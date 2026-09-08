@@ -358,7 +358,7 @@ func (m *model) refreshTranscript() {
 	followTail := m.viewport.AtBottom()
 	content := m.transcriptContent
 	if m.busy {
-		content += "\n\n" + m.agentStyle.Render(m.workingSpinner.View()+" working...")
+		content += "\n\n" + m.toolCallStyle.Render(m.workingSpinner.View()+" working...")
 	}
 	m.viewport.SetContent(content)
 	if followTail {
@@ -390,7 +390,7 @@ func (m model) isScrollKey(msg tea.KeyPressMsg) bool {
 func (m model) startTurn(prompt string) (tea.Model, tea.Cmd) {
 	m.appendMessage(userMessage, prompt)
 	m.busy = true
-	m.workingSpinner = spinner.New(spinner.WithSpinner(spinner.Dot))
+	m.workingSpinner = spinner.New(spinner.WithSpinner(spinner.Line))
 	m.refreshTranscript()
 	m.layout()
 	m.viewport.GotoBottom()

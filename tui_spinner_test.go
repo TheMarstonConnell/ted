@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/spinner"
+
 	"github.com/TheMarstonConnell/ted/agent"
 )
 
@@ -18,6 +20,13 @@ func TestWorkingSpinnerLifecycle(t *testing.T) {
 		}
 		if m.statusView() != idleStatus {
 			t.Fatal("working state changed bottom status bar")
+		}
+		if got := m.workingSpinner.Spinner; strings.Join(got.Frames, "") != strings.Join(spinner.Line.Frames, "") || got.FPS != spinner.Line.FPS {
+			t.Fatal("working indicator should use the line spinner")
+		}
+		wantIndicator := m.toolCallStyle.Render(m.workingSpinner.View() + " working...")
+		if !strings.Contains(m.viewport.View(), wantIndicator) {
+			t.Fatal("working indicator should use tool call styling")
 		}
 		before := m.workingSpinner.View()
 		next, cmd := m.Update(m.workingSpinner.Tick())
