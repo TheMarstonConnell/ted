@@ -2,6 +2,12 @@
 
 A Go coding agent with a Bubble Tea terminal interface.
 
+## System prompt
+
+The agent instructions live in [`agent/system_prompt.md`](agent/system_prompt.md).
+Go embeds this file into the binary at build time; edit it and rebuild (or use
+`go run`) to apply changes. No prompt file is needed at runtime.
+
 ## Run
 
 ```sh

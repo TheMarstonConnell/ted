@@ -98,3 +98,18 @@ func TestFailingCommandReportsOutputAndStatus(t *testing.T) {
 		t.Errorf("result should carry the exit status, got %q", result)
 	}
 }
+
+func TestToolNotificationIncludesQuotedCommand(t *testing.T) {
+	a := testAgent()
+	var replies []AgentResponse
+	a.SetOutput(func(reply AgentResponse) { replies = append(replies, reply) })
+	result := a.runToolCall(ToolCall{Function: FunctionCall{
+		Name: "bash", Arguments: `{"command":"echo one\necho two"}`,
+	}})
+	if strings.TrimSpace(result) != "one\ntwo" {
+		t.Fatalf("command execution changed: %q", result)
+	}
+	if len(replies) != 1 || replies[0].ResponseType != "tool" || replies[0].Content != `Ran shell command - "echo one\necho two"` {
+		t.Fatalf("unexpected tool notification: %+v", replies)
+	}
+}

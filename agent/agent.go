@@ -83,7 +83,7 @@ func (a *Agent) runToolCall(toolCall ToolCall) string {
 	command := bashArgs["command"]
 	a.emit(
 		AgentResponse{
-			Content:      "Ran shell command",
+			Content:      fmt.Sprintf("Ran shell command - %q", command),
 			ResponseType: "tool"},
 	)
 

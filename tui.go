@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/TheMarstonConnell/ted/agent"
 	"github.com/TheMarstonConnell/ted/commands"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // transcriptGap is the number of blank lines rendered between the transcript
@@ -314,6 +315,21 @@ func (m model) styleFor(kind messageKind) lipgloss.Style {
 // with terminal styling; if the markdown renderer is unavailable or fails,
 // the raw text is shown instead.
 func (m *model) renderEntry(entry transcriptEntry, width int) string {
+	if entry.kind == toolCallMessage {
+		// Keep the raw entry intact so resizing can reveal more of the command.
+		// Strip terminal escapes and collapse whitespace before measuring cells,
+		// not bytes, so wide Unicode characters cannot cause wrapping.
+		line := strings.Join(strings.Fields(ansi.Strip(entry.content)), " ")
+		limit := max(0, width*3/4)
+		if limit == 0 {
+			return ""
+		}
+		tail := "…"
+		if strings.HasSuffix(line, `"`) && limit >= 2 {
+			tail += `"`
+		}
+		return m.toolCallStyle.Render(ansi.Truncate(line, limit, tail))
+	}
 	if entry.kind == agentMessage && m.markdown != nil {
 		if out, err := m.markdown.Render(entry.content); err == nil {
 			return strings.TrimRight(out, "\n")

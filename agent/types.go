@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-const SYSTEM_PROMPT = "you are Ted, a friendly coding assistant. You can run bash commands. You have no other tools available. Use bash to do everything including reading & writing files."
-
 const OPENROUTER_API = "https://openrouter.ai/api/v1/chat/completions"
 
 type Function struct {
