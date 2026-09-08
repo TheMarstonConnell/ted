@@ -28,7 +28,13 @@ func main() {
 		logger.Fatal("no openrouter key found", zap.String("variable", "OPENROUTER_API_KEY"))
 	}
 
-	agent := NewAgent(logger, openRouterKey)
+	agent := NewAgent(logger, openRouterKey, func(s string, t string) {
+		if t == "tool" {
+			fmt.Println(s)
+		} else {
+			fmt.Printf("> %s\n", s) // output
+		}
+	})
 
 	logger.Debug("starting session", zap.String("model", agent.Model))
 

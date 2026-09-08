@@ -97,6 +97,7 @@ type Agent struct {
 	ready         bool
 	openRouterKey string
 	logger        *zap.Logger
+	respond       func(string, string)
 }
 
 // runToolCall carries out one tool call and reports the text to hand back to
@@ -129,7 +130,7 @@ func (a *Agent) runToolCall(toolCall ToolCall) string {
 	}
 
 	command := bashArgs["command"]
-	fmt.Println("Ran shell command") // output
+	a.respond("Ran shell command", "tool")
 
 	cmd := exec.Command("bash", "-c", command)
 	out, err := cmd.CombinedOutput()
@@ -218,7 +219,7 @@ func (a *Agent) Turn(userInput string) (err error) {
 
 		} else {
 			a.logger.Debug("assistant turn complete", zap.String("finish_reason", finishReason))
-			fmt.Printf("> %s\n", msg.Content.Text()) // output
+			a.respond(msg.Content.Text(), "agent")
 			break
 		}
 	}
@@ -229,7 +230,7 @@ func (a *Agent) Ready() bool {
 	return a.ready
 }
 
-func NewAgent(logger *zap.Logger, openRouterKey string) *Agent {
+func NewAgent(logger *zap.Logger, openRouterKey string, respond func(string, string)) *Agent {
 
 	a := Agent{
 		Model: "openai/gpt-5.6-luna",
@@ -242,6 +243,7 @@ func NewAgent(logger *zap.Logger, openRouterKey string) *Agent {
 		ready:         true,
 		openRouterKey: openRouterKey,
 		logger:        logger,
+		respond:       respond,
 	}
 
 	return &a
