@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/cursor"
@@ -9,6 +10,8 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
+	"charm.land/glamour/v2/styles"
 	"charm.land/lipgloss/v2"
 )
 
@@ -20,6 +23,15 @@ const transcriptGap = 1
 // the line break that ends the transcript plus the blank gap lines. It is
 // counted against the terminal height so the view never exceeds the screen.
 const separatorHeight = 1 + transcriptGap
+
+// inputMinHeight and inputMaxHeight bound the number of text rows in the
+// input area. It starts at the minimum and grows with its content up to the
+// maximum, after which it scrolls internally. The transcript above shrinks by
+// the same amount, so the input appears to expand upward.
+const (
+	inputMinHeight = 1
+	inputMaxHeight = 8
+)
 
 // messageKind identifies who produced a transcript entry so it can be styled
 // accordingly when the transcript is rendered.
@@ -40,7 +52,23 @@ type transcriptEntry struct {
 }
 
 type model struct {
-	viewport      viewport.Model
+	viewport viewport.Model
+	markdown *glamour.TermRenderer
+	// toolbarStyle draws the inverted band across the bottom of the screen,
+	// inputPadStyle draws the inverted padding around the text area, and
+	// inputBorder is the frame drawn around that padding. The frame is drawn
+	// by frameView rather than by a lipgloss border, because lipgloss applies
+	// only colors to border cells and the frame must be reversed to match
+	// the band.
+	toolbarStyle  lipgloss.Style
+	inputPadStyle lipgloss.Style
+	inputBorder   lipgloss.Border
+	// statusStyle draws the line beneath the input frame that names the
+	// model in use and the working directory.
+	statusStyle lipgloss.Style
+	// directory is the working directory at startup, shown in the status
+	// line so the user can see where the agent's tools operate.
+	directory     string
 	messages      []transcriptEntry
 	textarea      textarea.Model
 	bannerStyle   lipgloss.Style
@@ -49,6 +77,10 @@ type model struct {
 	toolCallStyle lipgloss.Style
 	err           error
 	agent         *Agent
+	// height is the terminal height from the most recent window size
+	// message. It is kept so the transcript can be resized whenever the input
+	// area changes height.
+	height int
 }
 
 // scrollKeyMap returns the transcript scrolling bindings. The text area holds
@@ -67,22 +99,49 @@ func scrollKeyMap() viewport.KeyMap {
 	return km
 }
 
+// newMarkdownRenderer builds the renderer used for agent messages. The
+// document margin and surrounding blank lines are removed so the rendered
+// text sits flush with the other transcript entries, and word wrap is fixed
+// to the given width so the renderer must be rebuilt when the terminal is
+// resized.
+func newMarkdownRenderer(width int) (*glamour.TermRenderer, error) {
+	style := styles.DarkStyleConfig
+	margin := uint(0)
+	style.Document.Margin = &margin
+	style.Document.BlockPrefix = ""
+	style.Document.BlockSuffix = ""
+	return glamour.NewTermRenderer(
+		glamour.WithStyles(style),
+		glamour.WithWordWrap(width),
+	)
+}
+
 func initialModel(agent *Agent) model {
 	ta := textarea.New()
 	ta.Placeholder = "Send a message..."
 	ta.SetVirtualCursor(false)
 	ta.Focus()
 
-	ta.Prompt = "┃ "
-	ta.CharLimit = 280
+	ta.Prompt = ""
 
 	ta.SetWidth(30)
-	ta.SetHeight(3)
 
-	// Remove cursor line styling
-	s := ta.Styles()
-	s.Focused.CursorLine = lipgloss.NewStyle()
-	ta.SetStyles(s)
+	ta.DynamicHeight = true
+	ta.MinHeight = inputMinHeight
+	ta.MaxHeight = inputMaxHeight
+	ta.SetHeight(inputMinHeight)
+
+	// Reverse swaps the terminal's default foreground and background colors,
+	// so the user's messages, the banner, and the input box appear inverted
+	// regardless of the terminal theme. Width is applied at render time to
+	// fill the line.
+	inverted := lipgloss.NewStyle().Reverse(true)
+
+	// The text is inverted to match the toolbar around it. The border is
+	// drawn by the view rather than by the text area's base style, because
+	// the text area applies its base style twice when it shows the
+	// placeholder, which would nest one frame inside another.
+	ta.SetStyles(inputStyles(ta.Styles()))
 
 	ta.ShowLineNumbers = false
 
@@ -92,23 +151,111 @@ func initialModel(agent *Agent) model {
 
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 
-	// Reverse swaps the terminal's default foreground and background colors,
-	// so the user's messages and the banner appear inverted regardless of the
-	// terminal theme. Width is applied at render time to fill the line.
-	inverted := lipgloss.NewStyle().Reverse(true)
+	markdown, err := newMarkdownRenderer(vp.Width())
+
+	directory, dirErr := os.Getwd()
+	if dirErr != nil {
+		directory = "unknown directory"
+	}
 
 	return model{
 		textarea: ta,
 		messages: []transcriptEntry{
-			{kind: bannerMessage, content: "TED coding agent"},
+			{kind: bannerMessage, content: "Ted Coding Agent"},
 		},
 		viewport:      vp,
-		bannerStyle:   inverted.Bold(true).Padding(1, 2),
-		senderStyle:   inverted.Padding(0, 1),
+		markdown:      markdown,
+		toolbarStyle:  inverted.Padding(1, 2),
+		inputPadStyle: inverted.Padding(1, 1),
+		inputBorder:   lipgloss.DoubleBorder(),
+		statusStyle:   inverted.Faint(true),
+		directory:     directory,
+		bannerStyle:   inverted.Bold(true).Padding(2, 2),
+		senderStyle:   inverted.Padding(1, 2),
 		agentStyle:    lipgloss.NewStyle(),
 		toolCallStyle: lipgloss.NewStyle().Faint(true),
-		err:           nil,
+		err:           err,
 		agent:         agent,
+	}
+}
+
+// inputStyles returns the text area styles with every element drawn inverted
+// so the input reads as one solid block.
+func inputStyles(s textarea.Styles) textarea.Styles {
+	inverted := lipgloss.NewStyle().Reverse(true)
+	for _, state := range []*textarea.StyleState{&s.Focused, &s.Blurred} {
+		state.Base = lipgloss.NewStyle()
+		state.Text = inverted
+		state.CursorLine = inverted
+		state.Prompt = inverted
+		state.EndOfBuffer = inverted
+		state.LineNumber = inverted
+		state.CursorLineNumber = inverted
+		state.Placeholder = inverted.Faint(true)
+	}
+	return s
+}
+
+// frameView surrounds content with border, rendering every border glyph
+// through style so the frame carries attributes such as reverse video that
+// lipgloss borders cannot. Each content line is padded to the widest line
+// with styled spaces so the right edge lines up.
+func frameView(content string, border lipgloss.Border, style lipgloss.Style) string {
+	lines := strings.Split(content, "\n")
+	width := lipgloss.Width(content)
+	rows := make([]string, 0, len(lines)+2)
+	rows = append(rows, style.Render(border.TopLeft+strings.Repeat(border.Top, width)+border.TopRight))
+	for _, line := range lines {
+		gap := style.Render(strings.Repeat(" ", max(0, width-lipgloss.Width(line))))
+		rows = append(rows, style.Render(border.Left)+line+gap+style.Render(border.Right))
+	}
+	rows = append(rows, style.Render(border.BottomLeft+strings.Repeat(border.Bottom, width)+border.BottomRight))
+	return strings.Join(rows, "\n")
+}
+
+// inputFrameWidth is the number of columns the input frame and padding add
+// to the text area width.
+func (m model) inputFrameWidth() int {
+	return m.inputPadStyle.GetHorizontalFrameSize() + lipgloss.Width(m.inputBorder.Left) + lipgloss.Width(m.inputBorder.Right)
+}
+
+// inputView renders the text area with its padding and frame.
+func (m model) inputView() string {
+	return frameView(m.inputPadStyle.Render(m.textarea.View()), m.inputBorder, m.inputPadStyle.UnsetPadding())
+}
+
+// statusView renders the line beneath the input frame naming the model in
+// use and the working directory. It is truncated to the frame width so a
+// long path cannot widen the toolbar.
+func (m model) statusView() string {
+	width := lipgloss.Width(m.inputView())
+	status := []rune(m.agent.Model + "  " + m.directory)
+	if len(status) > width && width > 0 {
+		status = append(status[:width-1], '…')
+	}
+	return m.statusStyle.Width(width).Render(string(status))
+}
+
+// toolbarView renders the bottom bar: the framed text area and the status
+// line beneath it on an inverted band that spans the full terminal width.
+func (m model) toolbarView() string {
+	return m.toolbarStyle.Width(m.viewport.Width()).Render(m.inputView() + "\n" + m.statusView())
+}
+
+// toolbarHeight is the number of rows the bottom bar occupies, including the
+// band padding, the input border, the input padding, and the status line.
+func (m model) toolbarHeight() int {
+	return lipgloss.Height(m.toolbarView())
+}
+
+// layout gives the transcript every row the toolbar and separator do not
+// use. It runs after any change that can alter the toolbar height so the
+// view never exceeds the terminal.
+func (m *model) layout() {
+	followTail := m.viewport.AtBottom()
+	m.viewport.SetHeight(max(1, m.height-m.toolbarHeight()-separatorHeight))
+	if followTail {
+		m.viewport.GotoBottom()
 	}
 }
 
@@ -130,6 +277,19 @@ func (m model) styleFor(kind messageKind) lipgloss.Style {
 	}
 }
 
+// renderEntry styles one message for the given width. Agent messages are
+// rendered as markdown so headings, lists, and fenced code blocks are shown
+// with terminal styling; if the markdown renderer is unavailable or fails,
+// the raw text is shown instead.
+func (m *model) renderEntry(entry transcriptEntry, width int) string {
+	if entry.kind == agentMessage && m.markdown != nil {
+		if out, err := m.markdown.Render(entry.content); err == nil {
+			return strings.TrimRight(out, "\n")
+		}
+	}
+	return m.styleFor(entry.kind).Width(width).Render(entry.content)
+}
+
 // renderTranscript styles and wraps every message to the viewport width,
 // separates them with a blank line, and installs the result as the viewport
 // content.
@@ -137,7 +297,7 @@ func (m *model) renderTranscript() {
 	width := m.viewport.Width()
 	rendered := make([]string, 0, len(m.messages))
 	for _, entry := range m.messages {
-		rendered = append(rendered, m.styleFor(entry.kind).Width(width).Render(entry.content))
+		rendered = append(rendered, m.renderEntry(entry, width))
 	}
 	m.viewport.SetContent(strings.Join(rendered, "\n\n"))
 }
@@ -165,9 +325,16 @@ func (m model) isScrollKey(msg tea.KeyPressMsg) bool {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.height = msg.Height
 		m.viewport.SetWidth(msg.Width)
-		m.textarea.SetWidth(msg.Width)
-		m.viewport.SetHeight(msg.Height - m.textarea.Height() - separatorHeight)
+		m.textarea.SetWidth(msg.Width - m.toolbarStyle.GetHorizontalFrameSize() - m.inputFrameWidth())
+		m.layout()
+
+		// Word wrap is fixed at construction, so the renderer is rebuilt for
+		// the new width before the transcript re-flows.
+		if renderer, err := newMarkdownRenderer(msg.Width); err == nil {
+			m.markdown = renderer
+		}
 
 		if len(m.messages) > 0 {
 			// Wrap content before setting it.
@@ -181,6 +348,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.appendMessage(agentMessage, msg.Content)
 		}
 		m.textarea.Reset()
+		m.layout()
 		return m, nil
 	case tea.MouseWheelMsg:
 		var cmd tea.Cmd
@@ -202,6 +370,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.appendMessage(userMessage, userInput)
 			m.textarea.Reset()
+			m.layout()
 			m.viewport.GotoBottom()
 			go func() {
 				err := m.agent.Turn(userInput)
@@ -218,9 +387,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 
-			// Send all other keypresses to the textarea.
+			// Send all other keypresses to the textarea. Typing can wrap onto
+			// a new row or delete one, so the transcript is resized to match.
 			var cmd tea.Cmd
 			m.textarea, cmd = m.textarea.Update(msg)
+			m.layout()
 			return m, cmd
 		}
 
@@ -236,10 +407,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() tea.View {
 	viewportView := m.viewport.View()
-	v := tea.NewView(viewportView + strings.Repeat("\n", separatorHeight) + m.textarea.View())
+	v := tea.NewView(viewportView + strings.Repeat("\n", separatorHeight) + m.toolbarView())
 	c := m.textarea.Cursor()
 	if c != nil {
-		c.Y += lipgloss.Height(viewportView) + transcriptGap
+		// The cursor position is relative to the text area, so it is moved
+		// past the transcript, the gap, the toolbar padding, and the input
+		// border and padding.
+		c.X += m.toolbarStyle.GetPaddingLeft() + lipgloss.Width(m.inputBorder.Left) + m.inputPadStyle.GetPaddingLeft()
+		c.Y += lipgloss.Height(viewportView) + transcriptGap +
+			m.toolbarStyle.GetPaddingTop() + 1 + m.inputPadStyle.GetPaddingTop()
 	}
 	v.Cursor = c
 	v.AltScreen = true
