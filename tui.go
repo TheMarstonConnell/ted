@@ -13,8 +13,8 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/glamour/v2/styles"
 	"charm.land/lipgloss/v2"
-	"github.com/TheMarstonConnell/harness/agent"
-	"github.com/TheMarstonConnell/harness/commands"
+	"github.com/TheMarstonConnell/ted/agent"
+	"github.com/TheMarstonConnell/ted/commands"
 )
 
 // transcriptGap is the number of blank lines rendered between the transcript

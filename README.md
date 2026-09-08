@@ -43,13 +43,13 @@ Live cross-model/provider compatibility still depends on the upstream APIs.
 
 ## Embed in Go
 
-The importable core is `github.com/TheMarstonConnell/harness/agent`; it has no
+The importable core is `github.com/TheMarstonConnell/ted/agent`; it has no
 Bubble Tea, CLI, or slash-command dependencies.
 
 ```go
 package example
 
-import "github.com/TheMarstonConnell/harness/agent"
+import "github.com/TheMarstonConnell/ted/agent"
 
 func Run(apiKey string) (string, error) {
     a := agent.NewAgent(nil, []agent.Provider{
@@ -91,7 +91,7 @@ store can refresh and rewrite Codex credentials; agent settings do not write fil
 
 ## Command adapter
 
-`github.com/TheMarstonConnell/harness/commands` exposes `New(a)`,
+`github.com/TheMarstonConnell/ted/commands` exposes `New(a)`,
 `Handle(input)`, and `Execute(name, args...)`. Results are plain data:
 confirmation text, exit requests, settings changes, or selection requests with stable choice
 IDs. A client confirms a selection with `Execute(selection.Command, choice.ID)`;

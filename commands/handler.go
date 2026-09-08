@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/TheMarstonConnell/harness/agent"
+	"github.com/TheMarstonConnell/ted/agent"
 )
 
 type Spec struct {

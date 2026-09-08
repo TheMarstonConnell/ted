@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"github.com/TheMarstonConnell/harness/agent"
+	"github.com/TheMarstonConnell/ted/agent"
 	"reflect"
 	"testing"
 )

@@ -1,4 +1,4 @@
-module github.com/TheMarstonConnell/harness
+module github.com/TheMarstonConnell/ted
 
 go 1.26.1
 

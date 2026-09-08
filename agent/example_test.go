@@ -3,7 +3,7 @@ package agent_test
 import (
 	"fmt"
 
-	"github.com/TheMarstonConnell/harness/agent"
+	"github.com/TheMarstonConnell/ted/agent"
 	"go.uber.org/zap"
 )
 

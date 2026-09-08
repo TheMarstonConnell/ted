@@ -6,7 +6,7 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/TheMarstonConnell/harness/agent"
+	"github.com/TheMarstonConnell/ted/agent"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
