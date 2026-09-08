@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/joho/godotenv"
+	"go.uber.org/zap"
 )
 
 func makeBashTool() Tool {
@@ -36,7 +36,7 @@ func makeBashTool() Tool {
 	return t
 }
 
-func completion(openRouterKey string, model string, messages []Message) (*Response, error) {
+func completion(logger *zap.Logger, openRouterKey string, model string, messages []Message) (*Response, error) {
 	client := &http.Client{}
 
 	compBod := CompletionBody{
@@ -60,6 +60,12 @@ func completion(openRouterKey string, model string, messages []Message) (*Respon
 	req.Header.Set("HTTP-Referer", "https://marston.dev")
 	req.Header.Set("X-Title", "Marston Connell Harness Engineering")
 
+	logger.Debug("sending completion request",
+		zap.String("endpoint", OPENROUTER_API),
+		zap.String("model", model),
+		zap.Int("message_count", len(messages)),
+	)
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("could not complete request %w", err)
@@ -71,10 +77,13 @@ func completion(openRouterKey string, model string, messages []Message) (*Respon
 		return nil, fmt.Errorf("could not read body %w", err)
 	}
 
-	fmt.Println(string(body))
+	logger.Debug("received completion response",
+		zap.Int("status_code", resp.StatusCode),
+		zap.String("body", string(body)),
+	)
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("not 200 %s | %w", body, err)
+		return nil, fmt.Errorf("completion request returned status %d: %s", resp.StatusCode, body)
 	}
 
 	res := Response{}
@@ -87,16 +96,21 @@ func completion(openRouterKey string, model string, messages []Message) (*Respon
 }
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
+	if err := godotenv.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "could not load .env file: %v\n", err)
+		os.Exit(1)
 	}
+
+	logger, err := newLogger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "could not build logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() { _ = logger.Sync() }()
 
 	openRouterKey := os.Getenv("OPENROUTER_API_KEY")
 	if openRouterKey == "" {
-		fmt.Println("no openrouter key found")
-		os.Exit(0)
-		return
+		logger.Fatal("no openrouter key found", zap.String("variable", "OPENROUTER_API_KEY"))
 	}
 
 	modelChoice := "openai/gpt-5.6-luna"
@@ -107,6 +121,8 @@ func main() {
 			Content: SYSTEM_PROMPT,
 		},
 	}
+
+	logger.Debug("starting session", zap.String("model", modelChoice))
 
 	input := bufio.NewScanner(os.Stdin)
 
@@ -127,25 +143,31 @@ func main() {
 			return
 		}
 
+		logger.Debug("received user input", zap.Int("length", len(userInput)))
+
 		messages = append(messages, Message{
 			Role:    "user",
 			Content: userInput,
 		})
 
 		for {
-			res, err := completion(openRouterKey, modelChoice, messages)
+			res, err := completion(logger, openRouterKey, modelChoice, messages)
 			if err != nil {
-				log.Fatal(err)
-				return
+				logger.Fatal("completion failed", zap.Error(err))
 			}
 
 			if len(res.Choices) == 0 {
-				log.Fatal("completion returned no choices")
+				logger.Fatal("completion returned no choices", zap.String("response_id", res.Id))
 			}
 
-			fmt.Println(res)
-
 			choice := res.Choices[0]
+
+			logger.Debug("parsed completion choice",
+				zap.String("response_id", res.Id),
+				zap.String("provider", res.Provider),
+				zap.String("finish_reason", choice.FinishReason),
+				zap.Int("tool_call_count", len(choice.Message.ToolCalls)),
+			)
 
 			msg := choice.Message
 			messages = append(messages, msg)
@@ -154,13 +176,24 @@ func main() {
 			if finishReason == "tool_calls" {
 				for i := 0; i < len(msg.ToolCalls); i++ {
 					toolCall := msg.ToolCalls[i]
-					fmt.Println(toolCall.Function.Name, toolCall.Function.Arguments)
+
+					logger.Debug("running tool call",
+						zap.String("tool_call_id", toolCall.Id),
+						zap.String("function", toolCall.Function.Name),
+						zap.String("arguments", toolCall.Function.Arguments),
+					)
+
 					args := toolCall.Function.Arguments
 					var bashArgs map[string]string
 					if err := json.Unmarshal([]byte(args), &bashArgs); err != nil {
-						log.Fatal(err)
+						logger.Fatal("could not parse tool call arguments",
+							zap.String("tool_call_id", toolCall.Id),
+							zap.String("arguments", args),
+							zap.Error(err),
+						)
 					}
 					command := bashArgs["command"]
+					fmt.Println("Ran shell command")
 
 					cmd := exec.Command("bash", "-c", command)
 					out, err := cmd.CombinedOutput()
@@ -168,7 +201,12 @@ func main() {
 					if err != nil {
 						result = fmt.Sprintf("%s\n%s", result, err)
 					}
-					fmt.Println(result)
+
+					logger.Debug("tool call finished",
+						zap.String("tool_call_id", toolCall.Id),
+						zap.String("command", command),
+						zap.String("result", result),
+					)
 
 					messages = append(messages, Message{
 						Role:       "tool",
@@ -178,7 +216,7 @@ func main() {
 				}
 
 			} else {
-				fmt.Printf("--%s--\n", finishReason)
+				logger.Debug("assistant turn complete", zap.String("finish_reason", finishReason))
 				fmt.Printf("> %s\n", msg.Content)
 				break
 			}
@@ -186,6 +224,6 @@ func main() {
 	}
 
 	if err := input.Err(); err != nil {
-		log.Fatalf("could not read input: %v", err)
+		logger.Fatal("could not read input", zap.Error(err))
 	}
 }
