@@ -84,7 +84,12 @@ func Run(apiKey string) (string, error) {
   selected effort, and a detached message snapshot.
 
 **Tool execution is not sandboxed.** The built-in bash tool runs with the host
-process's permissions and working directory. Only embed it where that access
+process's permissions and working directory. Each bash call has a two-minute
+timeout; captured output and a timeout message are returned to the model. On
+Unix, cancellation kills the command's process group; other platforms kill the
+direct process. Output-pipe cleanup is bounded to one additional second. This
+is not a sandbox: processes that detach from the group may survive, and shell
+side effects are not undone. Only embed it where that access
 is appropriate. Turn cancellation, custom tool policies, saved state, live
 catalogs, and an HTTP API are outside this first version. The existing Codex auth
 store can refresh and rewrite Codex credentials; agent settings do not write files.

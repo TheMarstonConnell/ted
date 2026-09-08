@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"sync"
 
 	"go.uber.org/zap"
@@ -14,7 +13,7 @@ func makeBashTool() Tool {
 	t := Tool{
 		ToolType: "function",
 		Function: Function{
-			Description: "calls bash",
+			Description: "Calls bash. Commands time out after two minutes; partial output is returned on timeout.",
 			Name:        "bash",
 			Parameters: map[string]any{
 				"type": "object",
@@ -88,12 +87,7 @@ func (a *Agent) runToolCall(toolCall ToolCall) string {
 			ResponseType: "tool"},
 	)
 
-	cmd := exec.Command("bash", "-c", command)
-	out, err := cmd.CombinedOutput()
-	result := string(out) // should add a cap on this
-	if err != nil {
-		result = fmt.Sprintf("%s\n%s", result, err)
-	}
+	result := runBash(command, DefaultToolTimeout)
 
 	a.logger.Debug("tool call finished",
 		zap.String("tool_call_id", toolCall.Id),

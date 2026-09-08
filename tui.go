@@ -116,6 +116,17 @@ func newMarkdownRenderer(width int) (*glamour.TermRenderer, error) {
 	style.Document.Margin = &margin
 	style.Document.BlockPrefix = ""
 	style.Document.BlockSuffix = ""
+	// Use reverse video for code rather than the theme's red inline code
+	// and syntax highlighting. Keep the existing padding and block margins.
+	inverse := true
+	style.Code.Color = nil
+	style.Code.BackgroundColor = nil
+	style.Code.Inverse = &inverse
+	style.CodeBlock.Color = nil
+	style.CodeBlock.BackgroundColor = nil
+	style.CodeBlock.Inverse = &inverse
+	style.CodeBlock.Theme = ""
+	style.CodeBlock.Chroma = nil
 	return glamour.NewTermRenderer(
 		glamour.WithStyles(style),
 		glamour.WithWordWrap(width),
