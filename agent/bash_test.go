@@ -34,3 +34,30 @@ func TestBashCompletesBeforeTimeout(t *testing.T) {
 		t.Fatalf("unexpected failure result: %q", result)
 	}
 }
+
+func TestBashOutputLimit(t *testing.T) {
+	result := runBash("head -c 200000 /dev/zero | tr '\\0' x; printf stderr-marker >&2; exit 3", 5*time.Second)
+	if !strings.HasPrefix(result, strings.Repeat("x", MaxToolOutputBytes)) {
+		t.Fatal("did not preserve the output prefix")
+	}
+	if len(result) > MaxToolOutputBytes+256 || !strings.Contains(result, "Tool output truncated") || !strings.Contains(result, "exit status 3") {
+		t.Fatalf("unexpected bounded output: length=%d suffix=%q", len(result), result[MaxToolOutputBytes:])
+	}
+}
+
+func TestLimitedToolOutputBoundary(t *testing.T) {
+	out := &limitedToolOutput{}
+	data := strings.Repeat("a", MaxToolOutputBytes)
+	if n, err := out.Write([]byte(data)); n != len(data) || err != nil {
+		t.Fatal(n, err)
+	}
+	if out.String() != data {
+		t.Fatal("exact limit should not truncate")
+	}
+	if n, err := out.Write([]byte("extra")); n != 5 || err != nil {
+		t.Fatal(n, err)
+	}
+	if out.buf.Len() != MaxToolOutputBytes || !strings.Contains(out.String(), "discarded 5 bytes") {
+		t.Fatal("overflow was not bounded")
+	}
+}

@@ -39,6 +39,7 @@ func runTUI(prompt, modelID, effort string) error {
 	}
 
 	instance := agent.NewAgent(logger, providers)
+	defer func() { _ = instance.Close() }()
 
 	if err := applyTUISettings(instance, modelID, effort); err != nil {
 		return err

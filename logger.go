@@ -53,5 +53,10 @@ func newLogger() (*zap.Logger, error) {
 
 	// Failures here are configuration and network problems reported with a
 	// plain message, so stack traces would only clutter the terminal.
-	return config.Build(zap.AddStacktrace(zapcore.FatalLevel + 1))
+	logger, err := config.Build(zap.AddStacktrace(zapcore.FatalLevel + 1))
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("logger initialized", zap.String("log_file", logFile), zap.String("log_level", level.String()))
+	return logger, nil
 }
