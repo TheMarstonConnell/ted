@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 )
 
 const openRouterKeyVariable = "OPENROUTER_API_KEY"
@@ -34,14 +35,30 @@ func runTUI() error {
 		return fmt.Errorf("could not load .env file: %w", err)
 	}
 
-	openRouterKey := os.Getenv(openRouterKeyVariable)
-	if openRouterKey == "" {
-		return fmt.Errorf("no openrouter key found in %s", openRouterKeyVariable)
+	var providers []Provider
+
+	codexAuthPath, err := DefaultCodexAuthPath()
+	if err != nil {
+		return err
+	}
+	codexAuth := NewCodexAuthStore(codexAuthPath)
+	if codexAuth.Exists() {
+		providers = append(providers, NewCodexProvider(codexAuth))
+	} else {
+		logger.Debug("no codex login found", zap.String("path", codexAuthPath))
 	}
 
-	openRouterProvider := NewOpenRouterProvider(openRouterKey)
+	if openRouterKey := os.Getenv(openRouterKeyVariable); openRouterKey != "" {
+		providers = append(providers, NewOpenRouterProvider(openRouterKey))
+	} else {
+		logger.Debug("no openrouter key found", zap.String("variable", openRouterKeyVariable))
+	}
 
-	agent := NewAgent(logger, []Provider{openRouterProvider})
+	if len(providers) == 0 {
+		return fmt.Errorf("no providers available: log in with `codex login` or set %s", openRouterKeyVariable)
+	}
+
+	agent := NewAgent(logger, providers)
 
 	p := tea.NewProgram(initialModel(agent))
 	agent.SetOutput(func(res AgentResponse) {

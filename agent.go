@@ -227,10 +227,22 @@ type AgentResponse struct {
 	ResponseType string
 }
 
+// defaultModel selects the first model of the first provider, so whichever
+// provider is configured is usable without a model switch.
+func defaultModel(providers []Provider) string {
+	for _, provider := range providers {
+		models := provider.ListModels()
+		if len(models) > 0 {
+			return fmt.Sprintf("%s/%s", provider.Name(), models[0])
+		}
+	}
+	return ""
+}
+
 func NewAgent(logger *zap.Logger, providers []Provider) *Agent {
 
 	a := Agent{
-		Model: "openrouter/openai/gpt-5.6-luna",
+		Model: defaultModel(providers),
 		Messages: []Message{
 			{
 				Role:    "system",
