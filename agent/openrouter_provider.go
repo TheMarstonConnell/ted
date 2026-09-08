@@ -33,6 +33,7 @@ func (o *OpenRouterProvider) ListModels() []ModelInfo {
 		{ID: "meta/muse-spark-1.3-contributor"},
 		{ID: "deepseek/deepseek-v4-flash-0731"},
 		{ID: "openai/gpt-5.6-luna", Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
+		{ID: "z-ai/glm-5.3-flash"},
 	}
 }
 

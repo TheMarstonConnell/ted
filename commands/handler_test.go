@@ -11,7 +11,7 @@ func TestCommands(t *testing.T) {
 	h := New(a)
 	before := a.Messages()
 	result, handled, err := h.Handle(" /model ")
-	if err != nil || !handled || result.Selection == nil || len(result.Selection.Choices) != 7 {
+	if err != nil || !handled || result.Selection == nil || len(result.Selection.Choices) != 8 {
 		t.Fatal(result, handled, err)
 	}
 	selection := result.Selection

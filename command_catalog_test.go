@@ -21,14 +21,15 @@ func TestCatalogCommands(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{"models", newModelsCommand, nil, "openrouter/meta/muse-spark-1.3-contributor\nopenrouter/deepseek/deepseek-v4-flash-0731\nopenrouter/openai/gpt-5.6-luna\n", false},
-		{"filtered models", newModelsCommand, []string{"--provider", "openrouter"}, "openrouter/meta/muse-spark-1.3-contributor\nopenrouter/deepseek/deepseek-v4-flash-0731\nopenrouter/openai/gpt-5.6-luna\n", false},
+		{"models", newModelsCommand, nil, "openrouter/meta/muse-spark-1.3-contributor\nopenrouter/deepseek/deepseek-v4-flash-0731\nopenrouter/openai/gpt-5.6-luna\nopenrouter/z-ai/glm-5.3-flash\n", false},
+		{"filtered models", newModelsCommand, []string{"--provider", "openrouter"}, "openrouter/meta/muse-spark-1.3-contributor\nopenrouter/deepseek/deepseek-v4-flash-0731\nopenrouter/openai/gpt-5.6-luna\nopenrouter/z-ai/glm-5.3-flash\n", false},
 		{"unknown provider", newModelsCommand, []string{"--provider", "missing"}, "", true},
 		{"unconfigured provider", newModelsCommand, []string{"--provider", "codex"}, "", true},
 		{"providers", newProvidersCommand, nil, "openrouter\n", false},
 		{"providers arguments", newProvidersCommand, []string{"unexpected"}, "", true},
 		{"efforts", newEffortsCommand, []string{"openrouter/openai/gpt-5.6-luna"}, "low\nmedium\nhigh\n", false},
 		{"unsupported", newEffortsCommand, []string{"openrouter/meta/muse-spark-1.3-contributor"}, "Model \"openrouter/meta/muse-spark-1.3-contributor\" does not expose configurable effort.\n", false},
+		{"glm flash unsupported effort", newEffortsCommand, []string{"openrouter/z-ai/glm-5.3-flash"}, "Model \"openrouter/z-ai/glm-5.3-flash\" does not expose configurable effort.\n", false},
 		{"unknown", newEffortsCommand, []string{"missing/model"}, "", true},
 		{"missing id", newEffortsCommand, nil, "", true},
 		{"extra id", newEffortsCommand, []string{"a", "b"}, "", true},
