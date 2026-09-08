@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/TheMarstonConnell/ted/browser"
 	"github.com/spf13/cobra"
 )
 
@@ -21,6 +22,6 @@ func newRootCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newTUICommand(), newModelsCommand(loadCatalogAgent), newEffortsCommand(loadCatalogAgent), newProvidersCommand(loadCatalogAgent))
+	root.AddCommand(newBrowserCommand(browser.Call), newTUICommand(), newModelsCommand(loadCatalogAgent), newEffortsCommand(loadCatalogAgent), newProvidersCommand(loadCatalogAgent))
 	return root
 }

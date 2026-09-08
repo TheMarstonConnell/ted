@@ -168,3 +168,26 @@ func TestCodexProviderLiveToolRoundTrip(t *testing.T) {
 		t.Fatalf("expected a tool call and its output in the reply; tool_used=%v final=%q", sawTool, final)
 	}
 }
+
+func TestResponsesInputTranslatesUserImages(t *testing.T) {
+	content := imageContent([]screenshotImage{{MIMEType: "image/png", Data: []byte("png bytes")}})
+	_, input, err := buildResponsesInput([]Message{{Role: "user", Content: content}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(input) != 1 {
+		t.Fatalf("input items = %d", len(input))
+	}
+	var item struct {
+		Content []struct {
+			Type     string `json:"type"`
+			ImageURL string `json:"image_url"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(input[0], &item); err != nil {
+		t.Fatal(err)
+	}
+	if len(item.Content) != 1 || item.Content[0].Type != "input_image" || !strings.HasPrefix(item.Content[0].ImageURL, "data:image/png;base64,") {
+		t.Fatalf("unexpected Codex image translation: %s", input[0])
+	}
+}

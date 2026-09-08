@@ -75,3 +75,16 @@ func TestOpenRouterEffortPayload(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenRouterPayloadRetainsUserImage(t *testing.T) {
+	body, err := json.Marshal(CompletionBody{
+		Model:    "vision-model",
+		Messages: []Message{{Role: "user", Content: imageContent([]screenshotImage{{MIMEType: "image/png", Data: []byte("pixels")}})}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"type":"image_url"`) || !strings.Contains(string(body), `data:image/png;base64,`) {
+		t.Fatalf("OpenRouter payload lost user image: %s", body)
+	}
+}

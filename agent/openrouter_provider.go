@@ -60,6 +60,10 @@ func (o *OpenRouterProvider) Complete(logger *zap.Logger, completion CompletionR
 		return nil, fmt.Errorf("could not build completion body data %w", err)
 	}
 
+	if err := checkRequestSize(logger, len(bodyData)); err != nil {
+		return nil, err
+	}
+
 	req, err := http.NewRequest("POST", OPENROUTER_API, bytes.NewBuffer(bodyData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to build completion request %w", err)
@@ -70,10 +74,11 @@ func (o *OpenRouterProvider) Complete(logger *zap.Logger, completion CompletionR
 	req.Header.Set("HTTP-Referer", "https://marston.dev")
 	req.Header.Set("X-Title", "Marston Connell Harness Engineering")
 
-	logger.Debug("sending completion request",
+	logger.Info("sending completion request",
 		zap.String("endpoint", OPENROUTER_API),
 		zap.String("model", modelName),
 		zap.Int("message_count", len(messages)),
+		zap.Int("request_bytes", len(bodyData)),
 	)
 
 	resp, err := o.client.Do(req)
@@ -81,6 +86,7 @@ func (o *OpenRouterProvider) Complete(logger *zap.Logger, completion CompletionR
 		return nil, fmt.Errorf("could not complete request %w", err)
 	}
 	defer resp.Body.Close()
+	logger.Info("model HTTP response", zap.Int("status_code", resp.StatusCode), zap.Int("request_bytes", len(bodyData)))
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -93,7 +99,7 @@ func (o *OpenRouterProvider) Complete(logger *zap.Logger, completion CompletionR
 	)
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("completion request returned status %d: %s", resp.StatusCode, body)
+		return nil, &statusError{status: resp.StatusCode, err: fmt.Errorf("completion request returned status %d: %s", resp.StatusCode, body)}
 	}
 
 	res := Response{}

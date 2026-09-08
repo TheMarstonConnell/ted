@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -40,6 +41,13 @@ type Agent struct {
 	providers []Provider
 	logger    *zap.Logger
 	respond   func(AgentResponse)
+
+	threadID       string
+	projectRoot    string
+	workingDir     string
+	home           string
+	artifactMu     sync.Mutex
+	manifestOffset int64
 }
 
 func (a *Agent) emit(response AgentResponse) {
@@ -57,6 +65,11 @@ func (a *Agent) emit(response AgentResponse) {
 // whereas abandoning the call would leave it unanswered and make every later
 // request invalid.
 func (a *Agent) runToolCall(toolCall ToolCall) string {
+	result, _ := a.runToolCallWithScreenshots(toolCall)
+	return result
+}
+
+func (a *Agent) runToolCallWithScreenshots(toolCall ToolCall) (string, []screenshotImage) {
 	a.logger.Debug("running tool call",
 		zap.String("tool_call_id", toolCall.Id),
 		zap.String("function", toolCall.Function.Name),
@@ -68,7 +81,7 @@ func (a *Agent) runToolCall(toolCall ToolCall) string {
 			zap.String("tool_call_id", toolCall.Id),
 			zap.String("function", toolCall.Function.Name),
 		)
-		return fmt.Sprintf("error: there is no tool named %q; bash is the only tool available", toolCall.Function.Name)
+		return fmt.Sprintf("error: there is no tool named %q; bash is the only tool available", toolCall.Function.Name), nil
 	}
 
 	var bashArgs map[string]string
@@ -77,7 +90,7 @@ func (a *Agent) runToolCall(toolCall ToolCall) string {
 			zap.String("tool_call_id", toolCall.Id),
 			zap.Error(err),
 		)
-		return fmt.Sprintf("error: could not parse the arguments as JSON: %s", err)
+		return fmt.Sprintf("error: could not parse the arguments as JSON: %s", err), nil
 	}
 
 	command := bashArgs["command"]
@@ -87,15 +100,17 @@ func (a *Agent) runToolCall(toolCall ToolCall) string {
 			ResponseType: "tool"},
 	)
 
-	result := runBash(command, DefaultToolTimeout)
+	result := runBashIn(command, DefaultToolTimeout, a.workingDir, toolEnvironment(a.threadID, a.projectRoot, a.home))
+	screenshots := a.newScreenshots(maxScreenshotsPerTurn)
 
+	a.logger.Info("tool output captured", zap.String("tool_call_id", toolCall.Id), zap.Int("output_bytes", len(result)), zap.Int("screenshot_count", len(screenshots)))
 	a.logger.Debug("tool call finished",
 		zap.String("tool_call_id", toolCall.Id),
 		zap.String("command", command),
 		zap.String("result", result),
 	)
 
-	return result
+	return result, screenshots
 }
 
 // Turn sends the user input to the model and runs the tool calls it asks for
@@ -140,8 +155,11 @@ func (a *Agent) Turn(userInput string) (err error) {
 	messages = append(messages, Message{Role: "user", Content: TextContent(userInput)})
 
 	for {
-		res, completionErr := provider.Complete(a.logger, CompletionRequest{Model: settings.Model, Effort: settings.Effort, Messages: messagesForModel(messages, settings.Model)})
+		res, completionErr := completeWithRetry(a.logger, provider, CompletionRequest{Model: settings.Model, Effort: settings.Effort, Messages: messagesForModel(messages, settings.Model)}, func(attempt int, delay time.Duration) {
+			a.emit(AgentResponse{ResponseType: "status", Content: fmt.Sprintf("Model connection interrupted; retrying (%d/%d) in %s…", attempt, completionAttempts-1, delay.Round(100*time.Millisecond))})
+		})
 		if completionErr != nil {
+			a.logger.Error("completion failed", zap.String("provider", settings.Provider), zap.String("model", settings.Model), zap.Error(completionErr))
 			return fmt.Errorf("completion failed %w", completionErr)
 		}
 
@@ -173,14 +191,29 @@ func (a *Agent) Turn(userInput string) (err error) {
 
 			// Each pass appends exactly one result and never leaves the
 			// loop early, so no tool call can go unanswered.
+			var screenshots []screenshotImage
 			for i := 0; i < len(msg.ToolCalls); i++ {
 				toolCall := msg.ToolCalls[i]
+				result, found := a.runToolCallWithScreenshots(toolCall)
 
 				messages = append(messages, Message{
 					Role:       "tool",
 					ToolCallId: toolCall.Id,
-					Content:    TextContent(a.runToolCall(toolCall)),
+					Content:    TextContent(result),
 				})
+				remaining := maxScreenshotsPerTurn - len(screenshots)
+				if remaining > 0 {
+					if len(found) > remaining {
+						found = found[:remaining]
+					}
+					screenshots = append(screenshots, found...)
+				}
+			}
+			// Function outputs must all immediately follow the assistant's
+			// calls. Add screenshots only after every call is answered, as a
+			// genuine multimodal user message rather than tool-result text.
+			if len(screenshots) > 0 {
+				messages = append(messages, Message{Role: "user", Content: imageContent(screenshots)})
 			}
 
 		} else {
@@ -217,21 +250,43 @@ type AgentResponse struct {
 	ResponseType string
 }
 
-// NewAgent does not read environment variables or require an output callback.
-// A nil logger discards diagnostics. Providers are tried in supplied order.
+// NewAgent does not require an output callback. A nil logger discards diagnostics.
+// Providers are tried in supplied order. TED_HOME only selects browser storage;
+// inherited thread and project variables are deliberately ignored.
 func NewAgent(logger *zap.Logger, providers []Provider) *Agent {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	a := &Agent{
-		logger:    logger,
-		providers: append([]Provider(nil), providers...),
-		messages:  []Message{{Role: "system", Content: TextContent(SYSTEM_PROMPT)}},
+		logger:      logger,
+		providers:   append([]Provider(nil), providers...),
+		messages:    []Message{{Role: "system", Content: TextContent(SYSTEM_PROMPT)}},
+		threadID:    newThreadID(),
+		projectRoot: resolveProjectRoot(""),
+		workingDir:  resolveWorkingDir(),
+		home:        tedHome(),
 	}
 	if models := a.ListModels(); len(models) > 0 {
 		_, _ = a.SetModel(models[0].ID)
 	}
 	return a
+}
+
+// ThreadID returns the stable browser/tool identity for this agent. Every
+// NewAgent call generates a fresh ID, including in nested ted processes.
+func (a *Agent) ThreadID() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.threadID
+}
+
+// ProjectRoot returns the canonical git root used as the browser profile key.
+// Outside a git worktree it is the canonical construction-time working
+// directory. Bash itself preserves the directory in which the agent started.
+func (a *Agent) ProjectRoot() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.projectRoot
 }
 
 // Messages returns a detached snapshot of committed conversation history.

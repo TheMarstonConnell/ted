@@ -433,7 +433,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.GotoBottom()
 	case agent.AgentResponse:
-		if msg.ResponseType == "tool" {
+		if msg.ResponseType == "status" {
+			m.appendMessage(commandMessage, msg.Content)
+		} else if msg.ResponseType == "tool" {
 			m.appendMessage(toolCallMessage, msg.Content)
 		} else {
 			m.appendMessage(agentMessage, msg.Content)

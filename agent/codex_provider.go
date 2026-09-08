@@ -116,15 +116,20 @@ func (c *CodexProvider) Complete(logger *zap.Logger, completion CompletionReques
 		return nil, fmt.Errorf("could not build responses body data %w", err)
 	}
 
+	if err := checkRequestSize(logger, len(bodyData)); err != nil {
+		return nil, err
+	}
+
 	credentials, err := c.auth.Credentials(logger)
 	if err != nil {
 		return nil, err
 	}
 
-	logger.Debug("sending responses request",
+	logger.Info("sending responses request",
 		zap.String("endpoint", CODEX_RESPONSES_API),
 		zap.String("model", modelName),
 		zap.Int("message_count", len(messages)),
+		zap.Int("request_bytes", len(bodyData)),
 		zap.Int("input_item_count", len(input)),
 	)
 
@@ -164,6 +169,7 @@ func (c *CodexProvider) send(logger *zap.Logger, bodyData []byte, credentials *C
 		return nil, fmt.Errorf("could not complete request %w", err)
 	}
 	defer resp.Body.Close()
+	logger.Info("model HTTP response", zap.Int("status_code", resp.StatusCode), zap.Int("request_bytes", len(bodyData)))
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		io.Copy(io.Discard, resp.Body)
@@ -172,11 +178,11 @@ func (c *CodexProvider) send(logger *zap.Logger, bodyData []byte, credentials *C
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		logger.Debug("received responses error",
+		logger.Error("received responses error",
 			zap.Int("status_code", resp.StatusCode),
 			zap.String("body", string(body)),
 		)
-		return nil, fmt.Errorf("responses request returned status %d: %s", resp.StatusCode, body)
+		return nil, &statusError{status: resp.StatusCode, err: fmt.Errorf("responses request returned status %d: %s", resp.StatusCode, body)}
 	}
 
 	completed, err := readResponsesStream(logger, resp.Body)
@@ -213,13 +219,30 @@ func buildResponsesInput(messages []Message) (string, []json.RawMessage, error) 
 			instructions = append(instructions, message.Content.Text())
 
 		case "user":
-			if err := appendItem(map[string]any{
-				"type": "message",
-				"role": "user",
-				"content": []map[string]any{{
+			var content []map[string]any
+			if text := message.Content.Text(); text != "" {
+				content = append(content, map[string]any{
 					"type": "input_text",
-					"text": message.Content.Text(),
-				}},
+					"text": text,
+				})
+			}
+			for _, imageURL := range message.Content.imageURLs() {
+				content = append(content, map[string]any{
+					"type":      "input_image",
+					"image_url": imageURL,
+				})
+			}
+			// Preserve the old representation for an empty user message.
+			if len(content) == 0 {
+				content = append(content, map[string]any{
+					"type": "input_text",
+					"text": "",
+				})
+			}
+			if err := appendItem(map[string]any{
+				"type":    "message",
+				"role":    "user",
+				"content": content,
 			}); err != nil {
 				return "", nil, err
 			}
@@ -372,7 +395,7 @@ func readResponsesStream(logger *zap.Logger, body io.Reader) (*responsesComplete
 		return completed, err
 	}
 
-	return nil, fmt.Errorf("responses stream ended after %d events without completing", events)
+	return nil, fmt.Errorf("responses stream ended after %d events without completing: %w", events, io.ErrUnexpectedEOF)
 }
 
 type responsesOutputItem struct {

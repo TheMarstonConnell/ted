@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -63,10 +64,70 @@ func TextContent(text string) Content {
 	return Content{text: text}
 }
 
+// imageContent builds a multimodal body containing in-memory images. The
+// bytes, rather than their filesystem names, are sent to providers so a model
+// cannot use this mechanism to request arbitrary local files.
+func imageContent(images []screenshotImage) Content {
+	parts := make([]map[string]any, 0, len(images))
+	for _, image := range images {
+		mime := image.MIMEType
+		if mime == "" {
+			mime = "image/png"
+		}
+		parts = append(parts, map[string]any{
+			"type": "image_url",
+			"image_url": map[string]string{
+				"url": "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(image.Data),
+			},
+		})
+	}
+	raw, _ := json.Marshal(parts) // maps above contain only JSON-safe values
+	return Content{raw: raw}
+}
+
+// screenshotImage is an image body supplied as multimodal user input.
+type screenshotImage struct {
+	MIMEType string
+	Data     []byte
+}
+
 // Text reports the readable portion of the body. Parts that carry no text,
 // such as images, contribute nothing.
 func (c Content) Text() string {
 	return c.text
+}
+
+// imageURLs returns image URLs from an array-form body. It is intentionally
+// private: callers should compose images from bytes via imageContent.
+func (c Content) imageURLs() []string {
+	if len(c.raw) == 0 {
+		return nil
+	}
+	var parts []struct {
+		PartType string          `json:"type"`
+		ImageURL json.RawMessage `json:"image_url"`
+	}
+	if json.Unmarshal(c.raw, &parts) != nil {
+		return nil
+	}
+	var urls []string
+	for _, part := range parts {
+		if part.PartType != "image_url" {
+			continue
+		}
+		var object struct {
+			URL string `json:"url"`
+		}
+		if json.Unmarshal(part.ImageURL, &object) == nil && object.URL != "" {
+			urls = append(urls, object.URL)
+			continue
+		}
+		var direct string
+		if json.Unmarshal(part.ImageURL, &direct) == nil && direct != "" {
+			urls = append(urls, direct)
+		}
+	}
+	return urls
 }
 
 func (c Content) MarshalJSON() ([]byte, error) {
