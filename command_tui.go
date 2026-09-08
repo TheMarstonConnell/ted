@@ -6,6 +6,7 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/TheMarstonConnell/harness/agent"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -35,21 +36,21 @@ func runTUI() error {
 		return fmt.Errorf("could not load .env file: %w", err)
 	}
 
-	var providers []Provider
+	var providers []agent.Provider
 
-	codexAuthPath, err := DefaultCodexAuthPath()
+	codexAuthPath, err := agent.DefaultCodexAuthPath()
 	if err != nil {
 		return err
 	}
-	codexAuth := NewCodexAuthStore(codexAuthPath)
+	codexAuth := agent.NewCodexAuthStore(codexAuthPath)
 	if codexAuth.Exists() {
-		providers = append(providers, NewCodexProvider(codexAuth))
+		providers = append(providers, agent.NewCodexProvider(codexAuth))
 	} else {
 		logger.Debug("no codex login found", zap.String("path", codexAuthPath))
 	}
 
 	if openRouterKey := os.Getenv(openRouterKeyVariable); openRouterKey != "" {
-		providers = append(providers, NewOpenRouterProvider(openRouterKey))
+		providers = append(providers, agent.NewOpenRouterProvider(openRouterKey))
 	} else {
 		logger.Debug("no openrouter key found", zap.String("variable", openRouterKeyVariable))
 	}
@@ -58,10 +59,10 @@ func runTUI() error {
 		return fmt.Errorf("no providers available: log in with `codex login` or set %s", openRouterKeyVariable)
 	}
 
-	agent := NewAgent(logger, providers)
+	instance := agent.NewAgent(logger, providers)
 
-	p := tea.NewProgram(initialModel(agent))
-	agent.SetOutput(func(res AgentResponse) {
+	p := tea.NewProgram(initialModel(instance))
+	instance.SetOutput(func(res agent.AgentResponse) {
 		p.Send(res)
 	})
 

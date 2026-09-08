@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"strings"
 
@@ -14,6 +13,8 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/glamour/v2/styles"
 	"charm.land/lipgloss/v2"
+	"github.com/TheMarstonConnell/harness/agent"
+	"github.com/TheMarstonConnell/harness/commands"
 )
 
 // transcriptGap is the number of blank lines rendered between the transcript
@@ -43,6 +44,7 @@ const (
 	userMessage
 	agentMessage
 	toolCallMessage
+	commandMessage
 )
 
 // transcriptEntry is one message in the conversation. Entries hold raw text
@@ -77,7 +79,10 @@ type model struct {
 	agentStyle    lipgloss.Style
 	toolCallStyle lipgloss.Style
 	err           error
-	agent         *Agent
+	agent         *agent.Agent
+	commands      *commands.Handler
+	picker        *pickerState
+	busy          bool
 	// height is the terminal height from the most recent window size
 	// message. It is kept so the transcript can be resized whenever the input
 	// area changes height.
@@ -117,7 +122,7 @@ func newMarkdownRenderer(width int) (*glamour.TermRenderer, error) {
 	)
 }
 
-func initialModel(agent *Agent) model {
+func initialModel(agent *agent.Agent) model {
 	ta := textarea.New()
 	ta.Placeholder = "Send a message..."
 	ta.SetVirtualCursor(false)
@@ -177,6 +182,7 @@ func initialModel(agent *Agent) model {
 		toolCallStyle: lipgloss.NewStyle().Faint(true),
 		err:           err,
 		agent:         agent,
+		commands:      commands.New(agent),
 	}
 }
 
@@ -230,7 +236,15 @@ func (m model) inputView() string {
 // long path cannot widen the toolbar.
 func (m model) statusView() string {
 	width := lipgloss.Width(m.inputView())
-	status := []rune(m.agent.Model + "  " + m.directory)
+	settings := m.agent.Settings()
+	label := settings.Model
+	if settings.Effort != "" {
+		label += " · " + string(settings.Effort)
+	}
+	if m.busy {
+		label += " · working"
+	}
+	status := []rune(label + "  " + m.directory)
 	if len(status) > width && width > 0 {
 		status = append(status[:width-1], '…')
 	}
@@ -271,7 +285,7 @@ func (m model) styleFor(kind messageKind) lipgloss.Style {
 		return m.bannerStyle
 	case userMessage:
 		return m.senderStyle
-	case toolCallMessage:
+	case toolCallMessage, commandMessage:
 		return m.toolCallStyle
 	default:
 		return m.agentStyle
@@ -342,13 +356,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.renderTranscript()
 		}
 		m.viewport.GotoBottom()
-	case AgentResponse:
+	case agent.AgentResponse:
 		if msg.ResponseType == "tool" {
 			m.appendMessage(toolCallMessage, msg.Content)
 		} else {
 			m.appendMessage(agentMessage, msg.Content)
 		}
-		m.textarea.Reset()
+		return m, nil
+	case turnDoneMsg:
+		m.busy = false
+		if msg.err != nil {
+			m.appendMessage(commandMessage, "Error: "+msg.err.Error())
+		}
 		m.layout()
 		return m, nil
 	case tea.MouseWheelMsg:
@@ -356,6 +375,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 	case tea.KeyPressMsg:
+		if m.picker != nil {
+			return m.updatePicker(msg)
+		}
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			fmt.Println(m.textarea.Value())
@@ -363,25 +385,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 
 			userInput := m.textarea.Value()
-
-			if userInput == "exit" {
-				fmt.Println(m.textarea.Value())
-				return m, tea.Quit
+			if strings.TrimSpace(userInput) == "" {
+				return m, nil
 			}
-
+			// Reserve the turn in the UI immediately, before its tea.Cmd starts.
+			fields := strings.Fields(userInput)
+			if m.busy && (fields[0] == "/model" || fields[0] == "/effort") {
+				m.appendMessage(commandMessage, agent.ErrBusy.Error())
+				return m, nil
+			}
+			result, handled, err := m.commands.Handle(userInput)
+			if handled {
+				m.textarea.Reset()
+				m.applyCommandResult(result, err)
+				if err == nil && result.Exit {
+					return m, tea.Quit
+				}
+				m.layout()
+				return m, nil
+			}
+			if m.busy {
+				m.appendMessage(commandMessage, agent.ErrBusy.Error())
+				return m, nil
+			}
+			userInput = commands.ChatText(userInput)
 			m.appendMessage(userMessage, userInput)
 			m.textarea.Reset()
+			m.busy = true
 			m.layout()
 			m.viewport.GotoBottom()
-			go func() {
-				err := m.agent.Turn(userInput)
-				if err != nil {
-					log.Fatal(err)
-					m.err = err
-				}
-			}()
+			instance := m.agent
+			return m, func() tea.Msg { return turnDoneMsg{err: instance.Turn(userInput)} }
 
-			return m, nil
 		default:
 			if m.isScrollKey(msg) {
 				var cmd tea.Cmd
@@ -397,10 +432,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-	case cursor.BlinkMsg:
-		// Textarea should also process cursor blinks.
+	case tea.PasteMsg, cursor.BlinkMsg:
+		previous := m.textarea.Value()
 		var cmd tea.Cmd
 		m.textarea, cmd = m.textarea.Update(msg)
+		if m.picker != nil && previous != m.textarea.Value() {
+			m.picker.index = 0
+		}
+		m.layout()
 		return m, cmd
 	}
 
@@ -409,6 +448,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() tea.View {
 	viewportView := m.viewport.View()
+	if m.picker != nil {
+		viewportView = m.pickerView()
+	}
 	v := tea.NewView(viewportView + strings.Repeat("\n", separatorHeight) + m.toolbarView())
 	c := m.textarea.Cursor()
 	if c != nil {

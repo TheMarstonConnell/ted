@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"bufio"
@@ -37,12 +37,12 @@ func NewCodexProvider(auth *CodexAuthStore) *CodexProvider {
 	}
 }
 
-func (c *CodexProvider) ListModels() []string {
-	return []string{
-		"gpt-6-astra",
-		"gpt-5.6-sol",
-		"gpt-5.6-terra",
-		"gpt-5.6-luna",
+func (c *CodexProvider) ListModels() []ModelInfo {
+	return []ModelInfo{
+		{ID: "gpt-6-astra", Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
+		{ID: "gpt-5.6-sol", Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
+		{ID: "gpt-5.6-terra", Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
+		{ID: "gpt-5.6-luna", Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
 	}
 }
 
@@ -59,7 +59,7 @@ type responsesTool struct {
 }
 
 type responsesReasoning struct {
-	Effort string `json:"effort"`
+	Effort Effort `json:"effort"`
 }
 
 // The backend insists on stream: true and store: false. Encrypted reasoning
@@ -78,7 +78,12 @@ type responsesRequest struct {
 	Include           []string           `json:"include"`
 }
 
-func (c *CodexProvider) Complete(logger *zap.Logger, model string, messages []Message) (*Response, error) {
+func (c *CodexProvider) Complete(logger *zap.Logger, completion CompletionRequest) (*Response, error) {
+	model, messages := completion.Model, completion.Messages
+	effort := completion.Effort
+	if effort == "" {
+		effort = EffortMedium
+	}
 	modelName := strings.TrimPrefix(strings.TrimPrefix(model, c.Name()), "/")
 
 	instructions, input, err := buildResponsesInput(messages)
@@ -100,7 +105,7 @@ func (c *CodexProvider) Complete(logger *zap.Logger, model string, messages []Me
 		}},
 		ToolChoice:        "auto",
 		ParallelToolCalls: false,
-		Reasoning:         responsesReasoning{Effort: "medium"},
+		Reasoning:         responsesReasoning{Effort: effort},
 		Store:             false,
 		Stream:            true,
 		Include:           []string{"reasoning.encrypted_content"},

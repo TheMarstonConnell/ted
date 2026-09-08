@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"encoding/json"
@@ -120,6 +120,7 @@ func (c *Content) UnmarshalJSON(data []byte) error {
 type ReasoningDetails []json.RawMessage
 
 type Message struct {
+	sourceModel      string
 	Role             string           `json:"role"`
 	Content          Content          `json:"content"`
 	Reasoning        string           `json:"reasoning,omitempty"`
@@ -129,7 +130,13 @@ type Message struct {
 }
 
 type CompletionBody struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Tools    []Tool    `json:"tools"`
+	Reasoning *ReasoningOptions `json:"reasoning,omitempty"`
+	Model     string            `json:"model"`
+	Messages  []Message         `json:"messages"`
+	Tools     []Tool            `json:"tools"`
+}
+
+// ReasoningOptions is the OpenRouter reasoning configuration.
+type ReasoningOptions struct {
+	Effort Effort `json:"effort"`
 }

@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"encoding/json"
@@ -117,10 +117,10 @@ func TestCodexProviderLive(t *testing.T) {
 	provider := NewCodexProvider(NewCodexAuthStore(path))
 
 	logger, _ := zap.NewDevelopment()
-	res, err := provider.Complete(logger, "codex/gpt-6-astra", []Message{
+	res, err := provider.Complete(logger, CompletionRequest{Model: "codex/gpt-6-astra", Messages: []Message{
 		{Role: "system", Content: TextContent("Reply with exactly the word pong. Do not use tools.")},
 		{Role: "user", Content: TextContent("ping")},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("completion failed: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestCodexProviderLiveToolRoundTrip(t *testing.T) {
 			final = reply.Content
 		}
 	}
-	t.Logf("messages=%d tool_used=%v final=%q", len(agent.Messages), sawTool, final)
+	t.Logf("messages=%d tool_used=%v final=%q", len(agent.Messages()), sawTool, final)
 	if !sawTool || !strings.Contains(final, "harness-round-trip") {
 		t.Fatalf("expected a tool call and its output in the reply; tool_used=%v final=%q", sawTool, final)
 	}

@@ -1,11 +1,11 @@
-package main
+package agent
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
-	"strings"
+	"sync"
 
 	"go.uber.org/zap"
 )
@@ -31,48 +31,25 @@ func makeBashTool() Tool {
 	return t
 }
 
-func (a *Agent) Complete(logger *zap.Logger) (*Response, error) {
-	currentProvider := a.getCurrentProvider()
-	if currentProvider == nil {
-		return nil, errors.New("could not load current provider")
-	}
-	return currentProvider.Complete(logger, a.Model, a.Messages)
-}
-
+// Agent is an instance-local conversation. One turn may run at a time.
+// Settings and output registration are safe to access concurrently.
 type Agent struct {
-	Model     string
-	Messages  []Message
-	ready     bool
+	mu        sync.Mutex
+	settings  Settings
+	messages  []Message
+	busy      bool
 	providers []Provider
 	logger    *zap.Logger
 	respond   func(AgentResponse)
 }
 
-func (a *Agent) getCurrentProvider() Provider {
-	for _, provider := range a.providers {
-		providerName := fmt.Sprintf("%s/", provider.Name())
-
-		if strings.HasPrefix(a.Model, providerName) {
-			return provider
-		}
+func (a *Agent) emit(response AgentResponse) {
+	a.mu.Lock()
+	output := a.respond
+	a.mu.Unlock()
+	if output != nil {
+		output(response)
 	}
-	return nil
-}
-
-func (a *Agent) verifyModel() bool {
-	for _, provider := range a.providers {
-		modelList := provider.ListModels()
-		providerName := fmt.Sprintf("%s/", provider.Name())
-		a.logger.Debug("available models", zap.String("provider name", providerName), zap.Strings("model list", modelList))
-		modelName := strings.TrimPrefix(a.Model, providerName)
-
-		for _, model := range modelList {
-			if modelName == model {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // runToolCall carries out one tool call and reports the text to hand back to
@@ -105,7 +82,7 @@ func (a *Agent) runToolCall(toolCall ToolCall) string {
 	}
 
 	command := bashArgs["command"]
-	a.respond(
+	a.emit(
 		AgentResponse{
 			Content:      "Ran shell command",
 			ResponseType: "tool"},
@@ -137,34 +114,44 @@ func (a *Agent) runToolCall(toolCall ToolCall) string {
 // request would be rejected. An abandoned turn is therefore rolled back.
 func (a *Agent) Turn(userInput string) (err error) {
 
-	if !a.verifyModel() {
-		return fmt.Errorf("%s is not a valid model", a.Model)
+	a.mu.Lock()
+	if a.busy {
+		a.mu.Unlock()
+		return ErrBusy
 	}
-
-	committed := len(a.Messages)
-	defer func() {
-		if err == nil {
-			return
+	settings := a.settings
+	var provider Provider
+	for _, p := range a.providers {
+		if p.Name() == settings.Provider {
+			provider = p
+			break
 		}
-		a.logger.Debug("discarding incomplete turn",
-			zap.Int("discarded_messages", len(a.Messages)-committed),
-		)
-		clear(a.Messages[committed:])
-		a.Messages = a.Messages[:committed]
+	}
+	if provider == nil {
+		a.mu.Unlock()
+		return errors.New("no model available")
+	}
+	a.busy = true
+	messages := cloneMessages(a.messages)
+	a.mu.Unlock()
+	completed := false
+	defer func() {
+		a.mu.Lock()
+		if completed {
+			a.messages = messages
+		}
+		a.busy = false
+		a.mu.Unlock()
 	}()
-
-	a.Messages = append(a.Messages, Message{
-		Role:    "user",
-		Content: TextContent(userInput),
-	})
+	messages = append(messages, Message{Role: "user", Content: TextContent(userInput)})
 
 	for {
-		res, completionErr := a.Complete(a.logger)
+		res, completionErr := provider.Complete(a.logger, CompletionRequest{Model: settings.Model, Effort: settings.Effort, Messages: messagesForModel(messages, settings.Model)})
 		if completionErr != nil {
 			return fmt.Errorf("completion failed %w", completionErr)
 		}
 
-		if len(res.Choices) == 0 {
+		if res == nil || len(res.Choices) == 0 {
 			return fmt.Errorf("completion returned no choices")
 		}
 
@@ -179,7 +166,8 @@ func (a *Agent) Turn(userInput string) (err error) {
 		)
 
 		msg := choice.Message
-		a.Messages = append(a.Messages, msg)
+		msg.sourceModel = settings.Model
+		messages = append(messages, msg)
 
 		finishReason := choice.FinishReason
 		if finishReason == "tool_calls" {
@@ -194,7 +182,7 @@ func (a *Agent) Turn(userInput string) (err error) {
 			for i := 0; i < len(msg.ToolCalls); i++ {
 				toolCall := msg.ToolCalls[i]
 
-				a.Messages = append(a.Messages, Message{
+				messages = append(messages, Message{
 					Role:       "tool",
 					ToolCallId: toolCall.Id,
 					Content:    TextContent(a.runToolCall(toolCall)),
@@ -203,7 +191,7 @@ func (a *Agent) Turn(userInput string) (err error) {
 
 		} else {
 			a.logger.Debug("assistant turn complete", zap.String("finish_reason", finishReason))
-			a.respond(
+			a.emit(
 				AgentResponse{
 					Content:      msg.Content.Text(),
 					ResponseType: "agent"},
@@ -211,14 +199,22 @@ func (a *Agent) Turn(userInput string) (err error) {
 			break
 		}
 	}
+	completed = true
 	return nil
 }
 
+// Ready reports whether another turn or settings change can start.
 func (a *Agent) Ready() bool {
-	return a.ready
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return !a.busy
 }
 
+// SetOutput installs an optional synchronous event callback. Callbacks should
+// return promptly; they may inspect settings and committed history.
 func (a *Agent) SetOutput(respond func(AgentResponse)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.respond = respond
 }
 
@@ -227,32 +223,54 @@ type AgentResponse struct {
 	ResponseType string
 }
 
-// defaultModel selects the first model of the first provider, so whichever
-// provider is configured is usable without a model switch.
-func defaultModel(providers []Provider) string {
-	for _, provider := range providers {
-		models := provider.ListModels()
-		if len(models) > 0 {
-			return fmt.Sprintf("%s/%s", provider.Name(), models[0])
-		}
+// NewAgent does not read environment variables or require an output callback.
+// A nil logger discards diagnostics. Providers are tried in supplied order.
+func NewAgent(logger *zap.Logger, providers []Provider) *Agent {
+	if logger == nil {
+		logger = zap.NewNop()
 	}
-	return ""
+	a := &Agent{
+		logger:    logger,
+		providers: append([]Provider(nil), providers...),
+		messages:  []Message{{Role: "system", Content: TextContent(SYSTEM_PROMPT)}},
+	}
+	if models := a.ListModels(); len(models) > 0 {
+		_, _ = a.SetModel(models[0].ID)
+	}
+	return a
 }
 
-func NewAgent(logger *zap.Logger, providers []Provider) *Agent {
+// Messages returns a detached snapshot of committed conversation history.
+// An active turn becomes visible only after it succeeds.
+func (a *Agent) Messages() []Message {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return cloneMessages(a.messages)
+}
 
-	a := Agent{
-		Model: defaultModel(providers),
-		Messages: []Message{
-			{
-				Role:    "system",
-				Content: TextContent(SYSTEM_PROMPT),
-			},
-		},
-		ready:     true,
-		logger:    logger,
-		providers: providers,
+func cloneMessages(messages []Message) []Message {
+	result := append([]Message(nil), messages...)
+	for i := range result {
+		result[i].Content.raw = append(json.RawMessage(nil), messages[i].Content.raw...)
+		result[i].ToolCalls = append([]ToolCall(nil), messages[i].ToolCalls...)
+		result[i].ReasoningDetails = nil
+		for _, raw := range messages[i].ReasoningDetails {
+			result[i].ReasoningDetails = append(result[i].ReasoningDetails, append(json.RawMessage(nil), raw...))
+		}
 	}
+	return result
+}
 
-	return &a
+// Opaque reasoning belongs to the model that produced it. Keep it in stored
+// history, but do not send it to a different model/provider. Text and tool
+// exchanges remain available when switching models.
+func messagesForModel(messages []Message, model string) []Message {
+	result := cloneMessages(messages)
+	for i := range result {
+		if result[i].sourceModel != model {
+			result[i].ReasoningDetails = nil
+			result[i].Reasoning = ""
+		}
+	}
+	return result
 }

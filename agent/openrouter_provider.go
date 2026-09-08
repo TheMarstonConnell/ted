@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -15,21 +16,23 @@ var _ Provider = &OpenRouterProvider{}
 
 type OpenRouterProvider struct {
 	apiKey string
+	client *http.Client
 }
 
 func NewOpenRouterProvider(apiKey string) *OpenRouterProvider {
 	o := OpenRouterProvider{
 		apiKey: apiKey,
+		client: &http.Client{Timeout: 10 * time.Minute},
 	}
 
 	return &o
 }
 
-func (o *OpenRouterProvider) ListModels() []string {
-	return []string{
-		"meta/muse-spark-1.3-contributor",
-		"deepseek/deepseek-v4-flash-0731",
-		"openai/gpt-5.6-luna",
+func (o *OpenRouterProvider) ListModels() []ModelInfo {
+	return []ModelInfo{
+		{ID: "meta/muse-spark-1.3-contributor"},
+		{ID: "deepseek/deepseek-v4-flash-0731"},
+		{ID: "openai/gpt-5.6-luna", Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
 	}
 }
 
@@ -37,8 +40,8 @@ func (o *OpenRouterProvider) Name() string {
 	return "openrouter"
 }
 
-func (o *OpenRouterProvider) Complete(logger *zap.Logger, model string, messages []Message) (*Response, error) {
-	client := &http.Client{}
+func (o *OpenRouterProvider) Complete(logger *zap.Logger, completion CompletionRequest) (*Response, error) {
+	model, messages := completion.Model, completion.Messages
 
 	modelName := strings.TrimPrefix(strings.TrimPrefix(model, o.Name()), "/")
 
@@ -48,6 +51,9 @@ func (o *OpenRouterProvider) Complete(logger *zap.Logger, model string, messages
 		Tools:    []Tool{makeBashTool()},
 	}
 
+	if completion.Effort != "" {
+		compBod.Reasoning = &ReasoningOptions{Effort: completion.Effort}
+	}
 	bodyData, err := json.Marshal(compBod)
 	if err != nil {
 		return nil, fmt.Errorf("could not build completion body data %w", err)
@@ -69,7 +75,7 @@ func (o *OpenRouterProvider) Complete(logger *zap.Logger, model string, messages
 		zap.Int("message_count", len(messages)),
 	)
 
-	resp, err := client.Do(req)
+	resp, err := o.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("could not complete request %w", err)
 	}
