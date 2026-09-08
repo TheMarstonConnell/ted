@@ -46,6 +46,15 @@ func (a *Agent) Settings() Settings {
 	return a.settings
 }
 
+// ListProviders returns configured provider names in priority order.
+func (a *Agent) ListProviders() []string {
+	names := make([]string, 0, len(a.providers))
+	for _, provider := range a.providers {
+		names = append(names, provider.Name())
+	}
+	return names
+}
+
 // ListModels returns detached metadata from configured providers in priority order.
 func (a *Agent) ListModels() []ModelInfo {
 	var models []ModelInfo

@@ -1,69 +1,48 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"os"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/TheMarstonConnell/ted/agent"
-	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 )
 
 const openRouterKeyVariable = "OPENROUTER_API_KEY"
 
 func newTUICommand() *cobra.Command {
-	var prompt string
+	var prompt, modelID, effort string
 	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Start the interactive terminal user interface",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTUI(prompt)
+			return runTUI(prompt, modelID, effort)
 		},
 	}
 	cmd.Flags().StringVar(&prompt, "prompt", "", "Send an initial user prompt when the TUI starts")
+	cmd.Flags().StringVar(&modelID, "model", "", "Select an initial model (provider/model-id)")
+	cmd.Flags().StringVar(&effort, "effort", "", "Set supported reasoning effort (low, medium, high)")
 	return cmd
 }
 
-func runTUI(prompt string) error {
+func runTUI(prompt, modelID, effort string) error {
 	logger, err := newLogger()
 	if err != nil {
 		return fmt.Errorf("could not build logger: %w", err)
 	}
 	defer func() { _ = logger.Sync() }()
 
-	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("could not load .env file: %w", err)
-	}
-
-	var providers []agent.Provider
-
-	codexAuthPath, err := agent.DefaultCodexAuthPath()
+	providers, err := configuredProviders(logger)
 	if err != nil {
 		return err
-	}
-	codexAuth := agent.NewCodexAuthStore(codexAuthPath)
-	if codexAuth.Exists() {
-		providers = append(providers, agent.NewCodexProvider(codexAuth))
-	} else {
-		logger.Debug("no codex login found", zap.String("path", codexAuthPath))
-	}
-
-	if openRouterKey := os.Getenv(openRouterKeyVariable); openRouterKey != "" {
-		providers = append(providers, agent.NewOpenRouterProvider(openRouterKey))
-	} else {
-		logger.Debug("no openrouter key found", zap.String("variable", openRouterKeyVariable))
-	}
-
-	if len(providers) == 0 {
-		return fmt.Errorf("no providers available: log in with `codex login` or set %s", openRouterKeyVariable)
 	}
 
 	instance := agent.NewAgent(logger, providers)
 
+	if err := applyTUISettings(instance, modelID, effort); err != nil {
+		return err
+	}
 	m := initialModel(instance)
 	m.initialPrompt = prompt
 	p := tea.NewProgram(m)
@@ -73,6 +52,21 @@ func runTUI(prompt string) error {
 
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("could not run tea program: %w", err)
+	}
+	return nil
+}
+
+// Select the model first so effort is validated against the startup model.
+func applyTUISettings(instance *agent.Agent, modelID, effort string) error {
+	if modelID != "" {
+		if _, err := instance.SetModel(modelID); err != nil {
+			return fmt.Errorf("invalid --model: %w", err)
+		}
+	}
+	if effort != "" {
+		if _, err := instance.SetEffort(agent.Effort(effort)); err != nil {
+			return fmt.Errorf("invalid --effort: %w", err)
+		}
 	}
 	return nil
 }

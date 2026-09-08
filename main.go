@@ -21,6 +21,6 @@ func newRootCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newTUICommand())
+	root.AddCommand(newTUICommand(), newModelsCommand(loadCatalogAgent), newEffortsCommand(loadCatalogAgent), newProvidersCommand(loadCatalogAgent))
 	return root
 }

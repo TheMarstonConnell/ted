@@ -18,9 +18,53 @@ The prompt is sent as literal chat text (not a slash command), and the TUI
 remains interactive afterward. An omitted, empty, or whitespace-only prompt
 starts the usual idle session.
 
+You can also select the startup model and reasoning effort:
+
+```sh
+go run . tui --model codex/gpt-5.6-terra --effort high --prompt "Explain this project."
+```
+
+`--model` and `--effort` can be used independently. The model is selected before
+applying effort, and both take effect before the initial prompt. Omitted or empty
+flags keep defaults. Invalid models or unsupported efforts fail before the TUI
+starts. Model IDs use the same `provider/model-id` format as `/model`.
+
 Configure `OPENROUTER_API_KEY`, or reuse an existing Codex CLI login (`codex
 login`). The CLI loads `.env`; the agent package does not. Configured providers
 supply a static model catalog; there is no live model fetch yet.
+
+### Discover providers, models, and efforts
+
+List model IDs available through your configured providers without starting the TUI:
+
+```sh
+go run . models
+```
+
+List configured provider names, or filter models to one provider:
+
+```sh
+go run . providers
+go run . models --provider codex
+```
+
+Without `--provider` (or with an empty value), `models` lists all configured
+providers' models. Unknown or unconfigured provider names return an error.
+`providers` prints one configured provider name per line.
+
+List reasoning effort options for a specific model:
+
+```sh
+go run . efforts codex/gpt-5.6-terra
+# low
+# medium
+# high
+```
+
+These commands load `.env` and use the same provider configuration as `tui`.
+Results come from the static catalog, with no API request. Model IDs are printed
+one per line and can be passed to `tui --model`. `efforts` reports when a model
+has no configurable effort; unknown or unavailable model IDs return an error.
 
 ### Slash commands
 
