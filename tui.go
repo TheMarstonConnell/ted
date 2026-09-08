@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/cursor"
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -75,18 +76,21 @@ type model struct {
 	statusStyle lipgloss.Style
 	// directory is the working directory at startup, shown in the status
 	// line so the user can see where the agent's tools operate.
-	directory     string
-	messages      []transcriptEntry
-	textarea      textarea.Model
-	bannerStyle   lipgloss.Style
-	senderStyle   lipgloss.Style
-	agentStyle    lipgloss.Style
-	toolCallStyle lipgloss.Style
-	err           error
-	agent         *agent.Agent
-	commands      *commands.Handler
-	picker        *pickerState
-	busy          bool
+	directory      string
+	messages       []transcriptEntry
+	textarea       textarea.Model
+	bannerStyle    lipgloss.Style
+	senderStyle    lipgloss.Style
+	agentStyle     lipgloss.Style
+	toolCallStyle  lipgloss.Style
+	err            error
+	agent          *agent.Agent
+	commands       *commands.Handler
+	picker         *pickerState
+	busy           bool
+	workingSpinner spinner.Model
+	// transcriptContent caches rendered messages so spinner ticks do not re-render markdown.
+	transcriptContent string
 	// height is the terminal height from the most recent window size
 	// message. It is kept so the transcript can be resized whenever the input
 	// area changes height.
@@ -256,9 +260,6 @@ func (m model) statusView() string {
 	if settings.Effort != "" {
 		label += " · " + string(settings.Effort)
 	}
-	if m.busy {
-		label += " · working"
-	}
 	status := []rune(label + "  " + m.directory)
 	if len(status) > width && width > 0 {
 		status = append(status[:width-1], '…')
@@ -347,7 +348,22 @@ func (m *model) renderTranscript() {
 	for _, entry := range m.messages {
 		rendered = append(rendered, m.renderEntry(entry, width))
 	}
-	m.viewport.SetContent(strings.Join(rendered, "\n\n"))
+	m.transcriptContent = strings.Join(rendered, "\n\n")
+	m.refreshTranscript()
+}
+
+// refreshTranscript adds the transient working indicator without recording it
+// in the conversation, and preserves the reader's scroll position.
+func (m *model) refreshTranscript() {
+	followTail := m.viewport.AtBottom()
+	content := m.transcriptContent
+	if m.busy {
+		content += "\n\n" + m.agentStyle.Render(m.workingSpinner.View()+" working...")
+	}
+	m.viewport.SetContent(content)
+	if followTail {
+		m.viewport.GotoBottom()
+	}
 }
 
 // appendMessage adds one message to the transcript. The view follows the
@@ -374,14 +390,24 @@ func (m model) isScrollKey(msg tea.KeyPressMsg) bool {
 func (m model) startTurn(prompt string) (tea.Model, tea.Cmd) {
 	m.appendMessage(userMessage, prompt)
 	m.busy = true
+	m.workingSpinner = spinner.New(spinner.WithSpinner(spinner.Dot))
+	m.refreshTranscript()
 	m.layout()
 	m.viewport.GotoBottom()
 	instance := m.agent
-	return m, func() tea.Msg { return turnDoneMsg{err: instance.Turn(prompt)} }
+	return m, tea.Batch(m.workingSpinner.Tick, func() tea.Msg { return turnDoneMsg{err: instance.Turn(prompt)} })
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case spinner.TickMsg:
+		if !m.busy || msg.ID != m.workingSpinner.ID() {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.workingSpinner, cmd = m.workingSpinner.Update(msg)
+		m.refreshTranscript()
+		return m, cmd
 	case initialPromptMsg:
 		prompt := m.initialPrompt
 		m.initialPrompt = ""
@@ -415,6 +441,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case turnDoneMsg:
 		m.busy = false
+		m.refreshTranscript()
 		if msg.err != nil {
 			m.appendMessage(commandMessage, "Error: "+msg.err.Error())
 		}
