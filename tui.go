@@ -54,9 +54,12 @@ type transcriptEntry struct {
 	content string
 }
 
+type initialPromptMsg struct{}
+
 type model struct {
-	viewport viewport.Model
-	markdown *glamour.TermRenderer
+	initialPrompt string
+	viewport      viewport.Model
+	markdown      *glamour.TermRenderer
 	// toolbarStyle draws the inverted band across the bottom of the screen,
 	// inputPadStyle draws the inverted padding around the text area, and
 	// inputBorder is the frame drawn around that padding. The frame is drawn
@@ -286,6 +289,9 @@ func (m *model) layout() {
 }
 
 func (m model) Init() tea.Cmd {
+	if strings.TrimSpace(m.initialPrompt) != "" {
+		return tea.Batch(textarea.Blink, func() tea.Msg { return initialPromptMsg{} })
+	}
 	return textarea.Blink
 }
 
@@ -348,8 +354,25 @@ func (m model) isScrollKey(msg tea.KeyPressMsg) bool {
 	return key.Matches(msg, km.PageUp, km.PageDown, km.HalfPageUp, km.HalfPageDown, km.Up, km.Down)
 }
 
+// startTurn reserves the UI turn before the asynchronous agent command runs.
+func (m model) startTurn(prompt string) (tea.Model, tea.Cmd) {
+	m.appendMessage(userMessage, prompt)
+	m.busy = true
+	m.layout()
+	m.viewport.GotoBottom()
+	instance := m.agent
+	return m, func() tea.Msg { return turnDoneMsg{err: instance.Turn(prompt)} }
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case initialPromptMsg:
+		prompt := m.initialPrompt
+		m.initialPrompt = ""
+		if strings.TrimSpace(prompt) == "" {
+			return m, nil
+		}
+		return m.startTurn(prompt)
 	case tea.WindowSizeMsg:
 		m.height = msg.Height
 		m.viewport.SetWidth(msg.Width)
@@ -420,13 +443,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			userInput = commands.ChatText(userInput)
-			m.appendMessage(userMessage, userInput)
 			m.textarea.Reset()
-			m.busy = true
-			m.layout()
-			m.viewport.GotoBottom()
-			instance := m.agent
-			return m, func() tea.Msg { return turnDoneMsg{err: instance.Turn(userInput)} }
+			return m.startTurn(userInput)
 
 		default:
 			if m.isScrollKey(msg) {

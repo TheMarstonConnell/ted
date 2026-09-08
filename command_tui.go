@@ -15,17 +15,20 @@ import (
 const openRouterKeyVariable = "OPENROUTER_API_KEY"
 
 func newTUICommand() *cobra.Command {
-	return &cobra.Command{
+	var prompt string
+	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Start the interactive terminal user interface",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTUI()
+			return runTUI(prompt)
 		},
 	}
+	cmd.Flags().StringVar(&prompt, "prompt", "", "Send an initial user prompt when the TUI starts")
+	return cmd
 }
 
-func runTUI() error {
+func runTUI(prompt string) error {
 	logger, err := newLogger()
 	if err != nil {
 		return fmt.Errorf("could not build logger: %w", err)
@@ -61,7 +64,9 @@ func runTUI() error {
 
 	instance := agent.NewAgent(logger, providers)
 
-	p := tea.NewProgram(initialModel(instance))
+	m := initialModel(instance)
+	m.initialPrompt = prompt
+	p := tea.NewProgram(m)
 	instance.SetOutput(func(res agent.AgentResponse) {
 		p.Send(res)
 	})

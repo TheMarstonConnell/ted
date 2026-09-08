@@ -8,6 +8,16 @@ A Go coding agent with a Bubble Tea terminal interface.
 go run . tui
 ```
 
+To automatically send an initial user message when the TUI starts:
+
+```sh
+go run . tui --prompt "Explain the current project without modifying files."
+```
+
+The prompt is sent as literal chat text (not a slash command), and the TUI
+remains interactive afterward. An omitted, empty, or whitespace-only prompt
+starts the usual idle session.
+
 Configure `OPENROUTER_API_KEY`, or reuse an existing Codex CLI login (`codex
 login`). The CLI loads `.env`; the agent package does not. Configured providers
 supply a static model catalog; there is no live model fetch yet.
