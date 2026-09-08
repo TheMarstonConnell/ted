@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -375,6 +376,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			go func() {
 				err := m.agent.Turn(userInput)
 				if err != nil {
+					log.Fatal(err)
 					m.err = err
 				}
 			}()

@@ -1,12 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os/exec"
+	"strings"
 
 	"go.uber.org/zap"
 )
@@ -32,72 +31,48 @@ func makeBashTool() Tool {
 	return t
 }
 
-func (a *Agent) Complete(logger *zap.Logger, openRouterKey string) (*Response, error) {
-	client := &http.Client{}
-
-	compBod := CompletionBody{
-		Model:    a.Model,
-		Messages: a.Messages,
-		Tools:    []Tool{makeBashTool()},
+func (a *Agent) Complete(logger *zap.Logger) (*Response, error) {
+	currentProvider := a.getCurrentProvider()
+	if currentProvider == nil {
+		return nil, errors.New("could not load current provider")
 	}
-
-	bodyData, err := json.Marshal(compBod)
-	if err != nil {
-		return nil, fmt.Errorf("could not build completion body data %w", err)
-	}
-
-	req, err := http.NewRequest("POST", OPENROUTER_API, bytes.NewBuffer(bodyData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to build completion request %w", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", openRouterKey))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("HTTP-Referer", "https://marston.dev")
-	req.Header.Set("X-Title", "Marston Connell Harness Engineering")
-
-	logger.Debug("sending completion request",
-		zap.String("endpoint", OPENROUTER_API),
-		zap.String("model", a.Model),
-		zap.Int("message_count", len(a.Messages)),
-	)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("could not complete request %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("could not read body %w", err)
-	}
-
-	logger.Debug("received completion response",
-		zap.Int("status_code", resp.StatusCode),
-		zap.String("body", string(body)),
-	)
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("completion request returned status %d: %s", resp.StatusCode, body)
-	}
-
-	res := Response{}
-	err = json.Unmarshal(body, &res)
-	if err != nil {
-		return nil, fmt.Errorf("could not parse response %w", err)
-	}
-
-	return &res, nil
+	return currentProvider.Complete(logger, a.Model, a.Messages)
 }
 
 type Agent struct {
-	Model         string
-	Messages      []Message
-	ready         bool
-	openRouterKey string
-	logger        *zap.Logger
-	respond       func(AgentResponse)
+	Model     string
+	Messages  []Message
+	ready     bool
+	providers []Provider
+	logger    *zap.Logger
+	respond   func(AgentResponse)
+}
+
+func (a *Agent) getCurrentProvider() Provider {
+	for _, provider := range a.providers {
+		providerName := fmt.Sprintf("%s/", provider.Name())
+
+		if strings.HasPrefix(a.Model, providerName) {
+			return provider
+		}
+	}
+	return nil
+}
+
+func (a *Agent) verifyModel() bool {
+	for _, provider := range a.providers {
+		modelList := provider.ListModels()
+		providerName := fmt.Sprintf("%s/", provider.Name())
+		a.logger.Debug("available models", zap.String("provider name", providerName), zap.Strings("model list", modelList))
+		modelName := strings.TrimPrefix(a.Model, providerName)
+
+		for _, model := range modelList {
+			if modelName == model {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // runToolCall carries out one tool call and reports the text to hand back to
@@ -161,6 +136,11 @@ func (a *Agent) runToolCall(toolCall ToolCall) string {
 // abandoned halfway would strand an unanswered tool call and every later
 // request would be rejected. An abandoned turn is therefore rolled back.
 func (a *Agent) Turn(userInput string) (err error) {
+
+	if !a.verifyModel() {
+		return fmt.Errorf("%s is not a valid model", a.Model)
+	}
+
 	committed := len(a.Messages)
 	defer func() {
 		if err == nil {
@@ -179,7 +159,7 @@ func (a *Agent) Turn(userInput string) (err error) {
 	})
 
 	for {
-		res, completionErr := a.Complete(a.logger, a.openRouterKey)
+		res, completionErr := a.Complete(a.logger)
 		if completionErr != nil {
 			return fmt.Errorf("completion failed %w", completionErr)
 		}
@@ -247,19 +227,19 @@ type AgentResponse struct {
 	ResponseType string
 }
 
-func NewAgent(logger *zap.Logger, openRouterKey string) *Agent {
+func NewAgent(logger *zap.Logger, providers []Provider) *Agent {
 
 	a := Agent{
-		Model: "openai/gpt-5.6-luna",
+		Model: "openrouter/openai/gpt-5.6-luna",
 		Messages: []Message{
 			{
 				Role:    "system",
 				Content: TextContent(SYSTEM_PROMPT),
 			},
 		},
-		ready:         true,
-		openRouterKey: openRouterKey,
-		logger:        logger,
+		ready:     true,
+		logger:    logger,
+		providers: providers,
 	}
 
 	return &a

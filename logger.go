@@ -13,17 +13,30 @@ import (
 // default logging level.
 const LOG_LEVEL_VARIABLE = "LOG_LEVEL"
 
-// newLogger builds the application logger. Diagnostic output is written to
-// standard error so that it stays separate from the conversation the user
-// reads on standard output. The level defaults to info and may be raised or
-// lowered with the LOG_LEVEL environment variable, which accepts the zap
-// level names: debug, info, warn, error, dpanic, panic, fatal.
+// LOG_FILE_VARIABLE names the environment variable that overrides the
+// default log file path.
+const LOG_FILE_VARIABLE = "LOG_FILE"
+
+// DEFAULT_LOG_FILE is the log file path used when LOG_FILE is unset.
+const DEFAULT_LOG_FILE = "harness.log"
+
+// newLogger builds the application logger. Diagnostic output is appended to
+// a log file so that it stays out of the terminal the TUI draws on. The path
+// defaults to harness.log in the working directory and may be changed with
+// the LOG_FILE environment variable. The level defaults to info and may be
+// raised or lowered with the LOG_LEVEL environment variable, which accepts
+// the zap level names: debug, info, warn, error, dpanic, panic, fatal.
 func newLogger() (*zap.Logger, error) {
 	level := zapcore.InfoLevel
 	if requested := strings.TrimSpace(os.Getenv(LOG_LEVEL_VARIABLE)); requested != "" {
 		if err := level.Set(requested); err != nil {
 			return nil, fmt.Errorf("invalid %s %q: %w", LOG_LEVEL_VARIABLE, requested, err)
 		}
+	}
+
+	logFile := strings.TrimSpace(os.Getenv(LOG_FILE_VARIABLE))
+	if logFile == "" {
+		logFile = DEFAULT_LOG_FILE
 	}
 
 	encoderConfig := zap.NewProductionEncoderConfig()
@@ -34,7 +47,7 @@ func newLogger() (*zap.Logger, error) {
 		Level:            zap.NewAtomicLevelAt(level),
 		Encoding:         "console",
 		EncoderConfig:    encoderConfig,
-		OutputPaths:      []string{"stderr"},
+		OutputPaths:      []string{logFile},
 		ErrorOutputPaths: []string{"stderr"},
 	}
 

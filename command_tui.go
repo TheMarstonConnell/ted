@@ -39,7 +39,9 @@ func runTUI() error {
 		return fmt.Errorf("no openrouter key found in %s", openRouterKeyVariable)
 	}
 
-	agent := NewAgent(logger, openRouterKey)
+	openRouterProvider := NewOpenRouterProvider(openRouterKey)
+
+	agent := NewAgent(logger, []Provider{openRouterProvider})
 
 	p := tea.NewProgram(initialModel(agent))
 	agent.SetOutput(func(res AgentResponse) {
