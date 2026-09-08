@@ -103,3 +103,19 @@ func TestThreadIdentityConcurrentAccess(t *testing.T) {
 	}
 	wait.Wait()
 }
+
+func TestBashPinsRelativeHomeAcrossDirectoryChanges(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("TED_HOME", "relative-home")
+	a := NewAgent(zap.NewNop(), nil)
+	result := a.runToolCall(ToolCall{Function: FunctionCall{
+		Name:      "bash",
+		Arguments: `{"command":"cd /; printf '%s' \"$TED_HOME\""}`,
+	}})
+	if result != a.home || !filepath.IsAbs(result) {
+		t.Fatalf("tool home = %q, agent reads artifacts from %q", result, a.home)
+	}
+	if os.Getenv("TED_HOME") != "relative-home" {
+		t.Fatal("tool environment changed host environment")
+	}
+}

@@ -76,3 +76,61 @@ func mustHome(t *testing.T) string {
 	}
 	return h
 }
+
+func TestURLWaitHonorsRequestTimeoutIntegration(t *testing.T) {
+	if os.Getenv("TED_BROWSER_INTEGRATION") != "1" {
+		t.Skip("set TED_BROWSER_INTEGRATION=1 to run Chrome integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+	defer cancel()
+	mgr := newManager(ctx, t.TempDir())
+	defer mgr.close()
+	project := t.TempDir()
+	call := func(action string, params map[string]any) {
+		t.Helper()
+		_, err := mgr.dispatch(ctx, Request{Project: project, Thread: "long-wait", Action: action, Params: params, Timeout: 40 * time.Second})
+		if err != nil {
+			t.Fatalf("%s: %v", action, err)
+		}
+	}
+	call("open", map[string]any{"url": "about:blank"})
+	call("cdp", map[string]any{"method": "Runtime.evaluate", "params": map[string]any{
+		"expression": "setTimeout(() => { location.hash = 'ready' }, 31000)",
+	}})
+	// chromedp.Poll defaults to 30s independently of the request context.
+	call("wait", map[string]any{"url-pattern": "*#ready"})
+}
+
+func TestURLWaitSurvivesNavigationIntegration(t *testing.T) {
+	if os.Getenv("TED_BROWSER_INTEGRATION") != "1" {
+		t.Skip("set TED_BROWSER_INTEGRATION=1 to run Chrome integration")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<title>Navigation wait</title>`))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	mgr := newManager(ctx, t.TempDir())
+	defer mgr.close()
+	project := t.TempDir()
+	call := func(action string, params map[string]any) {
+		t.Helper()
+		_, err := mgr.dispatch(ctx, Request{Project: project, Thread: "navigation-wait", Action: action, Params: params, Timeout: 10 * time.Second})
+		if err != nil {
+			t.Fatalf("%s: %v", action, err)
+		}
+	}
+	call("open", map[string]any{"url": server.URL})
+	call("cdp", map[string]any{"method": "Runtime.evaluate", "params": map[string]any{
+		"expression": "setTimeout(() => { location.href = '/ready' }, 500)",
+	}})
+	call("wait", map[string]any{"url-pattern": "*/ready"})
+	// A wait that expires should retain the machine-readable timeout code.
+	_, err := mgr.dispatch(ctx, Request{Project: project, Thread: "navigation-wait", Action: "wait", Params: map[string]any{"url-pattern": "*/never"}, Timeout: 100 * time.Millisecond})
+	if resp := errorResponse(err); resp.OK || resp.Error.Code != "timeout" {
+		t.Fatalf("unmatched URL wait = %+v", resp)
+	}
+	call("snapshot", nil)
+}

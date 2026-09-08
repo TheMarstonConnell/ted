@@ -231,12 +231,31 @@ func (s *session) wait(ctx context.Context, params map[string]any) (any, error) 
 		if err != nil {
 			return nil, fail("invalid_params", "invalid url-pattern: %v", err)
 		}
-		quoted, _ := json.Marshal(re.String())
-		expr := fmt.Sprintf(`new RegExp(%s).test(location.href)`, quoted)
-		if err := s.runTab(ctx, t, chromedp.Poll(expr, nil, chromedp.WithPollingInterval(100*time.Millisecond))); err != nil {
-			return nil, err
+		// Poll browser-owned target metadata, not JavaScript in the document:
+		// navigation destroys execution contexts and interrupts chromedp.Poll.
+		// The request context is the only timeout, including waits over 30s.
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			var info *target.Info
+			err := s.runTab(ctx, t, chromedp.ActionFunc(func(execCtx context.Context) error {
+				var err error
+				executor := cdp.WithExecutor(execCtx, chromedp.FromContext(execCtx).Browser)
+				info, err = target.GetTargetInfo().WithTargetID(t.id).Do(executor)
+				return err
+			}))
+			if err != nil {
+				return nil, err
+			}
+			if re.MatchString(info.URL) {
+				return map[string]any{"matched": "url", "pattern": pattern}, nil
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-ticker.C:
+			}
 		}
-		return map[string]any{"matched": "url", "pattern": pattern}, nil
 	}
 	ms, err := numberParam(params, "value", 0)
 	if err != nil {

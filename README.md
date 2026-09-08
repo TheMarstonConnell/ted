@@ -282,7 +282,9 @@ arguments or shell commands that will appear in the conversation.
 
 ### Artifacts and storage
 
-`TED_HOME` defaults to `~/.ted`; the shell's actual `$HOME` is unchanged. Browser
+`TED_HOME` defaults to `~/.ted`; the shell's actual `$HOME` is unchanged. Agents
+pass its construction-time absolute path to bash tools, so changing directories
+does not redirect browser storage or screenshot attachments. Browser
 profiles and service files live beneath `$TED_HOME/browser/`, while thread
 artifacts live beneath `$TED_HOME/threads/<thread-id>/artifacts/`. Directories
 are private. This feature does not introduce a general-purpose agent filesystem

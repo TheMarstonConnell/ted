@@ -103,17 +103,20 @@ func tedHome() string {
 	return filepath.Clean(home)
 }
 
-func toolEnvironment(threadID, projectRoot string) []string {
+// Pin the resolved home as well as the identity: a tool may cd before calling
+// ted browser, but its artifacts must still land where the agent reads them.
+func toolEnvironment(threadID, projectRoot, home string) []string {
 	environment := os.Environ()
 	filtered := environment[:0]
 	for _, item := range environment {
 		name, _, _ := strings.Cut(item, "=")
-		if name != threadIDEnvironment && name != projectRootEnvironment {
+		if name != threadIDEnvironment && name != projectRootEnvironment && name != "TED_HOME" {
 			filtered = append(filtered, item)
 		}
 	}
 	return append(filtered,
 		threadIDEnvironment+"="+threadID,
 		projectRootEnvironment+"="+projectRoot,
+		"TED_HOME="+home,
 	)
 }

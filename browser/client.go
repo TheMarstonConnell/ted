@@ -20,12 +20,18 @@ func Call(ctx context.Context, req Request) (Response, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return Response{}, err
+	}
 	path, err := socketPath()
 	if err != nil {
 		return Response{}, err
 	}
 	conn, err := dialDaemon(ctx, path)
 	if err != nil {
+		if err := ctx.Err(); err != nil {
+			return Response{}, err
+		}
 		if err := startDaemon(path); err != nil {
 			return Response{}, err
 		}

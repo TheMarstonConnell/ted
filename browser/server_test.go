@@ -5,6 +5,7 @@ package browser
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -219,5 +220,24 @@ func TestClientCancellationUnblocksRead(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("cancellation did not unblock client read")
+	}
+}
+
+func TestCancelledCallDoesNotStartDaemonOrCreateHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "not-created")
+	t.Setenv("TED_HOME", home)
+	previous := executablePath
+	defer func() { executablePath = previous }()
+	executablePath = func() (string, error) {
+		t.Error("cancelled call attempted to start daemon")
+		return "", context.Canceled
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Call(ctx, Request{Action: "status"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("cancelled call created TED_HOME: %v", err)
 	}
 }

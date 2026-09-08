@@ -100,7 +100,7 @@ func (a *Agent) runToolCallWithScreenshots(toolCall ToolCall) (string, []screens
 			ResponseType: "tool"},
 	)
 
-	result := runBashIn(command, DefaultToolTimeout, a.workingDir, toolEnvironment(a.threadID, a.projectRoot))
+	result := runBashIn(command, DefaultToolTimeout, a.workingDir, toolEnvironment(a.threadID, a.projectRoot, a.home))
 	screenshots := a.newScreenshots(maxScreenshotsPerTurn)
 
 	a.logger.Info("tool output captured", zap.String("tool_call_id", toolCall.Id), zap.Int("output_bytes", len(result)), zap.Int("screenshot_count", len(screenshots)))
