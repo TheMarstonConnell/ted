@@ -13,9 +13,7 @@ import remarkGfm from "remark-gfm";
 import {
   Archive,
   ArrowUp,
-  Check,
   ChevronRight,
-  Copy,
   GitBranch,
   Menu,
   Play,
@@ -114,36 +112,6 @@ const markdownComponents: Components = {
   ),
 };
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState(false);
-  return (
-    <Button
-      variant="ghost"
-      size="icon-xs"
-      aria-label={
-        error
-          ? "Copy failed; select the text to copy"
-          : copied
-            ? "Copied"
-            : "Copy message"
-      }
-      title={error ? "Clipboard unavailable; select text to copy" : "Copy"}
-      onClick={() => {
-        void navigator.clipboard
-          ?.writeText(text)
-          .then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          })
-          .catch(() => setError(true));
-        if (!navigator.clipboard) setError(true);
-      }}
-    >
-      {copied ? <Check /> : <Copy />}
-    </Button>
-  );
-}
 const Message = memo(function Message({ item }: { item: TranscriptItem }) {
   if (item.kind === "tool" || item.kind === "tool_result")
     return (
@@ -196,17 +164,6 @@ const Message = memo(function Message({ item }: { item: TranscriptItem }) {
         <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
           {item.text}
         </Markdown>
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        <time className="text-xs text-muted-foreground" dateTime={item.time}>
-          {new Date(item.time).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </time>
-        <div className="ml-auto">
-          <CopyButton text={item.text} />
-        </div>
       </div>
     </article>
   );

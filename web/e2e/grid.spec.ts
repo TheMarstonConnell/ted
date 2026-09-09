@@ -59,6 +59,16 @@ for (const width of [320, 390, 768, 1440, 1920]) {
         });
         const markdown = assistant.locator(".markdown");
         await expect(markdown).toBeVisible();
+        // Messages contain only their body: no timestamp/copy footer or empty spacer.
+        for (const name of ["Your message", "Assistant message"]) {
+          const message = page.getByRole("article", { name, exact: true });
+          await expect(message.locator("time")).toHaveCount(0);
+          await expect(
+            message.getByRole("button", { name: /copy/i }),
+          ).toHaveCount(0);
+          await expect(message.locator(":scope > *")).toHaveCount(1);
+        }
+
         await page.evaluate(() => document.fonts.ready);
         expect(
           await page.evaluate(() =>

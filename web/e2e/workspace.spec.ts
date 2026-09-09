@@ -237,15 +237,13 @@ for (const colorScheme of ["light", "dark"] as const) {
       exact: true,
     });
     await expect(userMessage).toContainText("Show me the project structure.");
-    await expect(
-      userMessage.getByRole("button", { name: "Copy message", exact: true }),
-    ).toBeVisible();
-    await expect(
-      assistantMessage.getByRole("button", {
-        name: "Copy message",
-        exact: true,
-      }),
-    ).toBeVisible();
+    for (const message of [userMessage, assistantMessage]) {
+      await expect(message.locator("time")).toHaveCount(0);
+      await expect(message.getByRole("button", { name: /copy/i })).toHaveCount(
+        0,
+      );
+      await expect(message.locator(":scope > *")).toHaveCount(1);
+    }
     await expect(
       page
         .getByRole("region", { name: "Messages", exact: true })
@@ -2537,18 +2535,23 @@ for (const width of [1440, 390]) {
 test("typing in a long chat does not rerender the transcript", async ({
   page,
 }, testInfo) => {
-  // Timestamp formatting is a render probe for message rows in both development
-  // and production bundles; it avoids machine-dependent frame-time thresholds.
+  // Markdown preprocessing stringifies each message body in both development
+  // and production bundles. Probe only this test's marked bodies so removing
+  // message chrome does not invalidate the no-rerender check. The live-message
+  // assertion below is a positive control that the probe still observes work.
   await page.addInitScript(() => {
     const probe = window as typeof window & { messageRenderCount: number };
     probe.messageRenderCount = 0;
-    const format = Date.prototype.toLocaleTimeString;
-    Date.prototype.toLocaleTimeString = function (
-      this: Date,
-      ...args: Parameters<typeof format>
-    ) {
-      probe.messageRenderCount++;
-      return format.apply(this, args);
+    const stringify = String.prototype.toString;
+    String.prototype.toString = function (this: String) {
+      const value = stringify.call(this);
+      if (
+        value.startsWith("## Result ") &&
+        value.includes("A detailed explanation of the implementation.")
+      ) {
+        probe.messageRenderCount++;
+      }
+      return value;
     };
   });
   const { emit } = await workspace(page);

@@ -39,7 +39,8 @@ focus/interaction locks are released.
 Running, held, settled, and connection states remain visible
 where they affect the current task. User messages use right-aligned neutral
 bubbles; assistant replies stay unboxed. Sender names are accessible labels rather
-than visible headings. Working/stopping status uses the same type size and line
+than visible headings. Messages show only their body, with no timestamp or copy
+button footer; normal text selection/copy remains available. Working/stopping status uses the same type size and line
 height as message body text. Consecutive tool entries are separated by 8px;
 all other transcript boundaries retain the normal 24px spacing. Tool headers
 use 16px horizontal / 8px vertical padding; expanded output uses 16px padding

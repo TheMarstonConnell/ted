@@ -34,6 +34,8 @@ Fix the grouping, wrapping, or hierarchy instead.
 Titles and their secondary metadata form one typographic group (no added margin
 between lines). Settings statistics use 8px gaps, not separate 24px form sections.
 Chat paragraphs have 16px boundaries; individual lines do not gain extra margins.
+User and assistant messages contain only their body, with no timestamp, copy
+button, or reserved footer space. Message boundaries still use 24px spacing.
 
 Transcript and composer reserve the same thin native scrollbar gutters on both
 sides. Keep their outer containers and horizontal padding synchronized. The chat
