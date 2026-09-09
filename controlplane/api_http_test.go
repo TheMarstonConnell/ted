@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -402,4 +403,37 @@ func TestHTTPRuntimeErrorEnvelopeAndUnavailableService(t *testing.T) {
 	if w.Code != 500 || strings.Contains(w.Body.String(), "secret") {
 		t.Fatal(w.Code, w.Body.String())
 	}
+}
+
+func TestProjectLiveGitBranch(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+	}
+	p, err := f.s.CreateProject(CreateProjectRequest{Name: "repo", Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(want string) {
+		t.Helper()
+		var got Project
+		data := f.request("GET", "/v1/projects/"+p.ID, "", "", 200)
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.GitBranch != want {
+			t.Fatalf("got %q want %q", got.GitBranch, want)
+		}
+	}
+	check("")
+	git("init", "-b", "main")
+	check("main")
+	git("symbolic-ref", "HEAD", "refs/heads/feature/remote")
+	check("feature/remote")
 }

@@ -16,10 +16,11 @@ type SettingsPatch struct {
 	Effort *string `json:"effort,omitempty"`
 }
 type Project struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Root     string   `json:"root"`
-	Defaults Settings `json:"defaults"`
+	GitBranch string   `json:"git_branch,omitempty"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Root      string   `json:"root"`
+	Defaults  Settings `json:"defaults"`
 }
 type CreateProjectRequest struct {
 	Name     string   `json:"name"`

@@ -157,3 +157,17 @@ func TestWebSocketReplayInventoryDoesNotSkipEventsAndFullOutput(t *testing.T) {
 	}
 	cancel()
 }
+
+func TestGitBranchComesFromServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/projects/p" {
+			t.Error(r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"id":"p","git_branch":"server-branch"}`))
+	}))
+	defer server.Close()
+	a := NewAgent(context.Background(), New(server.URL), Snapshot{ProjectID: "p"}, "/nonexistent/remote/root", nil)
+	if branch, err := a.GitBranch(); err != nil || branch != "server-branch" {
+		t.Fatal(branch, err)
+	}
+}

@@ -36,7 +36,7 @@ func TestToolCommandResizesWithoutLosingContent(t *testing.T) {
 	}
 }
 
-func TestFullToolResultRenderedWithoutProviderCap(t *testing.T) {
+func TestFullToolResultPreservedButPreviewTruncated(t *testing.T) {
 	m := tuiTestModel()
 	output := "first line\n" + strings.Repeat("full output ", 40) + "\nlast line"
 	next, _ := m.Update(agent.AgentResponse{ResponseType: "tool_result", Content: "provider-capped", FullToolOutput: output})
@@ -46,7 +46,18 @@ func TestFullToolResultRenderedWithoutProviderCap(t *testing.T) {
 		t.Fatal("full result lost")
 	}
 	rendered := ansi.Strip(m.renderEntry(entry, 80))
-	if !strings.Contains(rendered, "first line") || !strings.Contains(rendered, "last line") || strings.Contains(rendered, "provider-capped") {
+	if !strings.Contains(rendered, "first line") || strings.Contains(rendered, "last line") || strings.Contains(rendered, "provider-capped") {
 		t.Fatal(rendered)
+	}
+}
+
+func TestToolResultsSingleLine(t *testing.T) {
+	m := model{}
+	for _, width := range []int{0, 1, 2, 8, 40, 80} {
+		entry := transcriptEntry{kind: toolResultMessage, content: strings.Repeat("界🙂\n\t\x1b[31moutput", 50)}
+		out := ansi.Strip(m.renderEntry(entry, width))
+		if strings.ContainsAny(out, "\n\r\t\x1b") || ansi.StringWidth(out) > width*3/4 {
+			t.Fatalf("width %d: %q", width, out)
+		}
 	}
 }

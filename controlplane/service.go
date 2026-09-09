@@ -224,7 +224,7 @@ func (s *Service) CreateProject(req CreateProjectRequest) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
-	p := Project{newID(), req.Name, root, defaults}
+	p := Project{ID: newID(), Name: req.Name, Root: root, Defaults: defaults}
 	before := copyJSON(s.state)
 	s.state.Projects[p.ID] = p
 	if err = s.commitLocked(before); err != nil {

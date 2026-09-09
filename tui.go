@@ -355,11 +355,7 @@ func (m *model) layout() {
 }
 
 func (m model) Init() tea.Cmd {
-	var branch tea.Cmd
-	// A remote root belongs to the server's filesystem, not this terminal host.
-	if !m.acceptsQueuedInput() {
-		branch = readGitBranch(m.directory)
-	}
+	branch := m.readBranch()
 	if strings.TrimSpace(m.initialPrompt) != "" {
 		return tea.Batch(textarea.Blink, branch, func() tea.Msg { return initialPromptMsg{} })
 	}
@@ -385,7 +381,7 @@ func (m model) styleFor(kind messageKind) lipgloss.Style {
 // with terminal styling; if the markdown renderer is unavailable or fails,
 // the raw text is shown instead.
 func (m *model) renderEntry(entry transcriptEntry, width int) string {
-	if entry.kind == toolCallMessage {
+	if entry.kind == toolCallMessage || entry.kind == toolResultMessage {
 		// Keep the raw entry intact so resizing can reveal more of the command.
 		// Strip terminal escapes and collapse whitespace before measuring cells,
 		// not bytes, so wide Unicode characters cannot cause wrapping.
@@ -399,9 +395,6 @@ func (m *model) renderEntry(entry transcriptEntry, width int) string {
 			tail += `"`
 		}
 		return m.toolCallStyle.Render(ansi.Truncate(line, limit, tail))
-	}
-	if entry.kind == toolResultMessage {
-		entry.content = ansi.Strip(entry.content)
 	}
 	if entry.kind == agentMessage && m.markdown != nil {
 		if out, err := m.markdown.Render(entry.content); err == nil {
@@ -482,11 +475,13 @@ func (m model) startTurn(prompt string) (tea.Model, tea.Cmd) {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case gitBranchErrorMsg:
+		return m, scheduleGitBranchRefresh()
 	case gitBranchMsg:
 		m.gitBranch = string(msg)
 		return m, scheduleGitBranchRefresh()
 	case gitBranchRefreshMsg:
-		return m, readGitBranch(m.directory)
+		return m, m.readBranch()
 	case spinner.TickMsg:
 		if !m.busy || msg.ID != m.workingSpinner.ID() {
 			return m, nil

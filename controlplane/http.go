@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/TheMarstonConnell/ted/internal/gitstatus"
 	"io"
 	"mime"
 	"net/http"
@@ -234,6 +235,9 @@ func (h *httpAPI) CreateProject(w http.ResponseWriter, r *http.Request) {
 }
 func (h *httpAPI) GetProject(w http.ResponseWriter, r *http.Request, id string) {
 	p, err := h.service.GetProject(id)
+	if err == nil {
+		p.GitBranch = gitstatus.Branch(p.Root)
+	}
 	respond(w, 200, p, err)
 }
 func (h *httpAPI) PatchProject(w http.ResponseWriter, r *http.Request, id string) {

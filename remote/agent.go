@@ -193,3 +193,12 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 	}
 	return nil
 }
+
+// GitBranch reads live metadata on the server, never the terminal filesystem.
+func (a *Agent) GitBranch() (string, error) {
+	a.mu.RLock()
+	projectID := a.snapshot.ProjectID
+	a.mu.RUnlock()
+	p, err := a.client.Project(a.ctx, projectID)
+	return p.GitBranch, err
+}

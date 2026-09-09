@@ -676,6 +676,9 @@ components:
       type: object
       additionalProperties: false
       properties:
+        git_branch:
+          type: string
+          description: Live server-side Git branch (or detached commit), populated on GET project; omitted outside Git repositories.
         id: *id010
         name:
           type: string
