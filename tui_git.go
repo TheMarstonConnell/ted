@@ -9,6 +9,10 @@ import (
 )
 
 type gitBranchMsg string
+type remoteGitStatusMsg struct {
+	directory string
+	branch    string
+}
 type gitBranchRefreshMsg struct{}
 
 func scheduleGitBranchRefresh() tea.Cmd {
@@ -28,7 +32,9 @@ func (m model) readBranch() tea.Cmd {
 			if err != nil {
 				return gitBranchErrorMsg{}
 			}
-			return gitBranchMsg(branch)
+			// GitBranch is allowed to refresh a remote snapshot. Read WorkingDir
+			// afterward so the same asynchronous result updates the footer path.
+			return remoteGitStatusMsg{directory: m.agent.WorkingDir(), branch: branch}
 		}
 	}
 	return readGitBranch(m.directory)

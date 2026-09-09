@@ -27,8 +27,20 @@ func NewAgent(ctx context.Context, c *Client, s Snapshot, root string, models []
 	return &Agent{client: c, ctx: ctx, snapshot: s, id: s.ID, root: root, models: models, cursor: s.Cursor}
 }
 func (a *Agent) AcceptsQueuedInput() bool { return true }
-func (a *Agent) WorkingDir() string       { return a.root }
-func (a *Agent) Ready() bool              { a.mu.RLock(); defer a.mu.RUnlock(); return a.snapshot.State == "idle" }
+
+// WorkingDir reports the execution directory from the latest server snapshot.
+// It deliberately performs no I/O because render and update paths call it as an
+// infallible accessor; asynchronous websocket and GitBranch refreshes update the
+// snapshot when worktree setup starts.
+func (a *Agent) WorkingDir() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.snapshot.Workspace.Path != "" {
+		return a.snapshot.Workspace.Path
+	}
+	return a.root
+}
+func (a *Agent) Ready() bool { a.mu.RLock(); defer a.mu.RUnlock(); return a.snapshot.State == "idle" }
 func (a *Agent) Settings() agent.Settings {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -142,6 +154,7 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 		return nil
 	}
 	var output *agent.AgentResponse
+	var busy *bool
 	switch e.Type {
 	case "agent.updated":
 		var s Snapshot
@@ -154,6 +167,8 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 			s.Messages, s.Queue = a.snapshot.Messages, a.snapshot.Queue
 			a.snapshot = s
 		}
+		b := a.snapshot.State != "idle"
+		busy = &b
 	case "output":
 		output = new(agent.AgentResponse)
 		if err := json.Unmarshal(e.Data, output); err != nil {
@@ -188,17 +203,31 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 	}
 	a.cursor = e.Cursor
 	a.mu.Unlock()
-	if output != nil {
-		notify(Update{Output: output})
+	if output != nil || busy != nil {
+		notify(Update{Output: output, Busy: busy})
 	}
 	return nil
 }
 
 // GitBranch reads live metadata on the server, never the terminal filesystem.
+// For a linked worktree it reports the generated creation branch recorded in
+// workspace metadata; later manual branch switches are outside this feature.
 func (a *Agent) GitBranch() (string, error) {
 	a.mu.RLock()
+	w := a.snapshot.Workspace
 	projectID := a.snapshot.ProjectID
 	a.mu.RUnlock()
+	if w.Mode == "worktree" {
+		if w.Branch == "" {
+			s, err := a.client.GetAgent(a.ctx, a.id)
+			if err != nil {
+				return "", err
+			}
+			a.updateSnapshot(s)
+			w = s.Workspace
+		}
+		return w.Branch, nil
+	}
 	p, err := a.client.Project(a.ctx, projectID)
 	return p.GitBranch, err
 }

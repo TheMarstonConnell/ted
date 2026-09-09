@@ -78,11 +78,18 @@ func TestGitBranchStatus(t *testing.T) {
 
 type branchTestAgent struct {
 	tuiAgent
-	branch string
-	err    error
+	branch    string
+	directory string
+	err       error
 }
 
 func (a *branchTestAgent) GitBranch() (string, error) { return a.branch, a.err }
+func (a *branchTestAgent) WorkingDir() string {
+	if a.directory != "" {
+		return a.directory
+	}
+	return a.tuiAgent.WorkingDir()
+}
 
 func TestServerBranchPolling(t *testing.T) {
 	m := tuiTestModel()
@@ -112,5 +119,36 @@ func TestServerBranchPolling(t *testing.T) {
 	next, cmd = m.Update(m.readBranch()())
 	if next.(model).gitBranch != "" || cmd == nil {
 		t.Fatal("non-repository should clear branch and keep polling")
+	}
+}
+
+func TestRemoteWorkspaceDirectoryRefreshesFooter(t *testing.T) {
+	m := tuiTestModel()
+	source := &branchTestAgent{
+		tuiAgent:  m.agent,
+		branch:    "ted/chat-a",
+		directory: "/server/worktrees/chat-a",
+	}
+	m.agent = source
+	m.directory = "/server/project"
+
+	// The branch lookup is an asynchronous Tea command. Remote GitBranch may
+	// refresh its snapshot, so the result also carries the subsequent cwd.
+	next, cmd := m.Update(m.readBranch()())
+	m = next.(model)
+	if cmd == nil || m.directory != source.directory || m.gitBranch != source.branch {
+		t.Fatalf("directory=%q branch=%q cmd=%v", m.directory, m.gitBranch, cmd)
+	}
+	if got := ansi.Strip(m.statusView()); !strings.Contains(got, "/server/worktrees/chat-a (ted/ch") {
+		t.Fatal(got)
+	}
+
+	// Websocket agent.updated inventory/state notifications update the path
+	// immediately from the already-local snapshot, with no rendering-time I/O.
+	source.directory = "/server/worktrees/chat-a-ready"
+	next, _ = m.Update(remoteStateMsg(false))
+	m = next.(model)
+	if m.directory != source.directory {
+		t.Fatalf("state refresh directory = %q", m.directory)
 	}
 }

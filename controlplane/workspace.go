@@ -211,7 +211,7 @@ func (s *Service) prepareWorkspace(ctx context.Context, id string, project Proje
 	s.mu.Unlock()
 	defer func() {
 		if err != nil && w.Status != "failed" {
-			message := "Workspace unavailable: " + err.Error() + ". Create a new chat to try again."
+			message := "Workspace unavailable: " + strings.TrimRight(err.Error(), ".\n ") + ". Create a new chat to try again."
 			if saveErr := s.saveWorkspace(id, func(w *Workspace) { w.Status = "failed"; w.Error = message }); saveErr != nil {
 				err = saveErr
 			} else {
