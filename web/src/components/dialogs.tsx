@@ -55,13 +55,13 @@ function ProjectPicker() {
             key={p.id}
             disabled={busy}
             onClick={() => void create(p.id)}
-            className="h-auto w-full justify-start px-4 py-3 text-left"
+            className="h-auto w-full justify-start px-4 py-4 text-left"
           >
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">
                 {p.name}
               </span>
-              <span className="mt-1 block truncate text-xs font-normal text-muted-foreground">
+              <span className="block truncate font-mono text-xs font-normal text-muted-foreground">
                 {p.root}
               </span>
             </span>
@@ -165,12 +165,13 @@ function ProjectForm() {
             : "Connect a directory on the server. Its folder name becomes the project name."}
         </DialogDescription>
       </DialogHeader>
-      <form onSubmit={(event) => void save(event)} className="space-y-5">
+      <form onSubmit={(event) => void save(event)} className="space-y-6">
         <ErrorNotice error={error} />
         <div className="grid gap-2">
           <Label htmlFor="server-directory">Server directory</Label>
           <Input
             id="server-directory"
+            className="font-mono"
             autoFocus={!project}
             required
             maxLength={4096}
@@ -179,23 +180,24 @@ function ProjectForm() {
             readOnly={!!project}
             onChange={(event) => setRoot(event.target.value)}
           />
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Project name:{" "}
-          <strong className="text-foreground">
-            {project?.name || name || "—"}
-          </strong>
-          {!project && (
-            <span className="mt-1 block">
-              The directory must already exist on the server.
-            </span>
-          )}
-        </p>
-        {project?.git_branch && (
           <p className="text-xs text-muted-foreground">
-            Git branch: {project.git_branch}
+            Project name:{" "}
+            <strong className="text-foreground">
+              {project?.name || name || "—"}
+            </strong>
+            {!project && (
+              <span className="block">
+                The directory must already exist on the server.
+              </span>
+            )}
           </p>
-        )}
+          {project?.git_branch && (
+            <p className="text-xs text-muted-foreground">
+              Git branch:{" "}
+              <span className="font-mono">{project.git_branch}</span>
+            </p>
+          )}
+        </div>
         <ModelFields
           model={model}
           effort={effort}
@@ -213,13 +215,13 @@ function ProjectForm() {
       {project && (
         <div className="border-t border-border pt-4">
           {confirmDelete ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <p className="text-xs text-muted-foreground">
                 Delete this project? Only empty projects can be deleted,
                 including settled chats. The directory itself will not be
                 removed.
               </p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   variant="destructive"
                   disabled={busy}
@@ -267,7 +269,7 @@ function AgentSettings() {
       </DialogHeader>
       <ErrorNotice error={error} />
       <form
-        className="space-y-5"
+        className="space-y-6"
         onSubmit={(event) => {
           event.preventDefault();
           if (busy) return;
@@ -288,30 +290,32 @@ function AgentSettings() {
             setEffort(e);
           }}
         />
-        {agent?.active_settings && (
-          <p className="text-xs text-muted-foreground">
-            Current turn: {agent.active_settings.model} ·{" "}
-            {agent.active_settings.effort || "default"}
-          </p>
-        )}
-        {!agent?.context_usage && (
-          <p className="text-xs text-muted-foreground">
-            Context usage is not available yet.
-          </p>
-        )}
-        {agent?.context_usage && (
-          <p className="text-xs text-muted-foreground">
-            Context: {agent.context_usage.estimated_tokens.toLocaleString()}{" "}
-            estimated / {agent.context_usage.context_window.toLocaleString()}{" "}
-            tokens
-          </p>
-        )}
-        {agent?.context_usage?.known && (
-          <p className="text-xs text-muted-foreground">
-            Usage: {agent.context_usage.input_tokens.toLocaleString()} input /{" "}
-            {agent.context_usage.output_tokens.toLocaleString()} output tokens
-          </p>
-        )}
+        <div className="space-y-2">
+          {agent?.active_settings && (
+            <p className="text-xs text-muted-foreground">
+              Current turn: {agent.active_settings.model} ·{" "}
+              {agent.active_settings.effort || "default"}
+            </p>
+          )}
+          {!agent?.context_usage && (
+            <p className="text-xs text-muted-foreground">
+              Context usage is not available yet.
+            </p>
+          )}
+          {agent?.context_usage && (
+            <p className="text-xs text-muted-foreground">
+              Context: {agent.context_usage.estimated_tokens.toLocaleString()}{" "}
+              estimated / {agent.context_usage.context_window.toLocaleString()}{" "}
+              tokens
+            </p>
+          )}
+          {agent?.context_usage?.known && (
+            <p className="text-xs text-muted-foreground">
+              Usage: {agent.context_usage.input_tokens.toLocaleString()} input /{" "}
+              {agent.context_usage.output_tokens.toLocaleString()} output tokens
+            </p>
+          )}
+        </div>
         <div className="flex justify-end">
           <Button type="submit" disabled={busy || !model}>
             {busy ? "Saving…" : "Save settings"}

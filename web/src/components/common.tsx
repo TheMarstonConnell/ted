@@ -19,7 +19,9 @@ export function ErrorNotice({ error }: { error?: string | null }) {
   return (
     <Alert variant="destructive">
       <AlertCircle />
-      <AlertDescription className="break-words">{error}</AlertDescription>
+      <AlertDescription className="min-w-0 [overflow-wrap:anywhere]">
+        {error}
+      </AlertDescription>
     </Alert>
   );
 }
@@ -157,7 +159,11 @@ export function ModelFields({
         <p className="order-last col-span-full basis-full text-sm text-muted-foreground">
           No models available. Configure provider credentials on the server,
           then{" "}
-          <Button variant="link" onClick={() => location.reload()}>
+          <Button
+            variant="link"
+            className="h-auto min-h-0 min-w-0 p-0 align-baseline"
+            onClick={() => location.reload()}
+          >
             reload
           </Button>
           .

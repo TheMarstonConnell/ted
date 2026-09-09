@@ -152,13 +152,13 @@ const Message = memo(function Message({ item }: { item: TranscriptItem }) {
           render={
             <Button
               variant="ghost"
-              className="group h-auto w-full justify-start px-3 py-2"
+              className="group h-auto w-full justify-start px-4 py-2"
             />
           }
         >
           <ChevronRight className="size-4 group-data-panel-open:rotate-90" />
           <span
-            className="min-w-0 truncate text-xs font-normal"
+            className="min-w-0 truncate font-mono text-xs font-normal"
             title={item.kind === "tool" ? toolCommand(item.text) : undefined}
           >
             {item.kind === "tool"
@@ -169,7 +169,7 @@ const Message = memo(function Message({ item }: { item: TranscriptItem }) {
           </span>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <pre className="overflow-x-auto whitespace-pre-wrap break-words border-t p-3 text-xs leading-6">
+          <pre className="overflow-x-auto whitespace-pre-wrap break-words border-t p-4 font-mono text-xs leading-5">
             {item.kind === "tool"
               ? (item.output ?? "Waiting for output…")
               : item.text}
@@ -189,10 +189,10 @@ const Message = memo(function Message({ item }: { item: TranscriptItem }) {
       className={cn(
         "min-w-0",
         item.kind === "user" &&
-          "ml-auto w-fit max-w-[90%] rounded-lg bg-muted px-4 py-3",
+          "ml-auto w-fit max-w-[90%] rounded-xl bg-muted p-4",
       )}
     >
-      <div className="markdown text-sm leading-7 [overflow-wrap:anywhere] [&>*+*]:mt-4 [&_p]:whitespace-pre-wrap [&_h1]:text-2xl [&_h2]:text-xl [&_h3]:text-lg [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h4]:font-semibold [&_h5]:font-semibold [&_h6]:font-semibold [&_a]:underline [&_a]:underline-offset-4 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:text-xs [&_code]:font-mono [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_blockquote]:border-l-2 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_th]:border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_td]:border [&_td]:px-3 [&_td]:py-2">
+      <div className="markdown text-sm leading-6 [overflow-wrap:anywhere] [&>*+*]:mt-4 [&_p]:whitespace-pre-wrap [&_h1]:text-xl [&_h1]:leading-7 [&_h2]:text-xl [&_h2]:leading-7 [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h4]:font-semibold [&_h5]:font-semibold [&_h6]:font-semibold [&_a]:underline [&_a]:underline-offset-4 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-5 [&_code]:font-mono [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_blockquote]:border-l-2 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_th]:border [&_th]:px-4 [&_th]:py-2 [&_th]:text-left [&_td]:border [&_td]:px-4 [&_td]:py-2">
         <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
           {item.text}
         </Markdown>
@@ -226,8 +226,8 @@ const Transcript = memo(function Transcript({
   ) : (
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">
       <MessageScroller>
-        <MessageScrollerViewport>
-          <MessageScrollerContent className="mx-auto max-w-3xl gap-0 px-5 py-8 md:px-8 [&>*+*]:mt-6 [&>[data-tool=true]+[data-tool=true]]:mt-1.5">
+        <MessageScrollerViewport className="workspace-scroll-gutter">
+          <MessageScrollerContent className="mx-auto max-w-chat gap-0 px-4 py-8 md:px-8 [&>*+*]:mt-6 [&>[data-tool=true]+[data-tool=true]]:mt-2">
             {!items.length && (
               <p className="py-12 text-center text-sm text-muted-foreground">
                 Send a message to start this chat.
@@ -245,7 +245,7 @@ const Transcript = memo(function Transcript({
             {state !== "idle" && (
               <div
                 role="status"
-                className="flex items-center gap-2 py-2 text-sm leading-7 text-muted-foreground"
+                className="flex items-center gap-2 py-2 text-sm leading-6 text-muted-foreground"
               >
                 {state === "stopping" ? (
                   "Stopping current turn…"
@@ -287,7 +287,7 @@ const ComposerInput = memo(function ComposerInput({
       placeholder={
         settled ? "Send a message to restore this chat…" : "Message Ted…"
       }
-      className="max-h-52 min-h-12"
+      className="max-h-52 min-h-12 px-4 pt-4 leading-6 md:min-h-16 md:px-inset md:pt-inset md:pb-4"
       value={draft}
       onChange={(event) => writeDraft(agentId, event.target.value)}
       onKeyDown={(event) => {
@@ -530,7 +530,7 @@ export function Chat() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4 md:px-6">
+      <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border px-4 md:px-6">
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold">
             {agentTitle(agent)}
@@ -551,204 +551,215 @@ export function Chat() {
       </header>
       <div className="flex min-h-0 flex-1 flex-col">
         <Transcript items={items} ready={!!ready} state={agent.state} />
-        <div className="mx-auto w-full max-w-3xl shrink-0 space-y-3 px-4 pb-4 pt-2 md:px-8">
-          <ErrorNotice error={error} />
-          {notice && (
-            <Alert>
-              <AlertDescription>{notice}</AlertDescription>
-              <Button size="xs" variant="ghost" onClick={() => setNotice(null)}>
-                Dismiss
-              </Button>
-            </Alert>
-          )}
-          {agent.settled && (
-            <p className="text-xs text-muted-foreground">
-              This chat is settled. Sending a message restores it
-              {pending.length ? " and releases queued work in order" : ""}.
-            </p>
-          )}
-          {(pending.length > 0 || agent.held) && (
-            <div
-              role="region"
-              aria-label="Pending messages"
-              className="max-h-40 scroll-pt-8 overflow-y-auto rounded-lg border border-border bg-muted"
-            >
+        <div className="workspace-scroll-gutter scrollbar-thin shrink-0 overflow-y-auto">
+          <div className="mx-auto w-full max-w-chat space-y-4 px-4 pb-4 pt-2 md:px-8">
+            <ErrorNotice error={error} />
+            {notice && (
+              <Alert>
+                <AlertDescription>{notice}</AlertDescription>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => setNotice(null)}
+                >
+                  Dismiss
+                </Button>
+              </Alert>
+            )}
+            {agent.settled && (
+              <p className="text-xs text-muted-foreground">
+                This chat is settled. Sending a message restores it
+                {pending.length ? " and releases queued work in order" : ""}.
+              </p>
+            )}
+            {(pending.length > 0 || agent.held) && (
               <div
-                data-slot="pending-queue-header"
-                className="sticky top-0 z-10 flex items-center justify-between bg-muted px-3 py-2 text-xs"
-              >
-                <span className="font-medium">
-                  {agent.held ? "Queue held" : "Up next"} · {pending.length}{" "}
-                  pending
-                </span>
-              </div>
-              {pending.length > 0 && (
-                <div className="px-3 pb-2">
-                  {pending.map((m) => (
-                    <div
-                      key={m.id}
-                      data-pending-message-id={m.id}
-                      className="mt-2 flex items-center gap-2 border-t border-border pt-2 text-xs first:mt-0"
-                    >
-                      <span className="min-w-0 flex-1 truncate" title={m.text}>
-                        {m.text}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        title="Move this message back to the composer"
-                        disabled={busy || !ready || status !== "live"}
-                        onClick={() => requestEdit(m)}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        disabled={busy}
-                        onClick={() =>
-                          void action(() => control.cancel(agentId, m.id))
-                        }
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          <form onSubmit={submit} aria-label="Message composer">
-            <InputGroup
-              aria-label="Message input"
-              className="has-disabled:opacity-100 has-disabled:bg-transparent dark:has-disabled:bg-input/30"
-            >
-              <ComposerInput
-                agentId={agentId}
-                inputRef={composerRef}
-                readOnly={editingDraft}
-                settled={agent.settled}
-              />
-              <InputGroupAddon
-                align="block-end"
-                className="items-end"
-                aria-label="Composer toolbar"
+                role="region"
+                aria-label="Pending messages"
+                className="max-h-40 scroll-pt-8 overflow-y-auto rounded-lg border border-border bg-muted"
               >
                 <div
-                  role="group"
-                  aria-label="Chat settings"
-                  className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
+                  data-slot="pending-queue-header"
+                  className="sticky top-0 z-10 flex items-center justify-between bg-muted px-4 py-2 text-xs"
                 >
-                  <ModelFields
-                    compact
-                    disabled={busy || !ready || status !== "live"}
-                    model={agent.settings.model}
-                    effort={agent.settings.effort}
-                    onChange={(model, effort) =>
-                      void action(() =>
-                        control.settings(agentId, { model, effort }),
-                      )
-                    }
-                  />
-                </div>
-                <div
-                  role="group"
-                  aria-label="Message actions"
-                  className="ml-auto flex shrink-0 items-center gap-2"
-                >
-                  {agent.held && !agent.settled && (
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      aria-label="Continue"
-                      title="Continue queued work"
-                      disabled={busy || !ready || status !== "live"}
-                      onClick={() =>
-                        void action(() => control.continue(agentId))
-                      }
-                    >
-                      <Play />
-                    </Button>
-                  )}
-                  {running && (
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="icon"
-                      aria-label="Stop"
-                      disabled={busy || !ready || status !== "live"}
-                      title="Stop this turn; the next pending message can then run"
-                      onClick={() =>
-                        void action(() => control.stopTurn(agentId, running.id))
-                      }
-                    >
-                      <Square className="size-3 fill-current" />
-                    </Button>
-                  )}
-                  <SendMessageButton
-                    agentId={agentId}
-                    disabled={busy || !ready || status !== "live"}
-                  />
-                </div>
-              </InputGroupAddon>
-            </InputGroup>
-          </form>
-          <div
-            role="group"
-            aria-label="Composer footer"
-            className="flex min-w-0 items-center gap-3"
-          >
-            {project && (
-              <div
-                role="group"
-                aria-label="Project location"
-                className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground"
-              >
-                <span
-                  className="hidden min-w-0 max-w-full truncate md:inline"
-                  title={project.root}
-                >
-                  {project.root}
-                </span>
-                {project.git_branch && (
-                  <span
-                    className="flex min-w-0 max-w-full items-center gap-1"
-                    title={project.git_branch}
-                  >
-                    <GitBranch className="size-3 shrink-0" aria-hidden="true" />
-                    <span className="truncate">{project.git_branch}</span>
+                  <span className="font-medium">
+                    {agent.held ? "Queue held" : "Up next"} · {pending.length}{" "}
+                    pending
                   </span>
+                </div>
+                {pending.length > 0 && (
+                  <div className="px-4 pb-2">
+                    {pending.map((m) => (
+                      <div
+                        key={m.id}
+                        data-pending-message-id={m.id}
+                        className="mt-2 flex items-center gap-2 border-t border-border pt-2 text-xs first:mt-0"
+                      >
+                        <span
+                          className="min-w-0 flex-1 truncate"
+                          title={m.text}
+                        >
+                          {m.text}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          title="Move this message back to the composer"
+                          disabled={busy || !ready || status !== "live"}
+                          onClick={() => requestEdit(m)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          disabled={busy}
+                          onClick={() =>
+                            void action(() => control.cancel(agentId, m.id))
+                          }
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             )}
-            <div className="ml-auto flex shrink-0 items-center gap-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-label="View context"
-                title={`Context usage: ${contextPercent}%. View chat settings.`}
-                onClick={() => open("panel", "settings")}
+            <form onSubmit={submit} aria-label="Message composer">
+              <InputGroup
+                aria-label="Message input"
+                className="rounded-xl has-disabled:opacity-100 has-disabled:bg-transparent dark:has-disabled:bg-input/30"
               >
-                <span className="hidden md:inline">
-                  Context {contextPercent}%
+                <ComposerInput
+                  agentId={agentId}
+                  inputRef={composerRef}
+                  readOnly={editingDraft}
+                  settled={agent.settled}
+                />
+                <InputGroupAddon
+                  align="block-end"
+                  className="items-end px-4 pb-4 pt-2 md:px-inset md:pb-inset"
+                  aria-label="Composer toolbar"
+                >
+                  <div
+                    role="group"
+                    aria-label="Chat settings"
+                    className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
+                  >
+                    <ModelFields
+                      compact
+                      disabled={busy || !ready || status !== "live"}
+                      model={agent.settings.model}
+                      effort={agent.settings.effort}
+                      onChange={(model, effort) =>
+                        void action(() =>
+                          control.settings(agentId, { model, effort }),
+                        )
+                      }
+                    />
+                  </div>
+                  <div
+                    role="group"
+                    aria-label="Message actions"
+                    className="ml-auto flex shrink-0 items-center gap-2"
+                  >
+                    {agent.held && !agent.settled && (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        aria-label="Continue"
+                        title="Continue queued work"
+                        disabled={busy || !ready || status !== "live"}
+                        onClick={() =>
+                          void action(() => control.continue(agentId))
+                        }
+                      >
+                        <Play />
+                      </Button>
+                    )}
+                    {running && (
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        aria-label="Stop"
+                        disabled={busy || !ready || status !== "live"}
+                        title="Stop this turn; the next pending message can then run"
+                        onClick={() =>
+                          void action(() =>
+                            control.stopTurn(agentId, running.id),
+                          )
+                        }
+                      >
+                        <Square className="size-3 fill-current" />
+                      </Button>
+                    )}
+                    <SendMessageButton
+                      agentId={agentId}
+                      disabled={busy || !ready || status !== "live"}
+                    />
+                  </div>
+                </InputGroupAddon>
+              </InputGroup>
+            </form>
+            <div
+              role="group"
+              aria-label="Composer footer"
+              className="flex min-w-0 items-center gap-4 border-x border-transparent px-4 md:px-inset"
+            >
+              {project && (
+                <div
+                  role="group"
+                  aria-label="Project location"
+                  className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground"
+                >
+                  <span
+                    className="hidden min-w-0 max-w-full truncate font-mono md:inline"
+                    title={project.root}
+                  >
+                    {project.root}
+                  </span>
+                  {project.git_branch && (
+                    <span
+                      className="flex min-w-0 max-w-full items-center gap-2"
+                      title={project.git_branch}
+                    >
+                      <GitBranch
+                        className="size-3 shrink-0"
+                        aria-hidden="true"
+                      />
+                      <span className="truncate font-mono">
+                        {project.git_branch}
+                      </span>
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                <span
+                  data-slot="context-usage"
+                  className="font-mono text-xs text-muted-foreground"
+                  title={`Context usage: ${contextPercent}%`}
+                >
+                  <span className="hidden md:inline">
+                    Context {contextPercent}%
+                  </span>
+                  <span className="md:hidden">{contextPercent}%</span>
                 </span>
-                <span className="md:hidden">
-                  {contextPercent}%
-                </span>
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="md:hidden"
-                aria-label="Open sidebar"
-                onClick={() => open("sidebar", "open")}
-              >
-                <Menu />
-              </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="md:hidden"
+                  aria-label="Open sidebar"
+                  onClick={() => open("sidebar", "open")}
+                >
+                  <Menu />
+                </Button>
+              </div>
             </div>
           </div>
         </div>

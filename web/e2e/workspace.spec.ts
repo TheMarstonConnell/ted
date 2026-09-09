@@ -6,156 +6,7 @@ async function chooseOption(page: Page, trigger: Locator, label: string) {
   await expect(page.getByRole("listbox")).toHaveCount(0);
 }
 
-// Deterministic browser tests: no provider credentials, paid turns, or writes to
-// real projects. Real same-origin Go/Vite smoke testing is documented separately.
-async function workspace(page: Page) {
-  let project = {
-    id: "p",
-    name: "harness",
-    root: "/srv/harness",
-    git_branch: "main",
-    defaults: { model: "test/model", effort: "medium" },
-  };
-  const agents: Record<string, any> = {};
-  const events: Record<string, any[]> = {};
-  const sockets: any[] = [];
-  function inventory(id: string) {
-    sockets.forEach((ws) =>
-      ws.send(JSON.stringify({ type: "inventory", agent: agents[id] })),
-    );
-  }
-  function emit(id: string, type: string, data: unknown) {
-    const event = {
-      agent_id: id,
-      cursor: ++agents[id].cursor,
-      type,
-      data,
-      created_at: new Date().toISOString(),
-    };
-    events[id].push(event);
-    inventory(id);
-    sockets.forEach((ws) => ws.send(JSON.stringify({ type: "event", event })));
-  }
-  await page.routeWebSocket("**/v1/ws", (ws) => {
-    sockets.push(ws);
-    ws.onMessage((raw) => {
-      const request = JSON.parse(String(raw));
-      ws.send(
-        JSON.stringify({ type: "subscribed", request_id: request.request_id }),
-      );
-      Object.values(agents).forEach((agent) => {
-        ws.send(JSON.stringify({ type: "inventory", agent }));
-        events[agent.id]
-          .filter((e) => e.cursor > (request.cursors[agent.id] || 0))
-          .forEach((event) =>
-            ws.send(JSON.stringify({ type: "event", event })),
-          );
-      });
-    });
-  });
-  await page.route("**/v1/**", async (route) => {
-    const request = route.request(),
-      url = new URL(request.url()),
-      method = request.method();
-    const body = request.postDataJSON();
-    let result: unknown;
-    if (url.pathname === "/v1/projects") {
-      if (method === "POST") project = { ...project, ...body };
-      result = method === "POST" ? project : [project];
-    } else if (url.pathname === "/v1/projects/p") result = project;
-    else if (url.pathname === "/v1/models")
-      result = [
-        {
-          id: "test/model",
-          name: "Test model",
-          provider: "test",
-          context_window: 100000,
-          efforts: ["low", "medium", "high"],
-          default_effort: "medium",
-        },
-      ];
-    else if (url.pathname === "/v1/agents") {
-      if (method === "POST") {
-        expect(body).toEqual({ project_id: "p" });
-        const id = `a${Object.keys(agents).length + 1}`;
-        agents[id] = {
-          id,
-          project_id: "p",
-          title: "",
-          settings: project.defaults,
-          settled: false,
-          held: false,
-          state: "idle",
-          cursor: 0,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        events[id] = [];
-        inventory(id);
-        result = agents[id];
-      } else result = Object.values(agents);
-    } else {
-      const [, , , id, operation] = url.pathname.split("/");
-      if (method === "PATCH" && !operation) {
-        agents[id].settled = body.settled;
-        inventory(id);
-      }
-      if (operation === "messages" && method === "DELETE") {
-        const messageId = decodeURIComponent(url.pathname.split("/")[5]);
-        const message = events[id].findLast(
-          (event) =>
-            (event.type.startsWith("message.") ||
-              event.type.startsWith("turn.")) &&
-            event.data.id === messageId,
-        )?.data;
-        if (!message || !["pending", "cancelled"].includes(message.status)) {
-          await route.fulfill({
-            status: message ? 409 : 404,
-            json: {
-              error: { message: "Only pending messages can be removed" },
-            },
-          });
-          return;
-        }
-        if (message.status === "pending")
-          emit(id, "message.cancelled", { ...message, status: "cancelled" });
-        await route.fulfill({ status: 204 });
-        return;
-      }
-      if (operation === "messages" && method === "POST") {
-        expect(agents[id].settled).toBe(false);
-        expect(request.headers()["idempotency-key"]).toBeTruthy();
-        const queued = {
-          id: `m${events[id].length}`,
-          text: body.text,
-          status: "pending",
-          created_at: new Date().toISOString(),
-        };
-        emit(id, "message.queued", queued);
-        emit(id, "turn.started", { ...queued, status: "running" });
-        emit(id, "output", {
-          Content: "**Ready to build.**\n\n```ts\nconst connected = true\n```",
-          ResponseType: "agent",
-          ToolCallID: "",
-          ToolName: "",
-          FullToolOutput: "",
-        });
-        emit(id, "turn.completed", { ...queued, status: "completed" });
-        result = queued;
-      } else if (operation === "settings" && method === "PATCH") {
-        agents[id].settings = { ...agents[id].settings, ...body };
-        inventory(id);
-        result = agents[id];
-      } else result = agents[id];
-    }
-    await route.fulfill({
-      status:
-        method === "POST" && !url.pathname.endsWith("messages") ? 201 : 200,
-      json: result,
-    });
-  });
-  return { agents, events, emit };
-}
+import { openAgentSettings, workspace } from "./fixtures";
 
 test("complete project-first workflow, settlement, Markdown, drafts and deep links", async ({
   page,
@@ -218,7 +69,7 @@ test("complete project-first workflow, settlement, Markdown, drafts and deep lin
     page.getByRole("textbox", { name: "Message", exact: true }),
   ).toHaveValue("");
   await expect(page.locator(".markdown strong")).toHaveCount(1);
-  await page.getByRole("button", { name: "View context", exact: true }).click();
+  await openAgentSettings(page);
   await expect(page).toHaveURL(/panel=settings/);
   await chooseOption(
     page,
@@ -429,9 +280,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     ).toBeVisible();
     await capture(`chat-${colorScheme}`);
 
-    await page
-      .getByRole("button", { name: "View context", exact: true })
-      .click();
+    await openAgentSettings(page);
     await expect(
       page.getByRole("dialog").getByLabel("Model", { exact: true }),
     ).toBeVisible();
@@ -526,7 +375,7 @@ test("mobile project options dismiss back to the same chat without leaving a blo
     .getByRole("button", { name: "Close sidebar", exact: true })
     .click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await page.getByRole("button", { name: "View context", exact: true }).click();
+  await openAgentSettings(page);
   await expect(
     page.getByRole("dialog", { name: "Agent settings", exact: true }),
   ).toBeVisible();
@@ -633,7 +482,7 @@ test.describe("mobile modal hand-offs", () => {
     await expect(
       page.getByRole("textbox", { name: "Message", exact: true }),
     ).toBeFocused();
-    await page.getByRole("button", { name: "View context", exact: true }).tap();
+    await openAgentSettings(page);
     await expect(
       page.getByRole("dialog", { name: "Agent settings", exact: true }),
     ).toBeVisible();
@@ -669,11 +518,12 @@ test("mobile composer navigation uses a bottom sheet", async ({ page }) => {
   expect(menuBox.y).toBeGreaterThan(sendBox.y + sendBox.height);
   const contextBox = (await page
     .getByRole("group", { name: "Composer footer", exact: true })
-    .getByRole("button", { name: "View context", exact: true })
+    .locator('[data-slot="context-usage"]')
     .boundingBox())!;
   expect(locationBox.x + locationBox.width).toBeLessThan(contextBox.x);
   expect(contextBox.x + contextBox.width).toBeLessThan(menuBox.x);
-  expect(menuBox.x + menuBox.width).toBe(inputBox.x + inputBox.width);
+  // Mobile text inset: 16px padding + the input’s 1px border.
+  expect(menuBox.x + menuBox.width).toBe(inputBox.x + inputBox.width - 17);
   await expect(
     location.getByText("/srv/harness", { exact: true }),
   ).toBeHidden();
@@ -903,17 +753,14 @@ for (const width of [1440, 390, 320]) {
       name: "Composer footer",
       exact: true,
     });
-    const context = footer.getByRole("button", {
-      name: "View context",
-      exact: true,
-    });
+    const context = footer.locator('[data-slot="context-usage"]');
     const composer = input.getByRole("textbox", {
       name: "Message",
       exact: true,
     });
     await expect
       .poll(async () => (await composer.boundingBox())!.height)
-      .toBe(48);
+      .toBe(width < 768 ? 48 : 64);
     await expect(model).toHaveText("Test model");
     await expect(effort).toHaveText("medium");
     await expect(context).toHaveText(width < 768 ? "0%" : "Context 0%", {
@@ -938,7 +785,7 @@ for (const width of [1440, 390, 320]) {
     await expect(
       page.locator("header").getByRole("button", { name: "Agent settings" }),
     ).toHaveCount(0);
-    await context.click();
+    await openAgentSettings(page);
     await expect(
       page.getByRole("dialog").getByText("Context usage is not available yet."),
     ).toBeVisible();
@@ -1033,7 +880,7 @@ for (const width of [1440, 390, 320]) {
     await expect(context).toHaveText(width < 768 ? "25%" : "Context 25%", {
       useInnerText: true,
     });
-    await context.click();
+    await openAgentSettings(page);
     const dialog = page.getByRole("dialog", {
       name: "Agent settings",
       exact: true,
@@ -1124,9 +971,7 @@ for (const width of [1440, 390, 320]) {
     await expect(
       actions.getByRole("button", { name: "Open sidebar", exact: true }),
     ).toHaveCount(0);
-    await expect(
-      input.getByRole("button", { name: "View context", exact: true }),
-    ).toHaveCount(0);
+    await expect(input.locator('[data-slot="context-usage"]')).toHaveCount(0);
     const contextBox = (await context.boundingBox())!;
     expect(contextBox.y).toBeGreaterThan(inputBox.y + inputBox.height);
     if (width < 768) {
@@ -1140,7 +985,8 @@ for (const width of [1440, 390, 320]) {
       expect(menuBox.y).toBeGreaterThan(inputBox.y + inputBox.height);
       expect(locationBox.x + locationBox.width).toBeLessThan(contextBox.x);
       expect(contextBox.x + contextBox.width).toBeLessThan(menuBox.x);
-      expect(menuBox.x + menuBox.width).toBe(inputBox.x + inputBox.width);
+      // Mobile text inset: 16px padding + the input’s 1px border.
+      expect(menuBox.x + menuBox.width).toBe(inputBox.x + inputBox.width - 17);
     }
     await expect(model).toBeInViewport();
     await expect(effort).toBeInViewport();
@@ -1154,7 +1000,7 @@ for (const width of [1440, 390, 320]) {
     await composer.fill("");
     await expect
       .poll(async () => (await composer.boundingBox())!.height)
-      .toBe(48);
+      .toBe(width < 768 ? 48 : 64);
     await composer.fill("Keep this draft while changing settings");
     const path = testInfo.outputPath(`composer-${width}.png`);
     await page.screenshot({ path });
@@ -1259,7 +1105,14 @@ test("shadcn effort selection supports the empty default value and keyboard inte
   await effort.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("listbox")).toBeVisible();
+  // The portal is visible before its keyboard focus transfer completes.
+  await expect(
+    page.getByRole("option", { name: "medium", exact: true }),
+  ).toBeFocused();
   await page.keyboard.press("Home");
+  await expect(
+    page.getByRole("option", { name: "Default", exact: true }),
+  ).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("listbox")).toHaveCount(0);
   await expect(effort).toHaveText("Default");
@@ -1392,6 +1245,16 @@ for (const width of [1440, 390]) {
     const second = sidebar.locator('[data-agent-id="a2"]');
     await expect(first).toContainText("main");
     await expect(second).toContainText("feature/sidebar");
+    // Measure after the drawer's entry animation, not across moving frames.
+    if (width < 768) {
+      await page
+        .locator('[data-slot="sheet-content"]')
+        .evaluate(async (node) => {
+          await Promise.all(
+            node.getAnimations().map((animation) => animation.finished),
+          );
+        });
+    }
     const titleBox = (await second
       .getByText("Second chat", { exact: true })
       .boundingBox())!;
@@ -1405,7 +1268,7 @@ for (const width of [1440, 390]) {
     });
     await second.getByRole("link").hover();
     await expect(settle).toHaveCSS("opacity", "1");
-    await expect(settle).toHaveCSS("width", "32px");
+    await expect(settle).toHaveCSS("width", width < 768 ? "48px" : "32px");
     const linkBox = (await second.getByRole("link").boundingBox())!;
     const buttonBox = (await settle.boundingBox())!;
     expect(buttonBox.x).toBeGreaterThanOrEqual(linkBox.x + linkBox.width);
@@ -1520,7 +1383,7 @@ for (const width of [1440, 390]) {
   });
 }
 
-test("consecutive tools use 6px spacing while message boundaries keep 24px", async ({
+test("consecutive tools use 8px spacing while message boundaries keep 24px", async ({
   page,
 }, testInfo) => {
   const { emit } = await workspace(page);
@@ -1564,7 +1427,7 @@ test("consecutive tools use 6px spacing while message boundaries keep 24px", asy
     );
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 960 });
-    await expect.poll(gaps).toEqual([24, 24, 6, 6, 24, 24]);
+    await expect.poll(gaps).toEqual([24, 24, 8, 8, 24, 24]);
     const path = testInfo.outputPath(`tool-spacing-${width}.png`);
     await page.screenshot({ path });
     await testInfo.attach(`tool-spacing-${width}`, {
@@ -1582,7 +1445,7 @@ test("consecutive tools use 6px spacing while message boundaries keep 24px", asy
     page.getByText("App.tsx\ncomponents/\nlib/", { exact: true }),
   ).toBeVisible();
   await expect(items).toHaveCount(7);
-  await expect.poll(gaps).toEqual([24, 24, 6, 6, 24, 24]);
+  await expect.poll(gaps).toEqual([24, 24, 8, 8, 24, 24]);
 });
 
 for (const [width, height, colorScheme] of [
@@ -1893,7 +1756,7 @@ test("sidebar chats use full width and slide to reveal settle actions on hover o
   await expect(firstAction).toHaveCSS("width", "32px");
   await expect
     .poll(async () => (await first.getByRole("link").boundingBox())!.width)
-    .toBeCloseTo(before.width - 36, 0);
+    .toBeCloseTo(before.width - 40, 0);
   const after = (await first.getByRole("link").boundingBox())!;
   expect(after.y).toBe(before.y);
   expect(after.height).toBe(before.height);
@@ -1977,10 +1840,10 @@ for (const width of [390, 1440]) {
       const row = sidebar.locator('[data-agent-id="a1"]');
       const settle = row.getByRole("button", { name: /^Settle chat:/ });
       await expect(settle).toHaveCSS("opacity", "1");
-      await expect(settle).toHaveCSS("width", "32px");
+      await expect(settle).toHaveCSS("width", "48px");
       const rowBox = (await row.boundingBox())!;
       const linkBox = (await row.getByRole("link").boundingBox())!;
-      expect(rowBox.width - linkBox.width).toBe(36);
+      expect(rowBox.width - linkBox.width).toBe(56);
       const path = testInfo.outputPath(`sidebar-touch-actions-${width}.png`);
       await page.screenshot({ path });
       await testInfo.attach("sidebar-touch-actions", {
@@ -2197,10 +2060,7 @@ test.describe("mobile composer footer", () => {
       name: "Project location",
       exact: true,
     });
-    const context = page.getByRole("button", {
-      name: "View context",
-      exact: true,
-    });
+    const context = page.locator('[data-slot="context-usage"]');
     await expect(context).toHaveText("0%", { useInnerText: true });
     await expect(location.getByText(root, { exact: true })).toHaveAttribute(
       "title",
@@ -2232,7 +2092,7 @@ test.describe("mobile composer footer", () => {
     };
     emit("a1", "output", { ResponseType: "usage", Content: "" });
     await expect(context).toHaveText("0%", { useInnerText: true });
-    await context.tap();
+    await openAgentSettings(page);
     await expect(
       page.getByRole("dialog", { name: "Agent settings", exact: true }),
     ).toBeVisible();

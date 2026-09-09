@@ -7,26 +7,31 @@ browser-side provider configuration.
 
 ## Interface conventions
 
-Use the stock shadcn/ui `base-nova` components and neutral theme. Tailwind
-utilities handle layout and Markdown typography; `src/index.css` contains only
-theme tokens, base styles, and reduced-motion support. Avoid app-specific CSS,
+Use the shared shadcn/ui `base-nova` primitives and neutral theme, standardized
+by [the web design system](DESIGN_SYSTEM.md): an 8px layout grid, layered
+24/16/8px insets, and locally bundled Inter / IBM Plex Mono. Tailwind utilities
+handle layout and Markdown typography; `src/index.css` owns tokens, base styles,
+touch targets, shared scrollbar alignment, and reduced-motion support. Avoid
 decorative badges, marketing copy, and duplicate metadata in chat chrome.
 Model and effort controls sit on the left of the input’s bottom toolbar, using
 natural widths. Their shadcn Select menus open upward in the composer (with
 selected-item/trigger overlap disabled). Settings dialogs use the same selects
 with normal downward positioning. Send, Stop, and Continue have a separate,
 non-shrinking area on the right. Settings wrap on narrow screens without
-crowding the action buttons. The message field starts at 48px tall, grows with
-the draft up to 208px, then scrolls without covering the toolbar. Model/effort
-changes save immediately for the next turn.
+crowding the action buttons. The message field starts at 64px tall on desktop
+(48px on mobile), grows with the draft up to 208px, then scrolls without covering
+the toolbar. Model/effort changes save immediately for the next turn.
 
-Context lives in the footer below the input on every screen and opens the full
-usage/settings dialog. Mobile shows only its percentage (or “0%” when usage is
+Context is read-only, muted monospace text in the footer below the input on every
+screen, matching the path and branch metadata. It is not clickable or focusable;
+model and effort remain editable in the composer toolbar. The full settings
+dialog remains available through the `?panel=settings` deep link. Footer content
+aligns with the input text area, not the outer input border. Mobile shows only its percentage (or “0%” when usage is
 unavailable), while desktop retains the Context label. On mobile, the footer has
 the branch on the left and context plus the sidebar menu on the right; the file
 path is hidden. Desktop shows the directory and branch on the left, with context
 on the right. Full paths and branches remain in their titles if truncated. The
-context control and mobile menu remain available for chats without a project.
+context readout and mobile menu remain available for chats without a project.
 Queued-message cancellation stays beside each queued message. The mobile drawer
 opens with a subtle 200ms slide-up/fade and respects reduced-motion preferences.
 Closing or handing off to another dialog still unmounts it immediately, so modal
@@ -35,10 +40,10 @@ Running, held, settled, and connection states remain visible
 where they affect the current task. User messages use right-aligned neutral
 bubbles; assistant replies stay unboxed. Sender names are accessible labels rather
 than visible headings. Working/stopping status uses the same type size and line
-height as message body text. Consecutive tool entries are separated by 6px;
-all other transcript boundaries retain the normal 24px spacing. Tool card
-padding and expanded output are unchanged. Chat images have a subtle theme-aware
-border and a drop shadow with 16px of surrounding padding to prevent clipping at
+height as message body text. Consecutive tool entries are separated by 8px;
+all other transcript boundaries retain the normal 24px spacing. Tool headers
+use 16px horizontal / 8px vertical padding; expanded output uses 16px padding
+and compact 12px/20px monospace text. Chat images have a subtle theme-aware border and a drop shadow with 16px of surrounding padding to prevent clipping at
 message edges, and open in a near-full-window, aspect-ratio-preserving lightbox
 with a dark backdrop.
 Escape, the close button, or the space outside the image dismisses the preview

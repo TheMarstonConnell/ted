@@ -1,5 +1,10 @@
 import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
+// Named grid spacing must participate in overrides (notably the image lightbox).
+const twMerge = extendTailwindMerge({
+  extend: { theme: { spacing: ["inset"], container: ["chat"] } },
+});
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }

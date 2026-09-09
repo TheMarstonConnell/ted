@@ -53,9 +53,9 @@ export function AgentLink({ agent }: { agent: Agent }) {
   return (
     <div
       data-agent-id={agent.id}
-      className={`space-y-1 ${agent.settled ? "opacity-60 hover:opacity-100 focus-within:opacity-100" : ""}`}
+      className={`space-y-2 ${agent.settled ? "opacity-60 hover:opacity-100 focus-within:opacity-100" : ""}`}
     >
-      <div className="group/agent flex items-center gap-1 transition-[gap] duration-150 [@media(hover:hover)_and_(pointer:fine)]:gap-0 hover:gap-1 focus-within:gap-1">
+      <div className="group/agent flex items-center gap-2 transition-[gap] duration-150 [@media(hover:hover)_and_(pointer:fine)]:gap-0 hover:gap-2 focus-within:gap-2">
         <Button
           variant={agentId === agent.id ? "secondary" : "ghost"}
           className="h-auto min-w-0 flex-1 justify-start py-2 font-normal"
@@ -81,13 +81,13 @@ export function AgentLink({ agent }: { agent: Agent }) {
               )}
             </span>
             <span
-              className="mt-1 flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+              className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground"
               title={branch || undefined}
             >
               {branch && (
                 <GitBranch className="size-3 shrink-0" aria-hidden="true" />
               )}
-              <span className="truncate">
+              <span className="truncate font-mono">
                 {branch || (project ? "Branch unavailable" : "No project")}
               </span>
             </span>
@@ -119,7 +119,7 @@ function SidebarContent() {
   const groups = groupAgents(Object.values(agents), projects);
   return (
     <div className="flex h-full min-h-0 flex-col bg-sidebar">
-      <div className="flex h-14 shrink-0 items-center justify-between px-3">
+      <div className="flex h-14 shrink-0 items-center justify-between px-4">
         <Button variant="ghost" render={<Link to="/" />}>
           Ted
         </Button>
@@ -134,7 +134,7 @@ function SidebarContent() {
           </Button>
         )}
       </div>
-      <div className="px-3 pb-4">
+      <div className="px-4 pb-4">
         <div
           role="group"
           aria-label="Create chat or project"
@@ -159,10 +159,10 @@ function SidebarContent() {
       </div>
       <nav
         aria-label="Agents"
-        className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 pb-4"
+        className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4"
       >
         {groups.misc.length > 0 && (
-          <div className="space-y-1">
+          <div className="space-y-2">
             <p className="px-2 py-2 text-xs text-muted-foreground">Misc</p>
             {groups.misc.map((a) => (
               <AgentLink key={a.id} agent={a} />
@@ -171,7 +171,7 @@ function SidebarContent() {
         )}
         {groups.projects.map(({ project, agents: projectAgents }) => (
           <Collapsible key={project.id} defaultOpen>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-2">
               <CollapsibleTrigger
                 render={
                   <Button
@@ -192,7 +192,7 @@ function SidebarContent() {
                 <Settings2 />
               </Button>
             </div>
-            <CollapsibleContent className="space-y-1 pt-1">
+            <CollapsibleContent className="space-y-2 pt-2">
               {projectAgents.length ? (
                 projectAgents.map((a) => <AgentLink key={a.id} agent={a} />)
               ) : (
@@ -211,13 +211,16 @@ function SidebarContent() {
         <Collapsible>
           <CollapsibleTrigger
             render={
-              <Button variant="ghost" className="group w-full justify-start opacity-60 hover:opacity-100 focus-visible:opacity-100" />
+              <Button
+                variant="ghost"
+                className="group w-full justify-start opacity-60 hover:opacity-100 focus-visible:opacity-100"
+              />
             }
           >
             <ChevronRight className="size-4 group-data-panel-open:rotate-90" />
             Settled chats
           </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-1 pt-1">
+          <CollapsibleContent className="space-y-2 pt-2">
             {groups.settled.map((a) => (
               <AgentLink key={a.id} agent={a} />
             ))}

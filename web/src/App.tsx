@@ -28,7 +28,7 @@ function Overview() {
     : projects;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:px-6">
+      <header className="flex h-14 shrink-0 items-center gap-4 border-b px-4 md:px-6">
         <Button
           variant="ghost"
           size="icon"
@@ -46,7 +46,7 @@ function Overview() {
         <Loading>Loading projects…</Loading>
       ) : (
         <div className="flex-1 overflow-y-auto p-4 md:p-6">
-          <div className="mx-auto max-w-3xl space-y-6">
+          <div className="mx-auto max-w-chat space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <p className="text-sm text-muted-foreground">
                 Server directories available for chats.
@@ -64,17 +64,17 @@ function Overview() {
                 <Button
                   key={p.id}
                   variant="outline"
-                  className="h-auto w-full justify-start px-4 py-3 text-left"
+                  className="h-auto w-full justify-start rounded-xl p-inset text-left"
                   render={
                     <Link
                       to={`/projects/${encodeURIComponent(p.id)}?panel=settings`}
                     />
                   }
                 >
-                  <span className="min-w-0 space-y-1">
+                  <span className="min-w-0">
                     <span className="block truncate">{p.name}</span>
                     <span
-                      className="block truncate text-sm font-normal text-muted-foreground"
+                      className="block truncate font-mono text-xs font-normal text-muted-foreground"
                       title={p.root}
                     >
                       {p.root}
@@ -108,8 +108,8 @@ function Layout() {
       <Sidebar />
       <main className="flex min-w-0 flex-1 flex-col">
         {(status === "offline" || error) && (
-          <div className="shrink-0 border-b p-3">
-            <div className="flex items-center justify-between gap-3 text-sm">
+          <div className="shrink-0 border-b p-4">
+            <div className="flex items-center justify-between gap-4 text-sm">
               <span role="status">
                 {loaded
                   ? "Connection interrupted. Reconnecting safely from the last processed event."

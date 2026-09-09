@@ -1,3 +1,12 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/inter/wght-italic.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
+@import "@fontsource/ibm-plex-mono/latin-400-italic.css";
+@import "@fontsource/ibm-plex-mono/latin-500-italic.css";
+@import "@fontsource/ibm-plex-mono/latin-600-italic.css";
+
 @import "tailwindcss" source(".");
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -5,8 +14,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
-  --font-sans: ui-sans-serif, system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, monospace;
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -26,15 +35,27 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* 8px layout grid; Tailwind's 4px unit remains available for optical exceptions. */
+  --spacing: 0.25rem;
+  --spacing-inset: 1.5rem;
+  --container-chat: 48rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
 }
 
 :root {
   color-scheme: light;
-  --radius: 0.625rem;
+  --radius: 1rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -85,8 +106,23 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    font-synthesis: none;
+  }
+  strong,
+  b,
+  th {
+    font-weight: 600;
+  }
+  code,
+  pre,
+  kbd,
+  samp {
+    @apply font-mono;
+  }
   body {
-    @apply bg-background text-foreground font-sans;
+    @apply bg-background text-foreground font-sans text-sm;
+    margin: 0;
   }
 }
 
@@ -98,4 +134,28 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Touch controls use a 48px target without inflating desktop chrome. Kept in
+   base so explicit layout utilities (e.g. hidden sidebar actions) still work. */
+@layer base {
+  @media (max-width: 767px), (pointer: coarse) {
+    :where(
+      [data-slot="button"],
+      [data-slot="select-trigger"],
+      [data-slot="select-item"],
+      [data-slot="native-select"],
+      [data-slot="input"]
+    ) {
+      min-height: 3rem;
+    }
+    :where([data-slot="button"], [data-slot="select-trigger"]) {
+      min-width: 3rem;
+    }
+  }
+}
+
+/* Reserve identical native scrollbar space for transcript and composer. */
+@utility workspace-scroll-gutter {
+  scrollbar-gutter: stable both-edges;
 }
