@@ -1,5 +1,12 @@
 import { usePanel } from "@/lib/navigation";
-import { useState, type FormEvent } from "react";
+import {
+  memo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+  type RefObject,
+} from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Markdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -15,6 +22,14 @@ import {
   Square,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Collapsible,
@@ -35,7 +50,12 @@ import {
   MessageScrollerButton,
 } from "@/components/ui/message-scroller";
 import { cn, toolCommand } from "@/lib/utils";
-import { agentTitle, requestKey } from "@/lib/api";
+import {
+  agentTitle,
+  requestKey,
+  type Agent,
+  type QueueMessage,
+} from "@/lib/api";
 import { control, useControl, type TranscriptItem } from "@/lib/store";
 import { ErrorNotice, Loading, ModelFields } from "./common";
 import { ChatImage } from "./chat-image";
@@ -45,6 +65,26 @@ const drafts = new Map<string, string>();
 const draftVersions = new Map<string, number>();
 const receipts = new Map<string, { text: string; key: string }>();
 const inFlight = new Set<string>();
+const editingDrafts = new Set<string>();
+const composerErrors = new Map<string, string>();
+// Drafts and pending actions must stay in sync even if a request completes after
+// navigating away and back to the same chat. Nothing is persisted to disk.
+const composerListeners = new Set<() => void>();
+const subscribeComposer = (listener: () => void) => {
+  composerListeners.add(listener);
+  return () => {
+    composerListeners.delete(listener);
+  };
+};
+const notifyComposer = () =>
+  composerListeners.forEach((listener) => listener());
+function writeDraft(agentId: string, text: string) {
+  draftVersions.set(agentId, (draftVersions.get(agentId) || 0) + 1);
+  drafts.set(agentId, text);
+  notifyComposer();
+}
+const EMPTY_TRANSCRIPT: TranscriptItem[] = [];
+
 const HELP =
   "/model [provider/model] · /effort [value] · /stop · /settle · /unsettle · /continue · /help · /exit. Use // to send a literal leading slash.";
 
@@ -104,7 +144,7 @@ function CopyButton({ text }: { text: string }) {
     </Button>
   );
 }
-function Message({ item }: { item: TranscriptItem }) {
+const Message = memo(function Message({ item }: { item: TranscriptItem }) {
   if (item.kind === "tool" || item.kind === "tool_result")
     return (
       <Collapsible className="min-w-0 rounded-lg border">
@@ -170,7 +210,123 @@ function Message({ item }: { item: TranscriptItem }) {
       </div>
     </article>
   );
-}
+});
+
+const Transcript = memo(function Transcript({
+  items,
+  ready,
+  state,
+}: {
+  items: TranscriptItem[];
+  ready: boolean;
+  state: Agent["state"];
+}) {
+  return !ready ? (
+    <Loading>Replaying chat history…</Loading>
+  ) : (
+    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+      <MessageScroller>
+        <MessageScrollerViewport>
+          <MessageScrollerContent className="mx-auto max-w-3xl gap-0 px-5 py-8 md:px-8 [&>*+*]:mt-6 [&>[data-tool=true]+[data-tool=true]]:mt-1.5">
+            {!items.length && (
+              <p className="py-12 text-center text-sm text-muted-foreground">
+                Send a message to start this chat.
+              </p>
+            )}
+            {items.map((item) => (
+              <MessageScrollerItem
+                key={item.id}
+                messageId={item.id}
+                data-tool={item.kind === "tool" || item.kind === "tool_result"}
+              >
+                <Message item={item} />
+              </MessageScrollerItem>
+            ))}
+            {state !== "idle" && (
+              <div
+                role="status"
+                className="flex items-center gap-2 py-2 text-sm leading-7 text-muted-foreground"
+              >
+                {state === "stopping" ? (
+                  "Stopping current turn…"
+                ) : (
+                  <span className="shimmer">Ted is working…</span>
+                )}
+              </div>
+            )}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton />
+      </MessageScroller>
+    </MessageScrollerProvider>
+  );
+});
+
+// Typing updates this small leaf, not the transcript, queue, or model menus.
+const ComposerInput = memo(function ComposerInput({
+  agentId,
+  inputRef,
+  readOnly,
+  settled,
+}: {
+  agentId: string;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
+  readOnly: boolean;
+  settled: boolean;
+}) {
+  const draft = useSyncExternalStore(
+    subscribeComposer,
+    () => drafts.get(agentId) || "",
+  );
+  return (
+    <InputGroupTextarea
+      ref={inputRef}
+      readOnly={readOnly}
+      autoFocus
+      aria-label="Message"
+      placeholder={
+        settled ? "Send a message to restore this chat…" : "Message Ted…"
+      }
+      className="max-h-52 min-h-12"
+      value={draft}
+      onChange={(event) => writeDraft(agentId, event.target.value)}
+      onKeyDown={(event) => {
+        if (
+          event.key === "Enter" &&
+          !event.shiftKey &&
+          !event.nativeEvent.isComposing
+        ) {
+          event.preventDefault();
+          event.currentTarget.form?.requestSubmit();
+        }
+      }}
+    />
+  );
+});
+
+const SendMessageButton = memo(function SendMessageButton({
+  agentId,
+  disabled,
+}: {
+  agentId: string;
+  disabled: boolean;
+}) {
+  const empty = useSyncExternalStore(
+    subscribeComposer,
+    () => !drafts.get(agentId)?.trim(),
+  );
+  return (
+    <Button
+      type="submit"
+      size="icon"
+      disabled={disabled || empty}
+      aria-label="Send message"
+    >
+      <ArrowUp />
+    </Button>
+  );
+});
+
 export function Chat() {
   const { agentId = "" } = useParams();
   const {
@@ -185,10 +341,24 @@ export function Chat() {
   const navigate = useNavigate();
   const agent = agents[agentId];
   const project = projects.find((p) => p.id === agent?.project_id);
-  const items = transcripts[agentId] || [];
-  const [draft, setDraft] = useState(drafts.get(agentId) || "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const items = transcripts[agentId] || EMPTY_TRANSCRIPT;
+  const busy = useSyncExternalStore(subscribeComposer, () =>
+    inFlight.has(agentId),
+  );
+  const editingDraft = useSyncExternalStore(subscribeComposer, () =>
+    editingDrafts.has(agentId),
+  );
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const [editCandidate, setEditCandidate] = useState<QueueMessage | null>(null);
+  const error = useSyncExternalStore(
+    subscribeComposer,
+    () => composerErrors.get(agentId) || null,
+  );
+  const setError = (error: string | null) => {
+    if (error) composerErrors.set(agentId, error);
+    else composerErrors.delete(agentId);
+    notifyComposer();
+  };
   const [notice, setNotice] = useState<string | null>(null);
   const ready = !!agent && replayed[agentId];
   const queue = agent?.queue || [];
@@ -199,15 +369,10 @@ export function Chat() {
     context && context.context_window > 0
       ? Math.round((context.estimated_tokens / context.context_window) * 100)
       : undefined;
-  const updateDraft = (text: string) => {
-    draftVersions.set(agentId, (draftVersions.get(agentId) || 0) + 1);
-    drafts.set(agentId, text);
-    setDraft(text);
-  };
   const action = async (fn: () => Promise<unknown>) => {
     if (inFlight.has(agentId)) return;
     inFlight.add(agentId);
-    setBusy(true);
+    notifyComposer();
     setError(null);
     try {
       await fn();
@@ -215,12 +380,49 @@ export function Chat() {
       setError(String(e));
     } finally {
       inFlight.delete(agentId);
-      setBusy(false);
+      notifyComposer();
     }
+  };
+  const editPending = (message: QueueMessage) => {
+    setEditCandidate(null);
+    void action(async () => {
+      const current = control
+        .snapshot()
+        .agents[agentId]?.queue?.find((m) => m.id === message.id);
+      if (current?.status !== "pending")
+        throw new Error("This message is no longer pending.");
+      editingDrafts.add(agentId);
+      notifyComposer();
+      try {
+        // DELETE is atomic: if this turn started in the meantime, the server
+        // rejects it and the existing draft remains untouched.
+        await control.cancel(agentId, message.id);
+        // A previously accepted send may have left a retry receipt. Editing is
+        // a new submission, not a retry of the now-cancelled queue entry.
+        receipts.delete(agentId);
+        // Preserve a literal leading slash rather than turning it into a command.
+        writeDraft(agentId, message.text.replace(/^(\s*)\//, "$1//"));
+        requestAnimationFrame(() => {
+          const input = composerRef.current;
+          input?.focus();
+          input?.setSelectionRange(input.value.length, input.value.length);
+        });
+      } finally {
+        editingDrafts.delete(agentId);
+        notifyComposer();
+      }
+    });
+  };
+  const requestEdit = (message: QueueMessage) => {
+    if (inFlight.has(agentId) || !ready || status !== "live") return;
+    const text = message.text.replace(/^(\s*)\//, "$1//");
+    const draft = drafts.get(agentId) || "";
+    if (draft && draft !== text) setEditCandidate(message);
+    else editPending(message);
   };
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const original = draft;
+    const original = drafts.get(agentId) || "";
     if (!original.trim() || busy) return;
     void action(async () => {
       const trimmed = original.trim();
@@ -268,21 +470,21 @@ export function Chat() {
         }
         // Clear the submitted draft before the request, not after an async
         // response that may arrive after more typing or a chat switch.
-        updateDraft("");
+        writeDraft(agentId, "");
         const version = draftVersions.get(agentId);
         try {
           await control.send(agentId, text, receipt.key);
           receipts.delete(agentId);
         } catch (error) {
           // Keep the retry key and restore only if the composer was untouched.
-          if (draftVersions.get(agentId) === version) updateDraft(original);
+          if (draftVersions.get(agentId) === version)
+            writeDraft(agentId, original);
           throw error;
         }
         return;
       }
       if (drafts.get(agentId) === original) {
-        drafts.delete(agentId);
-        setDraft("");
+        writeDraft(agentId, "");
       }
     });
   };
@@ -299,6 +501,35 @@ export function Chat() {
     );
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <Dialog
+        open={!!editCandidate}
+        onOpenChange={(open) => {
+          if (!open) setEditCandidate(null);
+        }}
+      >
+        <DialogContent finalFocus={composerRef}>
+          <DialogHeader>
+            <DialogTitle>Replace current draft?</DialogTitle>
+            <DialogDescription>
+              Editing this message removes it from the queue and replaces your
+              current draft. It won’t be sent again until you send it.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditCandidate(null)}>
+              Keep draft
+            </Button>
+            <Button
+              disabled={busy || !ready || status !== "live"}
+              onClick={() => {
+                if (editCandidate) editPending(editCandidate);
+              }}
+            >
+              Edit message
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4 md:px-6">
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold">
@@ -319,47 +550,7 @@ export function Chat() {
         </Button>
       </header>
       <div className="flex min-h-0 flex-1 flex-col">
-        {!ready ? (
-          <Loading>Replaying chat history…</Loading>
-        ) : (
-          <MessageScrollerProvider autoScroll defaultScrollPosition="end">
-            <MessageScroller>
-              <MessageScrollerViewport>
-                <MessageScrollerContent className="mx-auto max-w-3xl gap-0 px-5 py-8 md:px-8 [&>*+*]:mt-6 [&>[data-tool=true]+[data-tool=true]]:mt-1.5">
-                  {!items.length && (
-                    <p className="py-12 text-center text-sm text-muted-foreground">
-                      Send a message to start this chat.
-                    </p>
-                  )}
-                  {items.map((item) => (
-                    <MessageScrollerItem
-                      key={item.id}
-                      messageId={item.id}
-                      data-tool={
-                        item.kind === "tool" || item.kind === "tool_result"
-                      }
-                    >
-                      <Message item={item} />
-                    </MessageScrollerItem>
-                  ))}
-                  {agent.state !== "idle" && (
-                    <div
-                      role="status"
-                      className="flex items-center gap-2 py-2 text-sm leading-7 text-muted-foreground"
-                    >
-                      {agent.state === "stopping" ? (
-                        "Stopping current turn…"
-                      ) : (
-                        <span className="shimmer">Ted is working…</span>
-                      )}
-                    </div>
-                  )}
-                </MessageScrollerContent>
-              </MessageScrollerViewport>
-              <MessageScrollerButton />
-            </MessageScroller>
-          </MessageScrollerProvider>
-        )}
+        <Transcript items={items} ready={!!ready} state={agent.state} />
         <div className="mx-auto w-full max-w-3xl shrink-0 space-y-3 px-4 pb-4 pt-2 md:px-8">
           <ErrorNotice error={error} />
           {notice && (
@@ -377,33 +568,55 @@ export function Chat() {
             </p>
           )}
           {(pending.length > 0 || agent.held) && (
-            <div className="max-h-40 overflow-y-auto rounded-lg border border-border bg-muted px-3 py-2">
-              <div className="flex items-center justify-between text-xs">
+            <div
+              role="region"
+              aria-label="Pending messages"
+              className="max-h-40 scroll-pt-8 overflow-y-auto rounded-lg border border-border bg-muted"
+            >
+              <div
+                data-slot="pending-queue-header"
+                className="sticky top-0 z-10 flex items-center justify-between bg-muted px-3 py-2 text-xs"
+              >
                 <span className="font-medium">
                   {agent.held ? "Queue held" : "Up next"} · {pending.length}{" "}
                   pending
                 </span>
               </div>
-              {pending.map((m) => (
-                <div
-                  key={m.id}
-                  className="mt-2 flex items-center gap-2 border-t border-border pt-2 text-xs"
-                >
-                  <span className="min-w-0 flex-1 truncate" title={m.text}>
-                    {m.text}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    disabled={busy}
-                    onClick={() =>
-                      void action(() => control.cancel(agentId, m.id))
-                    }
-                  >
-                    Cancel
-                  </Button>
+              {pending.length > 0 && (
+                <div className="px-3 pb-2">
+                  {pending.map((m) => (
+                    <div
+                      key={m.id}
+                      data-pending-message-id={m.id}
+                      className="mt-2 flex items-center gap-2 border-t border-border pt-2 text-xs first:mt-0"
+                    >
+                      <span className="min-w-0 flex-1 truncate" title={m.text}>
+                        {m.text}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        title="Move this message back to the composer"
+                        disabled={busy || !ready || status !== "live"}
+                        onClick={() => requestEdit(m)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        disabled={busy}
+                        onClick={() =>
+                          void action(() => control.cancel(agentId, m.id))
+                        }
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
           <form onSubmit={submit} aria-label="Message composer">
@@ -411,27 +624,11 @@ export function Chat() {
               aria-label="Message input"
               className="has-disabled:opacity-100 has-disabled:bg-transparent dark:has-disabled:bg-input/30"
             >
-              <InputGroupTextarea
-                autoFocus
-                aria-label="Message"
-                placeholder={
-                  agent.settled
-                    ? "Send a message to restore this chat…"
-                    : "Message Ted…"
-                }
-                className="max-h-52 min-h-24"
-                value={draft}
-                onChange={(event) => updateDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (
-                    event.key === "Enter" &&
-                    !event.shiftKey &&
-                    !event.nativeEvent.isComposing
-                  ) {
-                    event.preventDefault();
-                    event.currentTarget.form?.requestSubmit();
-                  }
-                }}
+              <ComposerInput
+                agentId={agentId}
+                inputRef={composerRef}
+                readOnly={editingDraft}
+                settled={agent.settled}
               />
               <InputGroupAddon
                 align="block-end"
@@ -454,17 +651,6 @@ export function Chat() {
                       )
                     }
                   />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label="View context"
-                    title="View context usage and chat settings"
-                    onClick={() => open("panel", "settings")}
-                  >
-                    Context
-                    {contextPercent === undefined ? "" : ` ${contextPercent}%`}
-                  </Button>
                 </div>
                 <div
                   role="group"
@@ -501,53 +687,75 @@ export function Chat() {
                       <Square className="size-3 fill-current" />
                     </Button>
                   )}
-                  <Button
-                    type="submit"
-                    size="icon"
-                    disabled={
-                      busy || !draft.trim() || !ready || status !== "live"
-                    }
-                    aria-label="Send message"
-                  >
-                    <ArrowUp />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="md:hidden"
-                    aria-label="Open sidebar"
-                    onClick={() => open("sidebar", "open")}
-                  >
-                    <Menu />
-                  </Button>
+                  <SendMessageButton
+                    agentId={agentId}
+                    disabled={busy || !ready || status !== "live"}
+                  />
                 </div>
               </InputGroupAddon>
             </InputGroup>
           </form>
-          {project && (
-            <div
-              role="group"
-              aria-label="Project location"
-              className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground"
-            >
-              <span
-                className="min-w-0 max-w-full truncate"
-                title={project.root}
+          <div
+            role="group"
+            aria-label="Composer footer"
+            className="flex min-w-0 items-center gap-3"
+          >
+            {project && (
+              <div
+                role="group"
+                aria-label="Project location"
+                className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground"
               >
-                {project.root}
-              </span>
-              {project.git_branch && (
                 <span
-                  className="flex min-w-0 max-w-full items-center gap-1"
-                  title={project.git_branch}
+                  className="hidden min-w-0 max-w-full truncate md:inline"
+                  title={project.root}
                 >
-                  <GitBranch className="size-3 shrink-0" aria-hidden="true" />
-                  <span className="truncate">{project.git_branch}</span>
+                  {project.root}
                 </span>
-              )}
+                {project.git_branch && (
+                  <span
+                    className="flex min-w-0 max-w-full items-center gap-1"
+                    title={project.git_branch}
+                  >
+                    <GitBranch className="size-3 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{project.git_branch}</span>
+                  </span>
+                )}
+              </div>
+            )}
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label="View context"
+                title={
+                  contextPercent === undefined
+                    ? "Context usage unavailable. View chat settings."
+                    : `Context usage: ${contextPercent}%. View chat settings.`
+                }
+                onClick={() => open("panel", "settings")}
+              >
+                <span className="hidden md:inline">
+                  Context
+                  {contextPercent === undefined ? "" : ` ${contextPercent}%`}
+                </span>
+                <span className="md:hidden">
+                  {contextPercent === undefined ? "—" : `${contextPercent}%`}
+                </span>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="md:hidden"
+                aria-label="Open sidebar"
+                onClick={() => open("sidebar", "open")}
+              >
+                <Menu />
+              </Button>
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>

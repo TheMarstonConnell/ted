@@ -11,16 +11,26 @@ Use the stock shadcn/ui `base-nova` components and neutral theme. Tailwind
 utilities handle layout and Markdown typography; `src/index.css` contains only
 theme tokens, base styles, and reduced-motion support. Avoid app-specific CSS,
 decorative badges, marketing copy, and duplicate metadata in chat chrome.
-Model, effort, and context controls sit on the left of the input’s bottom toolbar,
-using their natural widths. Model and effort use shadcn Select menus, opening
-upward in the composer (with selected-item/trigger overlap disabled). Settings
-dialogs use the same selects with normal downward positioning. Send, Stop,
-Continue, and the mobile menu have a
-separate, non-shrinking area on the right. The settings wrap on narrow screens
-without displacing the action buttons. Model/effort changes save immediately for
-the next turn; Context opens the full usage/settings dialog. The project directory
-and Git branch appear as plain text below the input, with full values in their
-titles if truncated. Queued-message cancellation stays beside each queued message.
+Model and effort controls sit on the left of the input’s bottom toolbar, using
+natural widths. Their shadcn Select menus open upward in the composer (with
+selected-item/trigger overlap disabled). Settings dialogs use the same selects
+with normal downward positioning. Send, Stop, and Continue have a separate,
+non-shrinking area on the right. Settings wrap on narrow screens without
+crowding the action buttons. The message field starts at 48px tall, grows with
+the draft up to 208px, then scrolls without covering the toolbar. Model/effort
+changes save immediately for the next turn.
+
+Context lives in the footer below the input on every screen and opens the full
+usage/settings dialog. Mobile shows only its percentage (or “—” when usage is
+unavailable), while desktop retains the Context label. On mobile, the footer has
+the branch on the left and context plus the sidebar menu on the right; the file
+path is hidden. Desktop shows the directory and branch on the left, with context
+on the right. Full paths and branches remain in their titles if truncated. The
+context control and mobile menu remain available for chats without a project.
+Queued-message cancellation stays beside each queued message. The mobile drawer
+opens with a subtle 200ms slide-up/fade and respects reduced-motion preferences.
+Closing or handing off to another dialog still unmounts it immediately, so modal
+focus/interaction locks are released.
 Running, held, settled, and connection states remain visible
 where they affect the current task. User messages use right-aligned neutral
 bubbles; assistant replies stay unboxed. Sender names are accessible labels rather
@@ -75,6 +85,10 @@ Do not use `vite preview` as the production API proxy; use `ted serve`.
 
 ## Workflow
 
+The sidebar starts with two separate shadcn buttons, with a small gap between
+them: the primary **New chat** action and a smaller, icon-only **New project**
+action with an accessible label and hover title. Project creation is no longer repeated below the chat list.
+
 - **New chat → project picker → empty chat.** The server copies the selected
   project's defaults. There is no title or initial-message form and no web-created
   misc agents. Until a server title exists, the first queued message labels a chat.
@@ -84,19 +98,36 @@ Do not use `vite preview` as the production API proxy; use `ted serve`.
 - Active agents are ordered newest-created first within project groups. Misc
   agents come first. Each sidebar entry shows its project’s current Git branch on
   a second line, with a settle button on the right. Settled chats are in one
-  ungrouped, collapsed section below, with restore buttons. Sidebar actions do
-  not switch chats or discard drafts; failures are shown beside the affected row.
+  ungrouped, collapsed section below, with restore buttons. On hover-capable
+  pointer devices, settle/restore buttons appear only while their row is hovered
+  or keyboard-focused. Entries use the full width at rest, then smoothly shrink
+  by the action’s width and gap on reveal without changing row height. Reduced
+  motion preferences are respected. Touch devices keep the action and its space
+  visible. Sidebar actions do not switch chats or discard drafts; failures are
+  shown beside the affected row. The sidebar has no persistent connection-status
+  footer; connection failures still show the main reconnect notice.
 - Sending to a settled agent explicitly restores it, then submits the message.
   Held messages run first in FIFO order. Restore alone does **not** continue work.
   If submission fails after restoration, the agent stays restored and the draft
   remains available for retry.
-- Pending messages are visible and cancellable. Continue releases held work.
+- The pending queue has a sticky count/header (including “Queue held”) that
+  stays visible while its messages scroll.
+- Pending messages have **Edit** and **Cancel** actions. Edit removes only that
+  queue entry and loads its text into the composer, focusing it without sending.
+  Replacing an existing draft requires confirmation. The composer is briefly
+  read-only while removal is pending; a failed removal leaves the draft intact.
+  Messages that have already started cannot be edited. Resending an edited
+  message is a new submission, with literal leading slashes escaped as needed.
+  Continue releases held work.
   Stop targets the specific running turn, **not** the next turn or the whole queue.
 - `/model`, `/effort`, `/stop`, `/settle`, `/unsettle`, `/continue`, `/help`, and
   `/exit` match the TUI controls. `/exit` returns to the workspace; `//` escapes a
   literal slash. Model/effort changes apply on the next turn.
 - Drafts and retry keys are in memory, scoped per agent. Switching retains drafts;
   refreshing discards them. They are never written to localStorage or the URL.
+  Keystrokes update only the textarea and send-button state, not the whole chat.
+  The transcript and individual message rows are memoized, so existing Markdown
+  is not re-parsed when typing or when new messages arrive.
 - Chat switches start at the bottom, without restoring scroll position. Message
   Scroller follows new output at the bottom and respects scrolling up to read.
 - Desktop sidebar, mobile drawer, system-aware light/dark colors.
@@ -195,10 +226,22 @@ deterministic API/WebSocket fixtures (no real model calls or project writes):
 - [Workflow video](../docs/screenshots/web-control-plane-demo.webm)
 - [Composer controls, desktop](../docs/screenshots/web-composer.png)
 - [Composer controls, mobile](../docs/screenshots/web-composer-mobile.png)
+- [Sticky pending queue header, desktop](../docs/screenshots/web-pending-queue-sticky.png)
+- [Sticky pending queue header, mobile](../docs/screenshots/web-pending-queue-sticky-mobile.png)
+- [Pending message edit action](../docs/screenshots/web-pending-edit.png)
+- [Pending message moved to composer](../docs/screenshots/web-pending-edit-after.png)
+- [Pending message editing, mobile](../docs/screenshots/web-pending-edit-mobile.png)
+- [Pending message edit workflow video](../docs/screenshots/web-pending-edit-demo.webm)
 - [Model menu, desktop](../docs/screenshots/web-model-select.png)
 - [Model menu, mobile](../docs/screenshots/web-model-select-mobile.png)
 - [Effort menu, mobile](../docs/screenshots/web-effort-select-mobile.png)
 - [Sidebar chat rows, desktop](../docs/screenshots/web-sidebar-chats.png)
+- [Sidebar full-width entries](../docs/screenshots/web-sidebar-full-width.png)
+- [Sidebar hover actions](../docs/screenshots/web-sidebar-hover-actions.png)
+- [Sidebar reveal workflow video](../docs/screenshots/web-sidebar-hover-demo.webm)
+- [Mobile drawer entry animation](../docs/screenshots/web-mobile-drawer-demo.webm)
+- [Sidebar creation controls, desktop](../docs/screenshots/web-sidebar-create.png)
+- [Sidebar creation controls, mobile](../docs/screenshots/web-sidebar-create-mobile.png)
 - [Sidebar chat rows, mobile](../docs/screenshots/web-sidebar-chats-mobile.png)
 - [Compact tool spacing, desktop](../docs/screenshots/web-tool-spacing.png)
 - [Compact tool spacing, mobile](../docs/screenshots/web-tool-spacing-mobile.png)

@@ -5,6 +5,7 @@ import {
   ArchiveRestore,
   ChevronRight,
   GitBranch,
+  FolderPlus,
   Plus,
   Settings2,
   X,
@@ -51,7 +52,7 @@ export function AgentLink({ agent }: { agent: Agent }) {
   };
   return (
     <div data-agent-id={agent.id} className="space-y-1">
-      <div className="flex items-center gap-1">
+      <div className="group/agent flex items-center gap-1 transition-[gap] duration-150 [@media(hover:hover)_and_(pointer:fine)]:gap-0 hover:gap-1 focus-within:gap-1">
         <Button
           variant={agentId === agent.id ? "secondary" : "ghost"}
           className="h-auto min-w-0 flex-1 justify-start py-2 font-normal"
@@ -96,6 +97,7 @@ export function AgentLink({ agent }: { agent: Agent }) {
           type="button"
           variant="ghost"
           size="icon"
+          className="overflow-hidden border-x-0 [@media(hover:hover)_and_(pointer:fine)]:w-0 group-hover/agent:w-8 group-focus-within/agent:w-8 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:disabled:opacity-0 group-hover/agent:opacity-100 group-hover/agent:disabled:opacity-50 group-focus-within/agent:opacity-100 group-focus-within/agent:disabled:opacity-50"
           aria-label={`${agent.settled ? "Restore" : "Settle"} chat: ${title}`}
           title={agent.settled ? "Restore chat" : "Settle chat"}
           disabled={busy || status !== "live"}
@@ -109,7 +111,7 @@ export function AgentLink({ agent }: { agent: Agent }) {
   );
 }
 function SidebarContent() {
-  const { agents, projects, status, loaded } = useControl();
+  const { agents, projects, loaded } = useControl();
   const { params, open, close, openProjectSettings } = usePanel();
   const groups = groupAgents(Object.values(agents), projects);
   return (
@@ -130,12 +132,27 @@ function SidebarContent() {
         )}
       </div>
       <div className="px-3 pb-4">
-        <Button
-          className="w-full justify-start"
-          onClick={() => open("dialog", "new-agent")}
+        <div
+          role="group"
+          aria-label="Create chat or project"
+          className="flex w-full gap-2"
         >
-          <Plus /> New chat
-        </Button>
+          <Button
+            className="min-w-0 flex-1 justify-start"
+            onClick={() => open("dialog", "new-agent")}
+          >
+            <Plus /> New chat
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="New project"
+            title="New project"
+            onClick={() => open("dialog", "new-project")}
+          >
+            <FolderPlus />
+          </Button>
+        </div>
       </div>
       <nav
         aria-label="Agents"
@@ -188,13 +205,6 @@ function SidebarContent() {
             Create a project to start your first chat.
           </p>
         )}
-        <Button
-          variant="ghost"
-          className="w-full justify-start"
-          onClick={() => open("dialog", "new-project")}
-        >
-          <Plus /> New project
-        </Button>
         <Collapsible>
           <CollapsibleTrigger
             render={
@@ -216,16 +226,6 @@ function SidebarContent() {
           </CollapsibleContent>
         </Collapsible>
       </nav>
-      <p
-        role="status"
-        className="border-t px-4 py-3 text-xs text-muted-foreground"
-      >
-        {status === "live"
-          ? "Connected to server"
-          : status === "connecting"
-            ? "Connecting…"
-            : "Disconnected"}
-      </p>
     </div>
   );
 }
@@ -234,6 +234,7 @@ export function Sidebar() {
   // Unmount the drawer on navigation/overlay hand-off. Keeping a closed root
   // while re-keying its portalled content can leave a modal focus/interaction
   // lock behind. There must be only one active modal owner at a time.
+  // Entry keyframes animate this initially-open mount without delaying cleanup.
   const drawerOpen =
     params.get("sidebar") === "open" &&
     !params.has("panel") &&
@@ -252,7 +253,8 @@ export function Sidebar() {
         >
           <SheetContent
             side="bottom"
-            className="overflow-hidden rounded-t-xl bg-sidebar p-0 pb-[env(safe-area-inset-bottom)] data-[side=bottom]:h-[80dvh]"
+            overlayClassName="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
+            className="overflow-hidden rounded-t-xl bg-sidebar p-0 pb-[env(safe-area-inset-bottom)] data-[side=bottom]:h-[80dvh] data-starting-style:opacity-100 data-[side=bottom]:data-starting-style:translate-y-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-200 motion-safe:ease-out"
             showCloseButton={false}
           >
             <SheetTitle className="sr-only">Workspace</SheetTitle>

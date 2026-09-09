@@ -100,6 +100,28 @@ async function workspace(page: Page) {
         agents[id].settled = body.settled;
         inventory(id);
       }
+      if (operation === "messages" && method === "DELETE") {
+        const messageId = decodeURIComponent(url.pathname.split("/")[5]);
+        const message = events[id].findLast(
+          (event) =>
+            (event.type.startsWith("message.") ||
+              event.type.startsWith("turn.")) &&
+            event.data.id === messageId,
+        )?.data;
+        if (!message || !["pending", "cancelled"].includes(message.status)) {
+          await route.fulfill({
+            status: message ? 409 : 404,
+            json: {
+              error: { message: "Only pending messages can be removed" },
+            },
+          });
+          return;
+        }
+        if (message.status === "pending")
+          emit(id, "message.cancelled", { ...message, status: "cancelled" });
+        await route.fulfill({ status: 204 });
+        return;
+      }
       if (operation === "messages" && method === "POST") {
         expect(agents[id].settled).toBe(false);
         expect(request.headers()["idempotency-key"]).toBeTruthy();
@@ -142,7 +164,12 @@ test("complete project-first workflow, settlement, Markdown, drafts and deep lin
   page.on("pageerror", (error) => errors.push(error.message));
   const { agents } = await workspace(page);
   await page.goto("/");
-  await expect(page.getByText("Connected to server")).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "harness /srv/harness", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Connected to server", { exact: true }),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page.getByRole("button", { name: "harness /srv/harness" }).click();
   await expect(page).toHaveURL(/\/agents\/a1$/);
@@ -311,7 +338,12 @@ for (const colorScheme of ["light", "dark"] as const) {
     await expect(
       page.getByRole("heading", { name: "Projects", exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("Connected to server")).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "harness /srv/harness", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("Connected to server", { exact: true }),
+    ).toHaveCount(0);
     await expect(page.locator('[data-slot="badge"]')).toHaveCount(0);
     await expect(
       page.getByText(/CONTROL PLANE|YOUR AGENTS|Let’s build something/),
@@ -626,8 +658,28 @@ test("mobile composer navigation uses a bottom sheet", async ({ page }) => {
   const sendBox = (await page
     .getByRole("button", { name: "Send message", exact: true })
     .boundingBox())!;
-  expect(menuBox.y).toBe(sendBox.y);
-  expect(sendBox.x + sendBox.width).toBeLessThan(menuBox.x);
+  const input = page.getByRole("group", { name: "Message input", exact: true });
+  const inputBox = (await input.boundingBox())!;
+  const location = page.getByRole("group", {
+    name: "Project location",
+    exact: true,
+  });
+  const locationBox = (await location.boundingBox())!;
+  expect(menuBox.y).toBeGreaterThan(inputBox.y + inputBox.height);
+  expect(menuBox.y).toBeGreaterThan(sendBox.y + sendBox.height);
+  const contextBox = (await page
+    .getByRole("group", { name: "Composer footer", exact: true })
+    .getByRole("button", { name: "View context", exact: true })
+    .boundingBox())!;
+  expect(locationBox.x + locationBox.width).toBeLessThan(contextBox.x);
+  expect(contextBox.x + contextBox.width).toBeLessThan(menuBox.x);
+  expect(menuBox.x + menuBox.width).toBe(inputBox.x + inputBox.width);
+  await expect(
+    location.getByText("/srv/harness", { exact: true }),
+  ).toBeHidden();
+  await expect(
+    input.getByRole("button", { name: "Open sidebar", exact: true }),
+  ).toHaveCount(0);
   await page
     .getByRole("textbox", { name: "Message", exact: true })
     .fill("Unsent draft");
@@ -794,7 +846,7 @@ test("failed submission restores an untouched draft", async ({ page }) => {
 });
 
 for (const width of [1440, 390, 320]) {
-  test(`composer keeps settings left and actions right with the directory below (${width}px)`, async ({
+  test(`composer keeps model and effort inside and context in the footer (${width}px)`, async ({
     page,
   }, testInfo) => {
     const { agents, emit } = await workspace(page);
@@ -847,7 +899,11 @@ for (const width of [1440, 390, 320]) {
     });
     const model = settings.getByLabel("Model", { exact: true });
     const effort = settings.getByLabel("Reasoning effort", { exact: true });
-    const context = settings.getByRole("button", {
+    const footer = page.getByRole("group", {
+      name: "Composer footer",
+      exact: true,
+    });
+    const context = footer.getByRole("button", {
       name: "View context",
       exact: true,
     });
@@ -855,15 +911,22 @@ for (const width of [1440, 390, 320]) {
       name: "Message",
       exact: true,
     });
+    await expect
+      .poll(async () => (await composer.boundingBox())!.height)
+      .toBe(48);
     await expect(model).toHaveText("Test model");
     await expect(effort).toHaveText("medium");
-    await expect(context).toHaveText("Context");
+    await expect(context).toHaveText(width < 768 ? "—" : "Context", {
+      useInnerText: true,
+    });
     const location = page.getByRole("group", {
       name: "Project location",
       exact: true,
     });
-    await expect(location).toContainText("/srv/harness");
-    await expect(location).toContainText("main");
+    const directory = location.getByText("/srv/harness", { exact: true });
+    if (width < 768) await expect(directory).toBeHidden();
+    else await expect(directory).toBeVisible();
+    await expect(location.getByText("main", { exact: true })).toBeVisible();
     expect((await model.boundingBox())!.width).toBeLessThan(200);
     expect((await effort.boundingBox())!.width).toBeLessThan(130);
     const initialSendX = (await actions
@@ -967,7 +1030,9 @@ for (const width of [1440, 390, 320]) {
       status: "pending",
       created_at: new Date().toISOString(),
     });
-    await expect(context).toHaveText("Context 25%");
+    await expect(context).toHaveText(width < 768 ? "25%" : "Context 25%", {
+      useInnerText: true,
+    });
     await context.click();
     const dialog = page.getByRole("dialog", {
       name: "Agent settings",
@@ -1015,6 +1080,12 @@ for (const width of [1440, 390, 320]) {
     // A long, scrollable draft must not overlap the bottom action row.
     await composer.fill("A line of text\n".repeat(30));
     await composer.press("End");
+    await expect
+      .poll(async () => (await composer.boundingBox())!.height)
+      .toBe(208);
+    expect(
+      await composer.evaluate((e) => e.scrollHeight > e.clientHeight),
+    ).toBe(true);
     const inputBox = (await input.boundingBox())!;
     const textBox = (await composer.boundingBox())!;
     const actionsBox = (await actions.boundingBox())!;
@@ -1032,7 +1103,7 @@ for (const width of [1440, 390, 320]) {
     expect((await location.boundingBox())!.y).toBeGreaterThan(
       inputBox.y + inputBox.height,
     );
-    for (const field of [model, effort, context]) {
+    for (const field of [model, effort]) {
       const box = (await field.boundingBox())!;
       expect(box.x + box.width).toBeLessThan(actionsBox.x);
     }
@@ -1043,16 +1114,33 @@ for (const width of [1440, 390, 320]) {
         ),
       ).toBeLessThan(1);
     }
-    for (const name of [
-      "Send message",
-      "Stop",
-      ...(width < 768 ? ["Open sidebar"] : []),
-    ]) {
+    for (const name of ["Send message", "Stop"]) {
       const button = actions.getByRole("button", { name, exact: true });
       await expect(button).toBeInViewport();
       const box = (await button.boundingBox())!;
       expect(box.x).toBeGreaterThan(inputBox.x + inputBox.width / 2);
       expect(box.x + box.width).toBeLessThan(inputBox.x + inputBox.width);
+    }
+    await expect(
+      actions.getByRole("button", { name: "Open sidebar", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      input.getByRole("button", { name: "View context", exact: true }),
+    ).toHaveCount(0);
+    const contextBox = (await context.boundingBox())!;
+    expect(contextBox.y).toBeGreaterThan(inputBox.y + inputBox.height);
+    if (width < 768) {
+      const menu = footer.getByRole("button", {
+        name: "Open sidebar",
+        exact: true,
+      });
+      await expect(menu).toBeInViewport();
+      const menuBox = (await menu.boundingBox())!;
+      const locationBox = (await location.boundingBox())!;
+      expect(menuBox.y).toBeGreaterThan(inputBox.y + inputBox.height);
+      expect(locationBox.x + locationBox.width).toBeLessThan(contextBox.x);
+      expect(contextBox.x + contextBox.width).toBeLessThan(menuBox.x);
+      expect(menuBox.x + menuBox.width).toBe(inputBox.x + inputBox.width);
     }
     await expect(model).toBeInViewport();
     await expect(effort).toBeInViewport();
@@ -1062,6 +1150,11 @@ for (const width of [1440, 390, 320]) {
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
+    await composer.fill("Keep this draft while changing settings");
+    await composer.fill("");
+    await expect
+      .poll(async () => (await composer.boundingBox())!.height)
+      .toBe(48);
     await composer.fill("Keep this draft while changing settings");
     const path = testInfo.outputPath(`composer-${width}.png`);
     await page.screenshot({ path });
@@ -1310,6 +1403,9 @@ for (const width of [1440, 390]) {
       name: "Settle chat: Second chat",
       exact: true,
     });
+    await second.getByRole("link").hover();
+    await expect(settle).toHaveCSS("opacity", "1");
+    await expect(settle).toHaveCSS("width", "32px");
     const linkBox = (await second.getByRole("link").boundingBox())!;
     const buttonBox = (await settle.boundingBox())!;
     expect(buttonBox.x).toBeGreaterThanOrEqual(linkBox.x + linkBox.width);
@@ -1344,6 +1440,15 @@ for (const width of [1440, 390]) {
     });
     await settle.click();
     await expect(settle).toBeDisabled();
+    await sidebar
+      .getByRole("button", { name: "Settled chats", exact: true })
+      .focus();
+    await sidebar
+      .getByRole("button", { name: "Settled chats", exact: true })
+      .hover();
+    await expect(settle).toHaveCSS("opacity", "0");
+    await second.getByRole("link").hover();
+    await expect(settle).toHaveCSS("opacity", "0.5");
     await settle.evaluate((button: HTMLButtonElement) => button.click());
     expect(calls).toBe(1);
     finish();
@@ -1354,6 +1459,7 @@ for (const width of [1440, 390]) {
       .getByRole("button", { name: "Settled chats", exact: true })
       .click();
     await expect(second).toContainText(branch);
+    await second.getByRole("link").hover();
     await second
       .getByRole("button", { name: "Restore chat: Second chat", exact: true })
       .click();
@@ -1375,6 +1481,7 @@ for (const width of [1440, 390]) {
         });
       } else await route.fallback();
     });
+    await first.getByRole("link").hover();
     await first
       .getByRole("button", { name: "Settle chat: First chat", exact: true })
       .click();
@@ -1389,9 +1496,11 @@ for (const width of [1440, 390]) {
     ).toBeEnabled();
     expect(agents.a1.settled).toBe(false);
     await page.unroute("**/v1/agents/a1");
+    await first.getByRole("link").hover();
     await first
       .getByRole("button", { name: "Settle chat: First chat", exact: true })
       .click();
+    await first.getByRole("link").hover();
     await expect(
       first.getByRole("button", {
         name: "Restore chat: First chat",
@@ -1745,4 +1854,993 @@ test("portrait and failed images remain usable in user-message previews", async 
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+});
+
+test("sidebar chats use full width and slide to reveal settle actions on hover or keyboard focus", async ({
+  page,
+}, testInfo) => {
+  const { agents } = await workspace(page);
+  for (let i = 0; i < 2; i++) {
+    await page.goto("/?dialog=new-agent");
+    await page
+      .getByRole("button", { name: "harness /srv/harness", exact: true })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/agents/a${i + 1}$`));
+  }
+  const draft = page.getByRole("textbox", { name: "Message", exact: true });
+  await draft.fill("Keep my draft");
+  await draft.hover();
+  const sidebar = page.locator("aside");
+  const first = sidebar.locator('[data-agent-id="a1"]');
+  const second = sidebar.locator('[data-agent-id="a2"]');
+  const firstAction = first.getByRole("button", { name: /^Settle chat:/ });
+  const secondAction = second.getByRole("button", { name: /^Settle chat:/ });
+  await expect(firstAction).toHaveCSS("opacity", "0");
+  await expect(secondAction).toHaveCSS("opacity", "0");
+  await expect(firstAction).toHaveCSS("width", "0px");
+  await expect(secondAction).toHaveCSS("width", "0px");
+  const before = (await first.getByRole("link").boundingBox())!;
+  expect(before.width).toBe((await first.boundingBox())!.width);
+  const fullWidthPath = testInfo.outputPath("sidebar-full-width.png");
+  await page.screenshot({ path: fullWidthPath });
+  await testInfo.attach("sidebar-full-width", {
+    path: fullWidthPath,
+    contentType: "image/png",
+  });
+  await first.getByRole("link").hover();
+  await expect(firstAction).toHaveCSS("opacity", "1");
+  await expect(secondAction).toHaveCSS("opacity", "0");
+  await expect(firstAction).toHaveCSS("width", "32px");
+  await expect
+    .poll(async () => (await first.getByRole("link").boundingBox())!.width)
+    .toBeCloseTo(before.width - 36, 0);
+  const after = (await first.getByRole("link").boundingBox())!;
+  expect(after.y).toBe(before.y);
+  expect(after.height).toBe(before.height);
+  const actionBox = (await firstAction.boundingBox())!;
+  expect(actionBox.x + actionBox.width).toBe(before.x + before.width);
+  // Moving from the link onto its action must not hide the action.
+  await firstAction.hover();
+  await expect(firstAction).toHaveCSS("opacity", "1");
+  const path = testInfo.outputPath("sidebar-hover-actions.png");
+  await page.screenshot({ path });
+  await testInfo.attach("sidebar-hover-actions", {
+    path,
+    contentType: "image/png",
+  });
+  await draft.hover();
+  await expect(firstAction).toHaveCSS("opacity", "0");
+  await expect(firstAction).toHaveCSS("width", "0px");
+  await expect
+    .poll(async () => (await first.getByRole("link").boundingBox())!.width)
+    .toBeCloseTo(before.width, 0);
+  await first.getByRole("link").focus();
+  await expect(firstAction).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Tab");
+  await expect(firstAction).toBeFocused();
+  await expect(firstAction).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Enter");
+  await expect(first).toBeHidden();
+  expect(agents.a1.settled).toBe(true);
+  await expect(page).toHaveURL(/\/agents\/a2$/);
+  await sidebar
+    .getByRole("button", { name: "Settled chats", exact: true })
+    .click();
+  await draft.focus();
+  await draft.hover();
+  const restore = first.getByRole("button", { name: /^Restore chat:/ });
+  await expect(restore).toHaveCSS("opacity", "0");
+  await first.getByRole("link").hover();
+  await expect(restore).toHaveCSS("opacity", "1");
+  await restore.click();
+  await expect(firstAction).toBeEnabled();
+  expect(agents.a1.settled).toBe(false);
+  await expect(draft).toHaveValue("Keep my draft");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await draft.focus();
+  await draft.hover();
+  await expect(firstAction).toHaveCSS("width", "0px");
+  expect(
+    await firstAction.evaluate((e) =>
+      parseFloat(getComputedStyle(e).transitionDuration),
+    ),
+  ).toBeLessThan(0.001);
+  await first.getByRole("link").focus();
+  await expect(firstAction).toHaveCSS("width", "32px");
+});
+
+for (const width of [390, 1440]) {
+  test.describe(`touch sidebar actions (${width}px)`, () => {
+    test.use({ hasTouch: true, viewport: { width, height: 960 } });
+    test("settle and restore remain visible without hover", async ({
+      page,
+    }, testInfo) => {
+      const { agents } = await workspace(page);
+      await page.goto("/?dialog=new-agent");
+      await page
+        .getByRole("button", { name: "harness /srv/harness", exact: true })
+        .tap();
+      await expect(page).toHaveURL(/\/agents\/a1$/);
+      expect(
+        await page.evaluate(
+          () => matchMedia("(hover: hover) and (pointer: fine)").matches,
+        ),
+      ).toBe(false);
+      if (width < 768)
+        await page
+          .getByRole("button", { name: "Open sidebar", exact: true })
+          .tap();
+      const sidebar =
+        width < 768
+          ? page.getByRole("dialog", { name: "Workspace", exact: true })
+          : page.locator("aside");
+      const row = sidebar.locator('[data-agent-id="a1"]');
+      const settle = row.getByRole("button", { name: /^Settle chat:/ });
+      await expect(settle).toHaveCSS("opacity", "1");
+      await expect(settle).toHaveCSS("width", "32px");
+      const rowBox = (await row.boundingBox())!;
+      const linkBox = (await row.getByRole("link").boundingBox())!;
+      expect(rowBox.width - linkBox.width).toBe(36);
+      const path = testInfo.outputPath(`sidebar-touch-actions-${width}.png`);
+      await page.screenshot({ path });
+      await testInfo.attach("sidebar-touch-actions", {
+        path,
+        contentType: "image/png",
+      });
+      await settle.tap();
+      await expect(row).toBeHidden();
+      expect(agents.a1.settled).toBe(true);
+      await sidebar
+        .getByRole("button", { name: "Settled chats", exact: true })
+        .tap();
+      const restore = row.getByRole("button", { name: /^Restore chat:/ });
+      await expect(restore).toHaveCSS("opacity", "1");
+      await restore.tap();
+      await expect(settle).toBeEnabled();
+      await expect(settle).toHaveCSS("opacity", "1");
+      expect(agents.a1.settled).toBe(false);
+    });
+  });
+}
+
+for (const width of [1440, 390]) {
+  test.describe(`sidebar create buttons (${width}px)`, () => {
+    test.use({ viewport: { width, height: 960 }, hasTouch: width < 768 });
+    test("separates the primary chat action from icon-only project creation", async ({
+      page,
+    }, testInfo) => {
+      await workspace(page);
+      await page.goto("/");
+      await expect(
+        page.getByRole("link", { name: "harness /srv/harness", exact: true }),
+      ).toBeVisible();
+      const openSidebar = async () => {
+        if (width < 768)
+          await page
+            .getByRole("button", { name: "Open sidebar", exact: true })
+            .tap();
+      };
+      await openSidebar();
+      const sidebar =
+        width < 768
+          ? page.getByRole("dialog", { name: "Workspace", exact: true })
+          : page.locator("aside");
+      const group = sidebar.getByRole("group", {
+        name: "Create chat or project",
+        exact: true,
+      });
+      const chat = group.getByRole("button", { name: "New chat", exact: true });
+      const project = group.getByRole("button", {
+        name: "New project",
+        exact: true,
+      });
+      await expect(group.getByRole("button")).toHaveCount(2);
+      await expect(chat).toHaveText("New chat");
+      await expect(project).toHaveText("");
+      await expect(project).toHaveAttribute("title", "New project");
+      await expect(
+        sidebar
+          .getByRole("navigation", { name: "Agents", exact: true })
+          .getByRole("button", { name: "New project", exact: true }),
+      ).toHaveCount(0);
+      const chatBox = (await chat.boundingBox())!;
+      const projectBox = (await project.boundingBox())!;
+      expect(projectBox.width).toBe(projectBox.height);
+      expect(chatBox.width).toBeGreaterThan(projectBox.width);
+      expect(chatBox.height).toBe(projectBox.height);
+      expect(chatBox.y).toBe(projectBox.y);
+      expect(projectBox.x - chatBox.x - chatBox.width).toBe(8);
+      await expect(project).toHaveCSS("border-left-width", "1px");
+      for (const button of [chat, project]) {
+        expect(
+          await button.evaluate((element) => {
+            const style = getComputedStyle(element);
+            return [
+              style.borderTopLeftRadius,
+              style.borderTopRightRadius,
+              style.borderBottomLeftRadius,
+              style.borderBottomRightRadius,
+            ].every((radius) => parseFloat(radius) > 0);
+          }),
+        ).toBe(true);
+      }
+      const path = testInfo.outputPath(`sidebar-create-${width}.png`);
+      await page.screenshot({ path });
+      await testInfo.attach("sidebar-create", {
+        path,
+        contentType: "image/png",
+      });
+      if (width < 768) await project.tap();
+      else {
+        await chat.focus();
+        await page.keyboard.press("Tab");
+        await expect(project).toBeFocused();
+        await page.keyboard.press("Enter");
+      }
+      const form = page.getByRole("dialog", {
+        name: "Create a project",
+        exact: true,
+      });
+      await expect(form).toBeVisible();
+      await expect(page.getByRole("dialog")).toHaveCount(1);
+      await expect(form.getByLabel("Server directory")).toBeVisible();
+      await form.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await openSidebar();
+      if (width < 768) await chat.tap();
+      else await chat.click();
+      await expect(
+        page.getByRole("dialog", { name: "New chat", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("dialog")).toHaveCount(1);
+      await page
+        .getByRole("button", { name: "harness /srv/harness", exact: true })
+        .click();
+      await expect(page).toHaveURL(/\/agents\/a1$/);
+      await expect(
+        page.getByRole("textbox", { name: "Message", exact: true }),
+      ).toBeVisible();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+    });
+  });
+}
+
+test("connection failures remain actionable without a persistent sidebar connection footer", async ({
+  page,
+}) => {
+  await workspace(page);
+  let available = false;
+  await page.route("**/v1/projects", async (route) => {
+    if (available) await route.fallback();
+    else
+      await route.fulfill({
+        status: 503,
+        json: { error: { message: "Server unavailable" } },
+      });
+  });
+  await page.goto("/");
+  await expect(
+    page.getByText("Could not connect to the server.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator("aside").getByRole("status")).toHaveCount(0);
+  available = true;
+  await page.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await expect(
+    page.getByRole("link", { name: "harness /srv/harness", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Reconnect", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Connected to server", { exact: true }),
+  ).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open sidebar", exact: true }).click();
+  const sidebar = page.getByRole("dialog", { name: "Workspace", exact: true });
+  await expect(
+    sidebar.getByRole("navigation", { name: "Agents", exact: true }),
+  ).toBeVisible();
+  await expect(sidebar.getByRole("status")).toHaveCount(0);
+  await expect(
+    sidebar.getByText(/Connected to server|Connecting…|Disconnected/),
+  ).toHaveCount(0);
+});
+
+test.describe("mobile composer footer", () => {
+  test.use({ hasTouch: true, viewport: { width: 320, height: 740 } });
+  test("keeps navigation reachable with long project details or no project", async ({
+    page,
+  }) => {
+    const { agents, emit } = await workspace(page);
+    const root = `/srv/${"a-long-project-directory/".repeat(6)}harness`;
+    const branch = `feature/${"a-long-branch-name-".repeat(6)}`;
+    const project = {
+      id: "p",
+      name: "harness",
+      root,
+      git_branch: branch,
+      defaults: { model: "test/model", effort: "medium" },
+    };
+    await page.route("**/v1/projects", (route) =>
+      route.fulfill({ json: [project] }),
+    );
+    await page.route("**/v1/projects/p", (route) =>
+      route.fulfill({ json: project }),
+    );
+    await page.goto("/?dialog=new-agent");
+    await page
+      .getByRole("button", { name: `harness ${root}`, exact: true })
+      .tap();
+    const draft = page.getByRole("textbox", { name: "Message", exact: true });
+    await draft.fill("Keep this mobile draft");
+    const footer = page.getByRole("group", {
+      name: "Composer footer",
+      exact: true,
+    });
+    const menu = footer.getByRole("button", {
+      name: "Open sidebar",
+      exact: true,
+    });
+    const location = footer.getByRole("group", {
+      name: "Project location",
+      exact: true,
+    });
+    const context = page.getByRole("button", {
+      name: "View context",
+      exact: true,
+    });
+    await expect(context).toHaveText("—", { useInnerText: true });
+    await expect(location.getByText(root, { exact: true })).toHaveAttribute(
+      "title",
+      root,
+    );
+    await expect(
+      location.locator("[title]").filter({ hasText: branch }),
+    ).toHaveAttribute("title", branch);
+    const menuBox = (await menu.boundingBox())!;
+    const locationBox = (await location.boundingBox())!;
+    const contextBox = (await context.boundingBox())!;
+    expect(locationBox.x + locationBox.width).toBeLessThan(contextBox.x);
+    expect(contextBox.x + contextBox.width).toBeLessThan(menuBox.x);
+    await expect(location.getByText(root, { exact: true })).toBeHidden();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await expect(menu).toBeInViewport();
+    agents.a1.context_usage = {
+      model: "test/model",
+      input_tokens: 0,
+      output_tokens: 0,
+      estimated_tokens: 0,
+      context_window: 100000,
+      known: true,
+      estimated: true,
+    };
+    emit("a1", "output", { ResponseType: "usage", Content: "" });
+    await expect(context).toHaveText("0%", { useInnerText: true });
+    await context.tap();
+    await expect(
+      page.getByRole("dialog", { name: "Agent settings", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Close", exact: true }).tap();
+    await menu.tap();
+    await expect(
+      page.getByRole("dialog", { name: "Workspace", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Close sidebar", exact: true })
+      .tap();
+    await expect(draft).toHaveValue("Keep this mobile draft");
+    agents.a1.project_id = "";
+    emit("a1", "output", { ResponseType: "usage", Content: "" });
+    await expect(location).toHaveCount(0);
+    await expect(menu).toBeVisible();
+    await menu.tap();
+    await expect(
+      page.getByRole("dialog", { name: "Workspace", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Close sidebar", exact: true })
+      .tap();
+    await expect(draft).toHaveValue("Keep this mobile draft");
+    await page.setViewportSize({ width: 1440, height: 960 });
+    await expect(menu).toBeHidden();
+    await expect(context).toHaveText("Context 0%", { useInnerText: true });
+    await expect(context).toBeVisible();
+    await expect(footer).toBeVisible();
+  });
+});
+
+for (const width of [1440, 390]) {
+  test.describe(`edit pending messages (${width}px)`, () => {
+    test.use({ viewport: { width, height: 960 }, hasTouch: width < 768 });
+    test("moves only the chosen message into the composer without resending", async ({
+      page,
+    }, testInfo) => {
+      const { agents, events, emit } = await workspace(page);
+      await page.goto("/?dialog=new-agent");
+      await page
+        .getByRole("button", { name: "harness /srv/harness", exact: true })
+        .click();
+      agents.a1.state = "running";
+      emit("a1", "turn.started", {
+        id: "current",
+        text: "Current work",
+        status: "running",
+        created_at: new Date().toISOString(),
+      });
+      const message = {
+        id: "edit-me",
+        text: "Review the changes\n\nKeep the tests focused.",
+        status: "pending",
+        created_at: new Date().toISOString(),
+      };
+      emit("a1", "message.queued", message);
+      emit("a1", "message.queued", {
+        ...message,
+        id: "keep-queued",
+        text: "Another pending message",
+      });
+      const mutations: string[] = [];
+      page.on("request", (request) => {
+        if (
+          request.method() !== "GET" &&
+          request.url().includes("/v1/agents/a1/")
+        )
+          mutations.push(
+            `${request.method()} ${new URL(request.url()).pathname}`,
+          );
+      });
+      const row = page.locator('[data-pending-message-id="edit-me"]');
+      const edit = row.getByRole("button", { name: "Edit", exact: true });
+      await expect(edit).toBeEnabled();
+      const before = testInfo.outputPath(`pending-edit-before-${width}.png`);
+      await page.screenshot({ path: before });
+      await testInfo.attach("pending-edit-before", {
+        path: before,
+        contentType: "image/png",
+      });
+      if (width < 768) await edit.tap();
+      else await edit.click();
+      const draft = page.getByRole("textbox", { name: "Message", exact: true });
+      await expect(row).toHaveCount(0);
+      await expect(draft).toHaveValue(message.text);
+      await expect(draft).toBeFocused();
+      await expect(draft).toBeEditable();
+      await expect(
+        page.locator('[data-pending-message-id="keep-queued"]'),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Stop", exact: true }),
+      ).toBeVisible();
+      expect(mutations).toEqual(["DELETE /v1/agents/a1/messages/edit-me"]);
+      expect(
+        events.a1.find((event) => event.type === "message.cancelled").data.id,
+      ).toBe("edit-me");
+      await expect(
+        page
+          .getByRole("region", { name: "Messages", exact: true })
+          .getByText(message.text, { exact: true }),
+      ).toHaveCount(0);
+      const after = testInfo.outputPath(`pending-edit-after-${width}.png`);
+      await page.screenshot({ path: after });
+      await testInfo.attach("pending-edit-after", {
+        path: after,
+        contentType: "image/png",
+      });
+      await draft.fill("The revised message");
+      await page
+        .getByRole("button", { name: "Send message", exact: true })
+        .click();
+      await expect(
+        page
+          .getByRole("article", { name: "Your message", exact: true })
+          .filter({ hasText: "The revised message" }),
+      ).toBeVisible();
+      await expect(draft).toHaveValue("");
+      expect(mutations).toEqual([
+        "DELETE /v1/agents/a1/messages/edit-me",
+        "POST /v1/agents/a1/messages",
+      ]);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+    });
+  });
+}
+
+test("editing pending work asks before replacing a draft and keeps it intact if cancellation fails", async ({
+  page,
+}) => {
+  const { emit } = await workspace(page);
+  await page.goto("/?dialog=new-agent");
+  await page
+    .getByRole("button", { name: "harness /srv/harness", exact: true })
+    .click();
+  const message = {
+    id: "edit-confirm",
+    text: "Queued work",
+    status: "pending",
+    created_at: new Date().toISOString(),
+  };
+  emit("a1", "message.queued", message);
+  const edit = page
+    .locator('[data-pending-message-id="edit-confirm"]')
+    .getByRole("button", { name: "Edit", exact: true });
+  const draft = page.getByRole("textbox", { name: "Message", exact: true });
+  await draft.fill("My current draft");
+  let deletes = 0;
+  await page.route("**/v1/agents/a1/messages/edit-confirm", async (route) => {
+    deletes++;
+    await route.fulfill({
+      status: 503,
+      json: { error: { message: "Could not remove pending message" } },
+    });
+  });
+  await edit.click();
+  const confirmation = page.getByRole("dialog", {
+    name: "Replace current draft?",
+    exact: true,
+  });
+  await expect(confirmation).toBeVisible();
+  await confirmation
+    .getByRole("button", { name: "Keep draft", exact: true })
+    .click();
+  await expect(draft).toHaveValue("My current draft");
+  expect(deletes).toBe(0);
+  await edit.click();
+  await confirmation
+    .getByRole("button", { name: "Edit message", exact: true })
+    .click();
+  await expect(confirmation).toHaveCount(0);
+  await expect(page.getByRole("alert")).toContainText(
+    "Could not remove pending message",
+  );
+  await expect(draft).toHaveValue("My current draft");
+  await expect(draft).toBeEditable();
+  await expect(edit).toBeEnabled();
+  expect(deletes).toBe(1);
+  await page.unroute("**/v1/agents/a1/messages/edit-confirm");
+  await edit.click();
+  await confirmation
+    .getByRole("button", { name: "Edit message", exact: true })
+    .click();
+  await expect(draft).toHaveValue(message.text);
+  await expect(edit).toHaveCount(0);
+  await expect(draft).toBeFocused();
+});
+
+test("a message that starts while editing cannot be removed or copied over the existing draft", async ({
+  page,
+}) => {
+  const { agents, emit } = await workspace(page);
+  await page.goto("/?dialog=new-agent");
+  await page
+    .getByRole("button", { name: "harness /srv/harness", exact: true })
+    .click();
+  const message = {
+    id: "edit-race",
+    text: "Queued work",
+    status: "pending",
+    created_at: new Date().toISOString(),
+  };
+  emit("a1", "message.queued", message);
+  const draft = page.getByRole("textbox", { name: "Message", exact: true });
+  await draft.fill("Do not overwrite this draft");
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  await page.route("**/v1/agents/a1/messages/edit-race", async (route) => {
+    await gate;
+    await route.fallback();
+  });
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Edit message", exact: true })
+    .click();
+  await expect(draft).toHaveJSProperty("readOnly", true);
+  agents.a1.state = "running";
+  emit("a1", "turn.started", { ...message, status: "running" });
+  await expect(
+    page.locator('[data-pending-message-id="edit-race"]'),
+  ).toHaveCount(0);
+  finish();
+  await expect(page.getByRole("alert")).toContainText(
+    "Only pending messages can be removed",
+  );
+  await expect(draft).toHaveValue("Do not overwrite this draft");
+  await expect(draft).toBeEditable();
+  await expect(
+    page.getByRole("button", { name: "Stop", exact: true }),
+  ).toBeVisible();
+});
+
+test("pending edits remain associated with their original chat when switching away and back during removal", async ({
+  page,
+}) => {
+  const { emit } = await workspace(page);
+  for (let i = 0; i < 2; i++) {
+    await page.goto("/?dialog=new-agent");
+    await page
+      .getByRole("button", { name: "harness /srv/harness", exact: true })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/agents/a${i + 1}$`));
+  }
+  const message = {
+    id: "edit-switch",
+    text: "The first chat's pending message",
+    status: "pending",
+    created_at: new Date().toISOString(),
+  };
+  emit("a1", "message.queued", message);
+  await page.locator('aside a[href="/agents/a1"]').click();
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  let requests = 0;
+  await page.route("**/v1/agents/a1/messages/edit-switch", async (route) => {
+    requests++;
+    await gate;
+    await route.fallback();
+  });
+  const draft = page.getByRole("textbox", { name: "Message", exact: true });
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(draft).toHaveJSProperty("readOnly", true);
+  await page.locator('aside a[href="/agents/a2"]').click();
+  await expect(draft).toBeEditable();
+  await draft.fill("A different chat's draft");
+  await page.locator('aside a[href="/agents/a1"]').click();
+  await expect(draft).toHaveValue("");
+  await expect(draft).toHaveJSProperty("readOnly", true);
+  await expect(
+    page.getByRole("button", { name: "Edit", exact: true }),
+  ).toBeDisabled();
+  expect(requests).toBe(1);
+  finish();
+  await expect(draft).toHaveValue(message.text);
+  await expect(draft).toBeEditable();
+  await expect(
+    page.getByRole("button", { name: "Edit", exact: true }),
+  ).toHaveCount(0);
+  await page.locator('aside a[href="/agents/a2"]').click();
+  await expect(draft).toHaveValue("A different chat's draft");
+  await page.locator('aside a[href="/agents/a1"]').click();
+  await expect(draft).toHaveValue(message.text);
+});
+
+test("editing a pending literal slash message uses a new submission key instead of reusing its cancelled receipt", async ({
+  page,
+}) => {
+  const { emit } = await workspace(page);
+  await page.goto("/?dialog=new-agent");
+  await page
+    .getByRole("button", { name: "harness /srv/harness", exact: true })
+    .click();
+  const keys: string[] = [];
+  const texts: string[] = [];
+  let stops = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/a1/stop")) stops++;
+  });
+  await page.route("**/v1/agents/a1/messages", async (route) => {
+    const request = route.request();
+    keys.push(request.headers()["idempotency-key"]);
+    texts.push(request.postDataJSON().text);
+    const message = {
+      id: `slash-${keys.length}`,
+      text: request.postDataJSON().text,
+      status: "pending",
+      created_at: new Date().toISOString(),
+    };
+    emit("a1", "message.queued", message);
+    if (keys.length === 1)
+      await route.fulfill({
+        status: 503,
+        json: { error: { message: "Response lost after enqueue" } },
+      });
+    else await route.fulfill({ status: 202, json: message });
+  });
+  const draft = page.getByRole("textbox", { name: "Message", exact: true });
+  await draft.fill("//stop");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Response lost after enqueue",
+  );
+  await expect(draft).toHaveValue("//stop");
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Edit", exact: true }),
+  ).toHaveCount(0);
+  await expect(draft).toHaveValue("//stop");
+  await expect(
+    page.getByRole("button", { name: "Send message", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(
+    page.locator('[data-pending-message-id="slash-2"]'),
+  ).toBeVisible();
+  expect(texts).toEqual(["/stop", "/stop"]);
+  expect(keys[0]).toBeTruthy();
+  expect(keys[1]).toBeTruthy();
+  expect(keys[1]).not.toBe(keys[0]);
+  expect(stops).toBe(0);
+});
+
+for (const width of [1440, 390]) {
+  test(`pending queue header stays fixed while rows scroll (${width}px)`, async ({
+    page,
+  }, testInfo) => {
+    const { agents, emit } = await workspace(page);
+    await page.setViewportSize({ width, height: 960 });
+    await page.goto("/?dialog=new-agent");
+    await page
+      .getByRole("button", { name: "harness /srv/harness", exact: true })
+      .click();
+    for (let i = 0; i < 16; i++)
+      emit("a1", "message.queued", {
+        id: `sticky-${i}`,
+        text: `Pending message ${i + 1}`,
+        status: "pending",
+        created_at: new Date().toISOString(),
+      });
+    const queue = page.getByRole("region", {
+      name: "Pending messages",
+      exact: true,
+    });
+    const header = queue.locator('[data-slot="pending-queue-header"]');
+    await expect(header).toHaveText("Up next · 16 pending");
+    const before = (await header.boundingBox())!;
+    expect((await queue.boundingBox())!.height).toBeLessThanOrEqual(160);
+    await queue.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect
+      .poll(() => queue.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
+    await expect(header).toBeInViewport();
+    expect((await header.boundingBox())!.y).toBe(before.y);
+    await expect(header).toHaveCSS(
+      "background-color",
+      await queue.evaluate(
+        (element) => getComputedStyle(element).backgroundColor,
+      ),
+    );
+    expect(
+      await page.evaluate(
+        ({ x, y }) =>
+          !!document
+            .elementFromPoint(x, y)
+            ?.closest('[data-slot="pending-queue-header"]'),
+        { x: before.x + before.width / 2, y: before.y + before.height / 2 },
+      ),
+    ).toBe(true);
+    await expect(
+      queue.locator('[data-pending-message-id="sticky-0"]'),
+    ).not.toBeInViewport();
+    const last = queue.locator('[data-pending-message-id="sticky-15"]');
+    await expect(last).toBeInViewport();
+    const path = testInfo.outputPath(`pending-queue-sticky-${width}.png`);
+    await page.screenshot({ path });
+    await testInfo.attach("pending-queue-sticky", {
+      path,
+      contentType: "image/png",
+    });
+    await last.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(header).toHaveText("Up next · 15 pending");
+    expect((await header.boundingBox())!.y).toBe(before.y);
+    await queue
+      .locator('[data-pending-message-id="sticky-14"]')
+      .getByRole("button", { name: "Edit", exact: true })
+      .click();
+    await expect(header).toHaveText("Up next · 14 pending");
+    await expect(
+      page.getByRole("textbox", { name: "Message", exact: true }),
+    ).toHaveValue("Pending message 15");
+    agents.a1.held = true;
+    emit("a1", "output", { ResponseType: "usage", Content: "" });
+    await expect(header).toHaveText("Queue held · 14 pending");
+    const heldPosition = (await header.boundingBox())!.y;
+    await queue.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    expect((await header.boundingBox())!.y).toBe(heldPosition);
+    await expect(
+      queue.locator('[data-pending-message-id="sticky-0"]'),
+    ).toBeInViewport();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  });
+}
+
+test("typing in a long chat does not rerender the transcript", async ({
+  page,
+}, testInfo) => {
+  // Timestamp formatting is a render probe for message rows in both development
+  // and production bundles; it avoids machine-dependent frame-time thresholds.
+  await page.addInitScript(() => {
+    const probe = window as typeof window & { messageRenderCount: number };
+    probe.messageRenderCount = 0;
+    const format = Date.prototype.toLocaleTimeString;
+    Date.prototype.toLocaleTimeString = function (
+      this: Date,
+      ...args: Parameters<typeof format>
+    ) {
+      probe.messageRenderCount++;
+      return format.apply(this, args);
+    };
+  });
+  const { emit } = await workspace(page);
+  await page.goto("/?dialog=new-agent");
+  await page
+    .getByRole("button", { name: "harness /srv/harness", exact: true })
+    .click();
+  const content = (i: number) =>
+    `## Result ${i}\n\n${"A detailed explanation of the implementation. ".repeat(15)}\n\n- Read the source\n- Run the tests\n\n\`\`\`ts\nconst ready = true\n\`\`\``;
+  for (let i = 0; i < 120; i++)
+    emit("a1", "output", { ResponseType: "agent", Content: content(i) });
+  await expect(
+    page.getByRole("article", { name: "Assistant message", exact: true }),
+  ).toHaveCount(120);
+  const renders = () =>
+    page.evaluate(
+      () =>
+        (window as typeof window & { messageRenderCount: number })
+          .messageRenderCount,
+    );
+  expect(await renders()).toBeGreaterThanOrEqual(120);
+  const input = page.getByRole("textbox", { name: "Message", exact: true });
+  await input.focus();
+  const before = await renders();
+  const start = Date.now();
+  await input.pressSequentially("Typing should stay fast");
+  const typingRenders = (await renders()) - before;
+  await testInfo.attach("typing-performance", {
+    body: JSON.stringify({
+      typingMs: Date.now() - start,
+      transcriptRenders: typingRenders,
+    }),
+    contentType: "application/json",
+  });
+  expect(typingRenders).toBe(0);
+  await expect(input).toHaveValue("Typing should stay fast");
+  await expect(
+    page.getByRole("button", { name: "Send message", exact: true }),
+  ).toBeEnabled();
+  await input.fill("");
+  await expect(
+    page.getByRole("button", { name: "Send message", exact: true }),
+  ).toBeDisabled();
+  expect(await renders()).toBe(before);
+  emit("a1", "output", { ResponseType: "agent", Content: content(120) });
+  await expect(
+    page.getByRole("article", { name: "Assistant message", exact: true }),
+  ).toHaveCount(121);
+  const liveRenders = (await renders()) - before;
+  expect(liveRenders).toBeGreaterThan(0);
+  expect(liveRenders).toBeLessThan(8);
+  await expect(
+    page.getByRole("heading", { name: "Result 120", exact: true }),
+  ).toBeVisible();
+});
+
+test.describe("mobile drawer animation", () => {
+  test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
+  test("plays a short entry animation on each open and honors reduced motion", async ({
+    page,
+  }, testInfo) => {
+    await page.addInitScript(() => {
+      const probe = window as typeof window & {
+        drawerAnimationStarts: {
+          duration: number;
+          transform: string;
+          opacity: string;
+        }[];
+      };
+      probe.drawerAnimationStarts = [];
+      document.addEventListener("animationstart", (event) => {
+        if (
+          !(event.target instanceof HTMLElement) ||
+          event.target.dataset.slot !== "sheet-content"
+        )
+          return;
+        const animation = event.target
+          .getAnimations()
+          .find(
+            (animation) =>
+              animation instanceof CSSAnimation &&
+              animation.animationName === "enter",
+          );
+        if (!(animation?.effect instanceof KeyframeEffect)) return;
+        const first = animation.effect.getKeyframes()[0];
+        probe.drawerAnimationStarts.push({
+          duration: Number(animation.effect.getTiming().duration),
+          transform: String(first.transform),
+          opacity: String(first.opacity),
+        });
+      });
+    });
+    await workspace(page);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.goto("/?dialog=new-agent");
+    await page
+      .getByRole("button", { name: "harness /srv/harness", exact: true })
+      .tap();
+    const menu = page.getByRole("button", {
+      name: "Open sidebar",
+      exact: true,
+    });
+    const drawer = page.getByRole("dialog", { name: "Workspace", exact: true });
+    const starts = () =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & {
+              drawerAnimationStarts: {
+                duration: number;
+                transform: string;
+                opacity: string;
+              }[];
+            }
+          ).drawerAnimationStarts,
+      );
+    for (let i = 1; i <= 2; i++) {
+      await menu.tap();
+      await expect(drawer).toBeVisible();
+      await expect(drawer).toHaveCSS("animation-name", "enter");
+      await expect(drawer).toHaveCSS("animation-duration", "0.2s");
+      await expect.poll(async () => (await starts()).length).toBe(i);
+      const animation = (await starts()).at(-1)!;
+      expect(animation.duration).toBe(200);
+      expect(animation.transform).toContain("16px");
+      expect(animation.opacity).toBe("0");
+      await expect
+        .poll(async () => {
+          const box = (await drawer.boundingBox())!;
+          return Math.round(box.y + box.height);
+        })
+        .toBe(844);
+      if (i === 1) {
+        const path = testInfo.outputPath("mobile-drawer-animation.png");
+        await page.screenshot({ path });
+        await testInfo.attach("mobile-drawer-animation", {
+          path,
+          contentType: "image/png",
+        });
+      }
+      await page.keyboard.press("Escape");
+      await expect(drawer).toHaveCount(0);
+    }
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await menu.tap();
+    await expect(drawer).toBeVisible();
+    await expect(drawer).toHaveCSS("animation-name", "none");
+    expect((await starts()).length).toBe(2);
+    await drawer
+      .getByRole("button", { name: "Settings for harness", exact: true })
+      .tap();
+    await expect(
+      page.getByRole("dialog", { name: "harness defaults", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    await page.getByRole("button", { name: "Close", exact: true }).tap();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    const input = page.getByRole("textbox", { name: "Message", exact: true });
+    await input.tap();
+    await expect(input).toBeFocused();
+    await input.fill("Still responsive after closing the drawer");
+  });
 });
