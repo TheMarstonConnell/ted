@@ -109,11 +109,17 @@ func (a *Agent) SetModel(id string) (SettingsChange, error) {
 		if effort != "" && !slices.Contains(model.Efforts, effort) {
 			return SettingsChange{}, fmt.Errorf("model %q has an unsupported default effort", id)
 		}
+		previousUsage := a.contextUsage
 		if a.settings.Model != id {
 			a.contextUsage = ContextUsage{}
 		}
 		a.settings = Settings{Model: id, Provider: model.Provider, Effort: effort}
 		change.After = a.settings
+		if err := a.saveSessionLocked(); err != nil {
+			a.settings = change.Before
+			a.contextUsage = previousUsage
+			return SettingsChange{}, err
+		}
 		change.EffortAdjusted = change.Before.Effort != effort
 		return change, nil
 	}
@@ -136,5 +142,9 @@ func (a *Agent) SetEffort(effort Effort) (SettingsChange, error) {
 	change := SettingsChange{Before: a.settings}
 	a.settings.Effort = effort
 	change.After = a.settings
+	if err := a.saveSessionLocked(); err != nil {
+		a.settings = change.Before
+		return SettingsChange{}, err
+	}
 	return change, nil
 }

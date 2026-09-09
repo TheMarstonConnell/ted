@@ -34,14 +34,17 @@ func makeBashTool() Tool {
 // Agent is an instance-local conversation. One turn may run at a time.
 // Settings and output registration are safe to access concurrently.
 type Agent struct {
-	mu           sync.Mutex
-	contextUsage ContextUsage
-	settings     Settings
-	messages     []Message
-	busy         bool
-	providers    []Provider
-	logger       *zap.Logger
-	respond      func(AgentResponse)
+	mu              sync.Mutex
+	persistent      bool
+	createdAt       time.Time
+	sessionRevision uint64
+	contextUsage    ContextUsage
+	settings        Settings
+	messages        []Message
+	busy            bool
+	providers       []Provider
+	logger          *zap.Logger
+	respond         func(AgentResponse)
 
 	threadID       string
 	projectRoot    string
@@ -150,6 +153,9 @@ func (a *Agent) Turn(userInput string) (err error) {
 		a.mu.Lock()
 		if completed {
 			a.messages = messages
+			if saveErr := a.saveSessionLocked(); saveErr != nil {
+				err = fmt.Errorf("turn completed, but was not saved: %w", saveErr)
+			}
 		} else {
 			a.contextUsage = previousUsage
 		}
@@ -260,7 +266,7 @@ type AgentResponse struct {
 }
 
 // NewAgent does not require an output callback. A nil logger discards diagnostics.
-// Providers are tried in supplied order. TED_HOME only selects browser storage;
+// Providers are tried in supplied order. TED_HOME selects session and browser storage;
 // inherited thread and project variables are deliberately ignored.
 func NewAgent(logger *zap.Logger, providers []Provider) *Agent {
 	if logger == nil {

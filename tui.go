@@ -1,8 +1,8 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/cursor"
@@ -179,16 +179,36 @@ func initialModel(agent *agent.Agent) model {
 
 	markdown, err := newMarkdownRenderer(vp.Width())
 
-	directory, dirErr := os.Getwd()
-	if dirErr != nil {
-		directory = "unknown directory"
+	directory := agent.WorkingDir()
+	entries := []transcriptEntry{{kind: bannerMessage, content: "Ted Coding Agent"}}
+	for _, message := range agent.Messages() {
+		switch message.Role {
+		case "user":
+			text := message.Content.Text()
+			if text == "" {
+				text = "[Image attachment]"
+			}
+			entries = append(entries, transcriptEntry{kind: userMessage, content: text})
+		case "assistant":
+			if text := message.Content.Text(); text != "" {
+				entries = append(entries, transcriptEntry{kind: agentMessage, content: text})
+			}
+			for _, call := range message.ToolCalls {
+				text := call.Function.Name + " " + call.Function.Arguments
+				var args struct {
+					Command string `json:"command"`
+				}
+				if call.Function.Name == "bash" && json.Unmarshal([]byte(call.Function.Arguments), &args) == nil {
+					text = fmt.Sprintf("Ran shell command - %q", args.Command)
+				}
+				entries = append(entries, transcriptEntry{kind: toolCallMessage, content: text})
+			}
+		}
 	}
 
 	return model{
-		textarea: ta,
-		messages: []transcriptEntry{
-			{kind: bannerMessage, content: "Ted Coding Agent"},
-		},
+		textarea:      ta,
+		messages:      entries,
 		viewport:      vp,
 		markdown:      markdown,
 		toolbarStyle:  inverted.Padding(1, 2),

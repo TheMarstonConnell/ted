@@ -21,7 +21,8 @@ func newRootCommand() *cobra.Command {
 		Short:         "ted is an agent harness",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args:          cobra.NoArgs,
 	}
-	root.AddCommand(newBrowserCommand(browser.Call), newTUICommand(), newModelsCommand(loadCatalogAgent), newEffortsCommand(loadCatalogAgent), newProvidersCommand(loadCatalogAgent))
+	root.AddCommand(newSessionsCommand(), newBrowserCommand(browser.Call), newTUICommand(), newModelsCommand(loadCatalogAgent), newEffortsCommand(loadCatalogAgent), newProvidersCommand(loadCatalogAgent))
 	return root
 }

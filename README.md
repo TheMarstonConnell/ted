@@ -45,6 +45,57 @@ The TUI shows the current Git branch beside the working directory, refreshing
 every three seconds. Detached HEADs show a short commit ID; outside a Git
 repository (or when Git is unavailable), the branch indicator is hidden.
 
+### Saved sessions
+
+Ted automatically saves a versioned snapshot when a TUI session starts, after
+successful turns, and after model/effort changes. No explicit save command is
+needed. Plain `ted` shows command help; `ted tui` starts a new TUI session.
+
+```sh
+ted sessions                 # all projects, most recently updated first
+ted tui --continue           # latest saved conversation in this project
+ted tui --resume <session-id> # a specific conversation
+ted tui --resume <session-id> --model codex/gpt-5.6-terra --effort high
+```
+
+`--continue` and `--resume` are mutually exclusive. Continue matches the canonical
+Git worktree root (or startup directory outside Git). Explicit resume restores
+the original working directory for tools, even when launched elsewhere; a
+missing directory is an error. Saved model/effort settings win over defaults;
+explicit flags override them. If the saved model is unavailable, Ted asks you
+to choose a replacement with `--model` rather than silently switching.
+`--prompt` also works on resume and starts a new turn in that conversation.
+
+Snapshots live at `$TED_HOME/threads/<session-id>/session.json` (default
+`~/.ted/threads/...`). They contain the original system prompt, complete committed
+message history, tool calls/results, image bodies, provider reasoning metadata
+and its source model, settings, latest context usage, and artifact cursor.
+Credentials and live runtime objects are not saved. The TUI rebuilds user and
+assistant messages and tool-call summaries from this history; transient notices
+and slash-command feedback are not restored. Images appear as attachment markers.
+The interactive session picker is not implemented yet; use `ted sessions` to
+find an ID.
+
+**Recovery is between turns only.** An interrupted or failed turn is not saved
+and is never automatically rerun. Commands may already have modified files, so
+inspect the workspace before repeating interrupted work. Restoring a conversation
+does not roll back files or recreate browser tabs or running processes. Updates
+to Ted's embedded system prompt affect new sessions, not restored ones.
+
+Snapshots use private file permissions, a synced temporary file, and atomic
+rename. They are plaintext and can include sensitive source code, command output,
+and images: keep `TED_HOME` private. Save errors are shown in the TUI. A completed
+turn that cannot be saved remains in memory, but will not survive exit unless a
+later save succeeds. Concurrent writers are rejected using a revision check;
+reopen the session if another process has changed it. An abrupt crash during a
+write can leave `session.write-lock` in the thread directory; remove that empty
+directory only after confirming no process is writing the session.
+
+Embedded users opt in with `Agent.EnablePersistence()`. To resume, construct an
+agent with configured providers, call `RestoreSession(id, modelOverride,
+effortOverride)` (empty overrides preserve saved settings), then enable
+persistence. Merely constructing an agent or listing models does not save it.
+
 ### Context usage
 
 The TUI starts at `ctx 100% left` until usage metrics arrive, then shows the
@@ -55,8 +106,8 @@ summed across the thread. Cached input and reasoning output are already included
 in those counts. Tool results and user input added after that completion are not
 counted until the next model response.
 
-Tracking is ephemeral and updates after every completion, including tool-call
-iterations. Failed turns restore the previous snapshot; switching models clears
+Tracking updates after every completion, including tool-call iterations, and
+the latest committed estimate is saved with the session. Failed turns restore the previous snapshot; switching models clears
 it. This meter does not trigger automatic compaction, and there is no capacity
 override setting.
 
