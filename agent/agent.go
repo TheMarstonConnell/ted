@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -74,6 +75,15 @@ func (a *Agent) runToolCall(toolCall ToolCall) string {
 }
 
 func (a *Agent) runToolCallWithScreenshots(toolCall ToolCall) (string, []screenshotImage) {
+	result, screenshots, _ := a.runToolCallContext(context.Background(), toolCall, false)
+	return result, screenshots
+}
+
+func (a *Agent) runToolCallContext(ctx context.Context, toolCall ToolCall, retainFull bool) (string, []screenshotImage, string) {
+	if err := ctx.Err(); err != nil {
+		result := fmt.Sprintf("error: tool call cancelled before execution: %v", err)
+		return result, nil, result
+	}
 	a.logger.Debug("running tool call",
 		zap.String("tool_call_id", toolCall.Id),
 		zap.String("function", toolCall.Function.Name),
@@ -85,7 +95,8 @@ func (a *Agent) runToolCallWithScreenshots(toolCall ToolCall) (string, []screens
 			zap.String("tool_call_id", toolCall.Id),
 			zap.String("function", toolCall.Function.Name),
 		)
-		return fmt.Sprintf("error: there is no tool named %q; bash is the only tool available", toolCall.Function.Name), nil
+		result := fmt.Sprintf("error: there is no tool named %q; bash is the only tool available", toolCall.Function.Name)
+		return result, nil, result
 	}
 
 	var bashArgs map[string]string
@@ -94,7 +105,8 @@ func (a *Agent) runToolCallWithScreenshots(toolCall ToolCall) (string, []screens
 			zap.String("tool_call_id", toolCall.Id),
 			zap.Error(err),
 		)
-		return fmt.Sprintf("error: could not parse the arguments as JSON: %s", err), nil
+		result := fmt.Sprintf("error: could not parse the arguments as JSON: %s", err)
+		return result, nil, result
 	}
 
 	command := bashArgs["command"]
@@ -104,7 +116,7 @@ func (a *Agent) runToolCallWithScreenshots(toolCall ToolCall) (string, []screens
 			ResponseType: "tool"},
 	)
 
-	result := runBashIn(command, DefaultToolTimeout, a.workingDir, toolEnvironment(a.threadID, a.projectRoot, a.home))
+	result, full := runBashInContext(ctx, command, DefaultToolTimeout, a.workingDir, toolEnvironment(a.threadID, a.projectRoot, a.home), retainFull)
 	screenshots := a.newScreenshots(maxScreenshotsPerTurn)
 
 	a.logger.Info("tool output captured", zap.String("tool_call_id", toolCall.Id), zap.Int("output_bytes", len(result)), zap.Int("screenshot_count", len(screenshots)))
@@ -114,18 +126,27 @@ func (a *Agent) runToolCallWithScreenshots(toolCall ToolCall) (string, []screens
 		zap.String("result", result),
 	)
 
-	return result, screenshots
+	return result, screenshots, full
 }
 
 // Turn sends the user input to the model and runs the tool calls it asks for
 // until it produces a final reply.
 //
-// A turn either completes and extends the conversation or leaves it exactly
-// as it was. The API requires every tool call in an assistant message to be
-// answered by a tool message carrying the same identifier, so a turn
-// abandoned halfway would strand an unanswered tool call and every later
-// request would be rejected. An abandoned turn is therefore rolled back.
-func (a *Agent) Turn(userInput string) (err error) {
+// Ordinary failed turns roll back. Cancelled turns retain a valid partial
+// conversation, including cancelled results for every unexecuted tool call.
+func (a *Agent) Turn(userInput string) error {
+	return a.TurnContext(context.Background(), userInput)
+}
+
+// TurnContext runs a cancellable turn. It does not return until active tools
+// have stopped. Output callbacks are synchronous and should return promptly.
+func (a *Agent) TurnContext(ctx context.Context, userInput string) (err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	a.mu.Lock()
 	if a.busy {
@@ -151,10 +172,10 @@ func (a *Agent) Turn(userInput string) (err error) {
 	completed := false
 	defer func() {
 		a.mu.Lock()
-		if completed {
+		if completed || ctx.Err() != nil {
 			a.messages = messages
 			if saveErr := a.saveSessionLocked(); saveErr != nil {
-				err = fmt.Errorf("turn completed, but was not saved: %w", saveErr)
+				err = errors.Join(err, fmt.Errorf("turn completed, but was not saved: %w", saveErr))
 			}
 		} else {
 			a.contextUsage = previousUsage
@@ -165,7 +186,10 @@ func (a *Agent) Turn(userInput string) (err error) {
 	messages = append(messages, Message{Role: "user", Content: TextContent(userInput)})
 
 	for {
-		res, completionErr := completeWithRetry(a.logger, provider, CompletionRequest{Model: settings.Model, Effort: settings.Effort, Messages: messagesForModel(messages, settings.Model)}, func(attempt int, delay time.Duration) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		res, completionErr := completeWithRetry(a.logger, provider, CompletionRequest{Context: ctx, Model: settings.Model, Effort: settings.Effort, Messages: messagesForModel(messages, settings.Model)}, func(attempt int, delay time.Duration) {
 			a.emit(AgentResponse{ResponseType: "status", Content: fmt.Sprintf("Model connection interrupted; retrying (%d/%d) in %s…", attempt, completionAttempts-1, delay.Round(100*time.Millisecond))})
 		})
 		if completionErr != nil {
@@ -195,11 +219,17 @@ func (a *Agent) Turn(userInput string) (err error) {
 		messages = append(messages, msg)
 
 		finishReason := choice.FinishReason
-		if finishReason == "tool_calls" {
+		if finishReason == "tool_calls" || len(msg.ToolCalls) > 0 {
 			// A turn that reports tool calls but carries none would be sent
 			// back unchanged on the next pass and loop without end.
 			if len(msg.ToolCalls) == 0 {
 				return fmt.Errorf("completion reported tool calls but sent none")
+			}
+
+			// Completed assistant text can accompany tool calls. Expose it just
+			// like a final reply rather than silently hiding the block.
+			if text := msg.Content.Text(); text != "" {
+				a.emit(AgentResponse{ResponseType: "agent", Content: text})
 			}
 
 			// Each pass appends exactly one result and never leaves the
@@ -207,7 +237,8 @@ func (a *Agent) Turn(userInput string) (err error) {
 			var screenshots []screenshotImage
 			for i := 0; i < len(msg.ToolCalls); i++ {
 				toolCall := msg.ToolCalls[i]
-				result, found := a.runToolCallWithScreenshots(toolCall)
+				result, found, full := a.runToolCallContext(ctx, toolCall, true)
+				a.emit(AgentResponse{ResponseType: "tool_result", Content: result, FullToolOutput: full, ToolCallID: toolCall.Id, ToolName: toolCall.Function.Name})
 
 				messages = append(messages, Message{
 					Role:       "tool",
@@ -239,6 +270,9 @@ func (a *Agent) Turn(userInput string) (err error) {
 			break
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	completed = true
 	return nil
 }
@@ -263,12 +297,21 @@ func (a *Agent) SetOutput(respond func(AgentResponse)) {
 type AgentResponse struct {
 	Content      string
 	ResponseType string
+	// Tool result metadata is populated on "tool_result" events. Content is
+	// capped for provider context; FullToolOutput retains all stdout/stderr.
+	ToolCallID     string
+	ToolName       string
+	FullToolOutput string
 }
 
 // NewAgent does not require an output callback. A nil logger discards diagnostics.
 // Providers are tried in supplied order. TED_HOME selects session and browser storage;
 // inherited thread and project variables are deliberately ignored.
 func NewAgent(logger *zap.Logger, providers []Provider) *Agent {
+	return newAgentIn(logger, providers, resolveWorkingDir())
+}
+
+func newAgentIn(logger *zap.Logger, providers []Provider, dir string) *Agent {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -277,8 +320,8 @@ func NewAgent(logger *zap.Logger, providers []Provider) *Agent {
 		providers:   append([]Provider(nil), providers...),
 		messages:    []Message{{Role: "system", Content: TextContent(SYSTEM_PROMPT)}},
 		threadID:    newThreadID(),
-		projectRoot: resolveProjectRoot(""),
-		workingDir:  resolveWorkingDir(),
+		projectRoot: resolveProjectRoot(dir),
+		workingDir:  dir,
 		home:        tedHome(),
 	}
 	if models := a.ListModels(); len(models) > 0 {
@@ -305,11 +348,15 @@ func (a *Agent) ProjectRoot() string {
 }
 
 // Messages returns a detached snapshot of committed conversation history.
-// An active turn becomes visible only after it succeeds.
+// An active turn becomes visible after success or cancellation.
 func (a *Agent) Messages() []Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return cloneMessages(a.messages)
+	result := cloneMessages(a.messages)
+	for i := range result {
+		result[i].SourceModel = result[i].sourceModel
+	}
+	return result
 }
 
 func cloneMessages(messages []Message) []Message {
@@ -331,7 +378,12 @@ func cloneMessages(messages []Message) []Message {
 func messagesForModel(messages []Message, model string) []Message {
 	result := cloneMessages(messages)
 	for i := range result {
-		if result[i].sourceModel != model {
+		source := result[i].sourceModel
+		if source == "" {
+			source = result[i].SourceModel
+		}
+		result[i].SourceModel = ""
+		if source != model {
 			result[i].ReasoningDetails = nil
 			result[i].Reasoning = ""
 		}

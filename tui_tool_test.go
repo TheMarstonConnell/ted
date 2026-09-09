@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/TheMarstonConnell/ted/agent"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -32,5 +33,20 @@ func TestToolCommandResizesWithoutLosingContent(t *testing.T) {
 	wide := ansi.Strip(m.renderEntry(entry, 120))
 	if wide != original || entry.content != original {
 		t.Fatalf("full command not preserved: %q", wide)
+	}
+}
+
+func TestFullToolResultRenderedWithoutProviderCap(t *testing.T) {
+	m := tuiTestModel()
+	output := "first line\n" + strings.Repeat("full output ", 40) + "\nlast line"
+	next, _ := m.Update(agent.AgentResponse{ResponseType: "tool_result", Content: "provider-capped", FullToolOutput: output})
+	m = next.(model)
+	entry := m.messages[len(m.messages)-1]
+	if entry.kind != toolResultMessage || entry.content != output {
+		t.Fatal("full result lost")
+	}
+	rendered := ansi.Strip(m.renderEntry(entry, 80))
+	if !strings.Contains(rendered, "first line") || !strings.Contains(rendered, "last line") || strings.Contains(rendered, "provider-capped") {
+		t.Fatal(rendered)
 	}
 }

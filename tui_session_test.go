@@ -32,10 +32,10 @@ func TestRestoredTranscriptFromAgentHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := initialModel(b)
-	if len(m.messages) != 4 {
+	if len(m.messages) != 5 {
 		t.Fatalf("entries: %+v", m.messages)
 	}
-	for i, want := range []transcriptEntry{{bannerMessage, "Ted Coding Agent"}, {userMessage, "Say hello"}, {toolCallMessage, `Ran shell command - "echo hello"`}, {agentMessage, "All done."}} {
+	for i, want := range []transcriptEntry{{bannerMessage, "Ted Coding Agent"}, {userMessage, "Say hello"}, {toolCallMessage, `Ran shell command - "echo hello"`}, {toolCallMessage, "hello\n"}, {agentMessage, "All done."}} {
 		if m.messages[i] != want {
 			t.Fatalf("entry %d = %+v; want %+v", i, m.messages[i], want)
 		}

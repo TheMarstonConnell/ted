@@ -1,6 +1,9 @@
 package agent
 
-import "go.uber.org/zap"
+import (
+	"context"
+	"go.uber.org/zap"
+)
 
 // Provider describes a configured backend. Model IDs returned here are local
 // to the provider; Agent.ListModels qualifies them with the provider name.
@@ -12,7 +15,16 @@ type Provider interface {
 
 // CompletionRequest is a single provider request within an agent turn.
 type CompletionRequest struct {
+	Context  context.Context
 	Model    string
 	Effort   Effort
 	Messages []Message
+}
+
+// RequestContext returns the request context, or background for legacy callers.
+func (r CompletionRequest) RequestContext() context.Context {
+	if r.Context != nil {
+		return r.Context
+	}
+	return context.Background()
 }

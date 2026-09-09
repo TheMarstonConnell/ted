@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"sync"
@@ -18,7 +19,14 @@ func runBash(command string, timeout time.Duration) string {
 }
 
 func runBashIn(command string, timeout time.Duration, dir string, environment []string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	result, _ := runBashInContext(context.Background(), command, timeout, dir, environment, false)
+	return result
+}
+
+// runBashInContext waits for the command and its output readers before returning.
+// Full output is retained only for runtime events; provider context stays capped.
+func runBashInContext(parent context.Context, command string, timeout time.Duration, dir string, environment []string, retainFull bool) (string, string) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	if dir != "" {
@@ -32,20 +40,28 @@ func runBashIn(command string, timeout time.Duration, dir string, environment []
 	// keeps stdout/stderr open after cancellation.
 	cmd.WaitDelay = time.Second
 	out := &limitedToolOutput{}
-	cmd.Stdout = out
-	cmd.Stderr = out
+	var full bytes.Buffer
+	var writer io.Writer = out
+	if retainFull {
+		writer = io.MultiWriter(out, &full)
+	}
+	// Using the same writer for both streams makes os/exec serialize writes.
+	cmd.Stdout = writer
+	cmd.Stderr = writer
 	err := cmd.Run()
-	result := out.String()
-	if ctx.Err() == context.DeadlineExceeded {
-		return fmt.Sprintf("%s\nerror: bash tool call timed out after %s", result, timeout)
+	result, fullResult := out.String(), strings.ToValidUTF8(full.String(), "?")
+	suffix := ""
+	if parent.Err() != nil {
+		suffix = fmt.Sprintf("\nerror: bash tool call cancelled: %v", parent.Err())
+	} else if ctx.Err() == context.DeadlineExceeded {
+		suffix = fmt.Sprintf("\nerror: bash tool call timed out after %s", timeout)
+	} else if err != nil {
+		suffix = fmt.Sprintf("\n%s", err)
 	}
-	if err != nil {
-		return fmt.Sprintf("%s\n%s", result, err)
-	}
-	return result
+	return result + suffix, fullResult + suffix
 }
 
-// MaxToolOutputBytes bounds retained stdout and stderr together. Continue
+// MaxToolOutputBytes bounds provider-context stdout and stderr together. Continue
 // draining after the cap so verbose commands cannot block on a full pipe.
 const MaxToolOutputBytes = 64 << 10
 

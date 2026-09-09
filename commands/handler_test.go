@@ -56,3 +56,50 @@ func TestCommands(t *testing.T) {
 		t.Fatal("commands polluted history")
 	}
 }
+
+type remoteSettingsAgent struct {
+	*agent.Agent
+	operations []string
+}
+
+func (*remoteSettingsAgent) Ready() bool              { return false }
+func (*remoteSettingsAgent) AcceptsQueuedInput() bool { return true }
+func (a *remoteSettingsAgent) Stop() error            { a.operations = append(a.operations, "stop"); return nil }
+func (a *remoteSettingsAgent) Unsettle() error {
+	a.operations = append(a.operations, "unsettle")
+	return nil
+}
+func (a *remoteSettingsAgent) Settle() error {
+	a.operations = append(a.operations, "settle")
+	return nil
+}
+func (a *remoteSettingsAgent) Continue() error {
+	a.operations = append(a.operations, "continue")
+	return nil
+}
+
+func TestRemoteLifecycleAndBusySettingsPickers(t *testing.T) {
+	a := &remoteSettingsAgent{Agent: agent.NewAgent(nil, []agent.Provider{agent.NewCodexProvider(nil)})}
+	h := New(a)
+	for _, name := range []string{"model", "effort"} {
+		result, err := h.Execute(name)
+		if err != nil || result.Selection == nil {
+			t.Fatal("busy API settings picker blocked", result, err)
+		}
+	}
+	for _, name := range []string{"stop", "settle", "unsettle", "continue"} {
+		result, handled, err := h.Handle("/" + name)
+		if err != nil || !handled || result.Message == "" {
+			t.Fatal(result, handled, err)
+		}
+		if _, err := h.Execute(name, "unexpected"); err == nil {
+			t.Fatal("accepted lifecycle argument")
+		}
+	}
+	if !reflect.DeepEqual(a.operations, []string{"stop", "settle", "unsettle", "continue"}) {
+		t.Fatal(a.operations)
+	}
+	if _, _, err := h.Handle("/pause"); err == nil {
+		t.Fatal("pause must not exist")
+	}
+}
