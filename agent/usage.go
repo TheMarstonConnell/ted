@@ -13,13 +13,13 @@ type TokenUsage struct {
 // include tool results or user input appended since that response. Missing
 // usage and unknown model capacity are distinct from measured zero usage.
 type ContextUsage struct {
-	Model           string
-	InputTokens     int64
-	OutputTokens    int64
-	EstimatedTokens int64
-	ContextWindow   int64
-	Known           bool
-	Estimated       bool
+	Model           string `json:"model"`
+	InputTokens     int64  `json:"input_tokens"`
+	OutputTokens    int64  `json:"output_tokens"`
+	EstimatedTokens int64  `json:"estimated_tokens"`
+	ContextWindow   int64  `json:"context_window"`
+	Known           bool   `json:"known"`
+	Estimated       bool   `json:"estimated"`
 }
 
 // Percent reports an approximate context percentage, without clamping it.

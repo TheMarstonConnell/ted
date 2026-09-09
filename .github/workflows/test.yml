@@ -1,0 +1,53 @@
+name: Test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: ./api/check-generated.sh
+      - run: go vet ./...
+      - run: go test -race ./...
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run generate:api
+      - run: git diff --exit-code -- src/lib/api.generated.ts
+      - run: npm run lint
+      - run: npm test
+      - name: Disable unused Google Chrome apt repository
+        # Playwright downloads its own Chromium. A stale Chrome apt index can
+        # otherwise block installation of Ubuntu's browser system dependencies.
+        run: |
+          for source in /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            if [ -f "$source" ] && grep -q 'dl.google.com/linux/chrome' "$source"; then
+              sudo mv "$source" "$source.disabled"
+            fi
+          done
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm run build
+      - run: git diff --exit-code -- dist
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: web-browser-test-artifacts
+          path: web/test-results

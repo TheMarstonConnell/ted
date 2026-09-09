@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,5 +73,44 @@ func TestGitBranchStatus(t *testing.T) {
 	m = next.(model)
 	if got := ansi.Strip(m.statusView()); strings.Contains(got, "/repo (") {
 		t.Fatal(got)
+	}
+}
+
+type branchTestAgent struct {
+	tuiAgent
+	branch string
+	err    error
+}
+
+func (a *branchTestAgent) GitBranch() (string, error) { return a.branch, a.err }
+
+func TestServerBranchPolling(t *testing.T) {
+	m := tuiTestModel()
+	source := &branchTestAgent{tuiAgent: m.agent, branch: "server-branch"}
+	m.agent = source
+	m.directory = "/not/on/this/client"
+	next, cmd := m.Update(m.readBranch()())
+	m = next.(model)
+	if m.gitBranch != "server-branch" || cmd == nil {
+		t.Fatal("missing branch or refresh")
+	}
+	source.branch = "changed"
+	_, poll := m.Update(gitBranchRefreshMsg{})
+	next, _ = m.Update(poll())
+	m = next.(model)
+	if m.gitBranch != "changed" {
+		t.Fatal(m.gitBranch)
+	}
+	source.err = fmt.Errorf("offline")
+	next, cmd = m.Update(m.readBranch()())
+	m = next.(model)
+	if m.gitBranch != "changed" || cmd == nil {
+		t.Fatal("transient failure lost branch or stopped polling")
+	}
+	source.err = nil
+	source.branch = ""
+	next, cmd = m.Update(m.readBranch()())
+	if next.(model).gitBranch != "" || cmd == nil {
+		t.Fatal("non-repository should clear branch and keep polling")
 	}
 }

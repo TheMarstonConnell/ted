@@ -51,15 +51,22 @@ func retryableCompletionError(err error) bool {
 // and no shell command is replayed. Providers buffer partial streams, so an
 // interrupted attempt cannot expose partial tool calls or assistant output.
 func completeWithRetry(logger *zap.Logger, provider Provider, request CompletionRequest, notify ...func(int, time.Duration)) (*Response, error) {
-	return retryCompletion(logger, provider, request, time.Sleep, notify...)
+	return retryCompletion(logger, provider, request, nil, notify...)
 }
 
 func retryCompletion(logger *zap.Logger, provider Provider, request CompletionRequest, sleep func(time.Duration), notify ...func(int, time.Duration)) (*Response, error) {
+	ctx := request.RequestContext()
 	for attempt := 1; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// Give every attempt a detached copy, even if a provider mutates its input.
 		current := request
 		current.Messages = cloneMessages(request.Messages)
 		result, err := provider.Complete(logger, current)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if err == nil {
 			return result, nil
 		}
@@ -77,6 +84,16 @@ func retryCompletion(logger *zap.Logger, provider Provider, request CompletionRe
 				callback(attempt, delay)
 			}
 		}
-		sleep(delay)
+		if sleep != nil {
+			sleep(delay) // injected clock for retry tests
+		} else {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+		}
 	}
 }

@@ -1,6 +1,7 @@
 # Ted
 
-A Go coding agent with a Bubble Tea terminal interface.
+A Go coding agent with a server-owned control plane, an OpenAPI HTTP/WebSocket API,
+a React web control plane, and a Bubble Tea terminal client.
 
 ## System prompt
 
@@ -13,6 +14,26 @@ Go embeds this file into the binary at build time; edit it and rebuild (or use
 ```sh
 go run . tui
 ```
+
+The TUI connects to a local server, starting one on **`0.0.0.0:8281`** if needed.
+The TUI that starts that server owns it: exiting or crashing that TUI shuts down
+its server and all agents. Other connected TUIs do not own its lifetime.
+
+For a persistent control plane, start the server explicitly:
+
+```sh
+ted serve                         # 0.0.0.0:8281, no authentication
+ted serve --addr 127.0.0.1:8281     # local-only alternative
+ted tui --server http://host:8281  # existing server only; never starts a fallback
+```
+
+**Security:** the default API has no authentication or TLS. Anyone able to reach
+its port can run agents with the server user's filesystem and shell permissions.
+Use a trusted network/firewall or an authenticated TLS reverse proxy. Project
+paths and provider credentials belong to the server machine.
+
+See [control-plane behavior](docs/control-plane.md), the
+[OpenAPI contract](api/openapi.yaml), and the [WebSocket protocol](api/websocket.md).
 
 To automatically send an initial user message when the TUI starts:
 
@@ -45,56 +66,54 @@ The TUI shows the current Git branch beside the working directory, refreshing
 every three seconds. Detached HEADs show a short commit ID; outside a Git
 repository (or when Git is unavailable), the branch indicator is hidden.
 
-### Saved sessions
+### Web control plane
 
-Ted automatically saves a versioned snapshot when a TUI session starts, after
-successful turns, and after model/effort changes. No explicit save command is
-needed. Plain `ted` shows command help; `ted tui` starts a new TUI session.
+`ted serve` also serves the React web UI at **http://localhost:8281**. Start a
+chat by picking a project, follow live agent output, manage queues and settings,
+and send a message to restore a settled chat. The built UI is embedded in the Go
+binary; no separate frontend process is needed.
+
+For Vite development, rebuilding the embedded assets, and web tests, see
+[`web/README.md`](web/README.md). The same server security warning applies to the
+browser UI: there is no authentication, and tools run with the server user's
+permissions.
+
+### Projects, agents, and durable conversations
+
+The server stores projects with existing server-local root directories and model/
+effort defaults. A new TUI agent uses the project matching its current directory.
+Defaults are copied into new agents; changing project defaults affects only future
+agents. Multiple agents in a project share that directory—there is no automatic
+worktree isolation.
 
 ```sh
-ted sessions                 # all projects, most recently updated first
-ted tui --continue           # latest saved conversation in this project
-ted tui --resume <session-id> # a specific conversation
-ted tui --resume <session-id> --model codex/gpt-5.6-terra --effort high
+ted sessions                 # agents on the running local server
+ted tui --continue           # latest unsettled agent in this directory's project
+ted tui --resume <agent-id>  # specific server agent
 ```
 
-`--continue` and `--resume` are mutually exclusive. Continue matches the canonical
-Git worktree root (or startup directory outside Git). Explicit resume restores
-the original working directory for tools, even when launched elsewhere; a
-missing directory is an error. Saved model/effort settings win over defaults;
-explicit flags override them. If the saved model is unavailable, Ted asks you
-to choose a replacement with `--model` rather than silently switching.
-`--prompt` also works on resume and starts a new turn in that conversation.
+`--continue` and `--resume` are mutually exclusive. `--prompt`, `--model`, and
+`--effort` also work with resumed agents. Remote project directories must exist on
+the server; an explicit agent ID restores that agent's project directory.
 
-Snapshots live at `$TED_HOME/threads/<session-id>/session.json` (default
-`~/.ted/threads/...`). They contain the original system prompt, complete committed
-message history, tool calls/results, image bodies, provider reasoning metadata
-and its source model, settings, latest context usage, and artifact cursor.
-Credentials and live runtime objects are not saved. The TUI rebuilds user and
-assistant messages and tool-call summaries from this history; transient notices
-and slash-command feedback are not restored. Images appear as attachment markers.
-The interactive session picker is not implemented yet; use `ted sessions` to
-find an ID.
+Messages are durably queued, including while the agent is busy. Turns run FIFO,
+one at a time per agent. Failures hold the remaining queue. `/continue` releases
+held work; sending a new message does so implicitly, preserving FIFO order.
+`/stop` cancels the active turn and then starts the next queued message.
+`/settle` cancels work, holds pending messages, and hides the agent without
+removing its data. `/unsettle` (or restoring visibility through the API) does not resume work.
 
-**Recovery is between turns only.** An interrupted or failed turn is not saved
-and is never automatically rerun. Commands may already have modified files, so
-inspect the workspace before repeating interrupted work. Restoring a conversation
-does not roll back files or recreate browser tabs or running processes. Updates
-to Ted's embedded system prompt affect new sessions, not restored ones.
+Server state lives at `$TED_HOME/controlplane` (default `~/.ted/controlplane`),
+configurable with `ted serve --data-dir`. Queues, settings, conversations, and
+lifetime replay events are persisted together with private file permissions and
+atomic synced replacement. The data is plaintext and can contain sensitive code,
+outputs, and images. Credentials are loaded by the server, not saved in this store.
 
-Snapshots use private file permissions, a synced temporary file, and atomic
-rename. They are plaintext and can include sensitive source code, command output,
-and images: keep `TED_HOME` private. Save errors are shown in the TUI. A completed
-turn that cannot be saved remains in memory, but will not survive exit unless a
-later save succeeds. Concurrent writers are rejected using a revision check;
-reopen the session if another process has changed it. An abrupt crash during a
-write can leave `session.write-lock` in the thread directory; remove that empty
-directory only after confirming no process is writing the session.
-
-Embedded users opt in with `Agent.EnablePersistence()`. To resume, construct an
-agent with configured providers, call `RestoreSession(id, modelOverride,
-effortOverride)` (empty overrides preserve saved settings), then enable
-persistence. Merely constructing an agent or listing models does not save it.
+Interrupted turns are never automatically retried, and pending work is held after
+interruption. Commands may already have changed files; cancellation and restart
+do not undo those effects. Full completed tool output is retained in replay events,
+while model-facing context retains its existing output size cap. This greenfield
+control plane does not migrate standalone embedded-agent session snapshots.
 
 ### Context usage
 
@@ -146,7 +165,8 @@ go run . efforts codex/gpt-5.6-terra
 # high
 ```
 
-These commands load `.env` and use the same provider configuration as `tui`.
+These standalone discovery commands load `.env` using the same provider discovery
+as `serve`. A remote TUI instead uses the server's `/v1/models` catalog.
 Results come from the static catalog, with no API request. Model IDs are printed
 one per line and can be passed to `tui --model`. `efforts` reports when a model
 has no configurable effort; unknown or unavailable model IDs return an error.
@@ -159,6 +179,10 @@ has no configurable effort; unknown or unavailable model IDs return an error.
 | `/model <provider/model-id>` | Select a model directly |
 | `/effort` | Effort picker for the current model |
 | `/effort <value>` | Set supported reasoning effort directly |
+| `/stop` | Cancel the active turn, then advance the queue |
+| `/settle` | Cancel and archive this agent, preserving pending work |
+| `/unsettle` | Restore visibility without starting pending work |
+| `/continue` | Release work held after failure or restoration |
 | `/help` | List commands |
 | `/exit` | Exit the application |
 
@@ -167,18 +191,44 @@ cancel. The current selection has a check mark. Outside a picker, Escape and
 Ctrl+C also exit. Plain `exit` is sent as chat. Use `//` to send chat beginning with a literal slash (for example,
 `//model` sends `/model` to the model). Unknown commands produce local errors.
 
-Settings belong to the running agent instance and are not persisted. A model
+Settings belong to the durable server agent. Changes apply at the next turn. A model
 switch retains compatible effort; otherwise it uses the new model's default
 (or clears effort if unsupported) and reports the adjustment. The static
 integration currently exposes low/medium/high for the Codex entries and
 OpenRouter's listed OpenAI model. The other OpenRouter entries do not expose
 configurable effort; this is not a claim that the upstream models cannot reason.
 
-Settings changes and overlapping turns are rejected while a turn is active.
+The TUI accepts queued messages and next-turn settings changes while a turn is
+active. The embedded `agent.Agent` still rejects overlapping direct turns and
+busy settings changes; the control plane supplies the queue and desired settings.
 Command results appear only in the UI transcript, never in model history.
 Conversation text and tool exchanges survive model switches. Opaque reasoning
 is retained in stored history but only replayed to its originating model.
 Live cross-model/provider compatibility still depends on the upstream APIs.
+
+## HTTP API quick start
+
+With `ted serve` running, use a server-local root and a model from `GET /v1/models`:
+
+```sh
+curl http://localhost:8281/health
+curl http://localhost:8281/v1/models
+curl -X POST http://localhost:8281/v1/projects \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"my-project","root":"/absolute/server/path","defaults":{"model":"codex/gpt-6-astra","effort":"high"}}'
+
+# Substitute the returned project ID.
+curl -X POST http://localhost:8281/v1/agents \
+  -H 'Content-Type: application/json' -H 'Idempotency-Key: create-example' \
+  -d '{"project_id":"PROJECT_ID","prompt":"Explain this project."}'
+curl http://localhost:8281/v1/agents
+```
+
+The [OpenAPI document](api/openapi.yaml) defines all routes, validation, errors,
+pagination, and idempotency. The [WebSocket contract](api/websocket.md) covers
+multi-agent discovery, completed output events, submission, and cursor replay.
+Regenerate the checked-in server bindings with `go generate ./api`; verify drift
+with `./api/check-generated.sh`. No client SDK is generated yet.
 
 ## Embed in Go
 

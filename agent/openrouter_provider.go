@@ -110,7 +110,7 @@ func (o *OpenRouterProvider) Complete(logger *zap.Logger, completion CompletionR
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", OPENROUTER_API, bytes.NewBuffer(bodyData))
+	req, err := http.NewRequestWithContext(completion.RequestContext(), "POST", OPENROUTER_API, bytes.NewBuffer(bodyData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to build completion request %w", err)
 	}

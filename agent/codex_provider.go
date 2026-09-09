@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -120,7 +121,7 @@ func (c *CodexProvider) Complete(logger *zap.Logger, completion CompletionReques
 		return nil, err
 	}
 
-	credentials, err := c.auth.Credentials(logger)
+	credentials, err := c.auth.CredentialsContext(completion.RequestContext(), logger)
 	if err != nil {
 		return nil, err
 	}
@@ -133,15 +134,15 @@ func (c *CodexProvider) Complete(logger *zap.Logger, completion CompletionReques
 		zap.Int("input_item_count", len(input)),
 	)
 
-	output, err := c.send(logger, bodyData, credentials)
+	output, err := c.sendContext(completion.RequestContext(), logger, bodyData, credentials)
 	if errors.Is(err, errCodexUnauthorized) {
 		// The store believed the token was valid; the backend disagreed.
 		logger.Debug("codex backend rejected the access token, refreshing and retrying")
-		credentials, err = c.auth.Refresh(logger)
+		credentials, err = c.auth.RefreshContext(completion.RequestContext(), logger)
 		if err != nil {
 			return nil, err
 		}
-		output, err = c.send(logger, bodyData, credentials)
+		output, err = c.sendContext(completion.RequestContext(), logger, bodyData, credentials)
 	}
 	if err != nil {
 		return nil, err
@@ -153,7 +154,11 @@ func (c *CodexProvider) Complete(logger *zap.Logger, completion CompletionReques
 var errCodexUnauthorized = errors.New("codex backend returned 401 unauthorized")
 
 func (c *CodexProvider) send(logger *zap.Logger, bodyData []byte, credentials *CodexCredentials) (*Response, error) {
-	req, err := http.NewRequest("POST", CODEX_RESPONSES_API, bytes.NewReader(bodyData))
+	return c.sendContext(context.Background(), logger, bodyData, credentials)
+}
+
+func (c *CodexProvider) sendContext(ctx context.Context, logger *zap.Logger, bodyData []byte, credentials *CodexCredentials) (*Response, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", CODEX_RESPONSES_API, bytes.NewReader(bodyData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to build responses request %w", err)
 	}

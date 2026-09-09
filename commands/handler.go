@@ -39,12 +39,31 @@ type entry struct {
 	run  func([]string) (Result, error)
 }
 
+// Agent is the settings surface shared by local agents and API clients.
+type Agent interface {
+	Settings() agent.Settings
+	SetModel(string) (agent.SettingsChange, error)
+	SetEffort(agent.Effort) (agent.SettingsChange, error)
+	ListModels() []agent.ModelInfo
+	ListEfforts() []agent.Effort
+	Ready() bool
+}
+
+// Lifecycle is implemented by server-backed agents. No pause operation exists:
+// continue (or a new message) releases held input only after explicit restoration.
+type Lifecycle interface {
+	Stop() error
+	Settle() error
+	Unsettle() error
+	Continue() error
+}
+
 type Handler struct {
-	agent   *agent.Agent
+	agent   Agent
 	entries []entry
 }
 
-func New(a *agent.Agent) *Handler {
+func New(a Agent) *Handler {
 	h := &Handler{agent: a}
 	h.entries = []entry{
 		{Spec{"model", "Choose a model", "/model [provider/model-id]"}, h.model},
@@ -53,6 +72,27 @@ func New(a *agent.Agent) *Handler {
 		{Spec{"exit", "Exit the application", "/exit"}, func(_ []string) (Result, error) {
 			return Result{Exit: true}, nil
 		}},
+	}
+	if lifecycle, ok := a.(Lifecycle); ok {
+		for _, operation := range []struct {
+			name, description string
+			run               func() error
+		}{
+			{"stop", "Stop the current turn", lifecycle.Stop},
+			{"settle", "Settle this agent", lifecycle.Settle},
+			{"unsettle", "Restore visibility without starting work", lifecycle.Unsettle},
+			{"continue", "Continue pending input", lifecycle.Continue},
+		} {
+			h.entries = append(h.entries, entry{Spec{operation.name, operation.description, "/" + operation.name}, func(args []string) (Result, error) {
+				if len(args) != 0 {
+					return Result{}, fmt.Errorf("usage: /%s", operation.name)
+				}
+				if err := operation.run(); err != nil {
+					return Result{}, err
+				}
+				return Result{Message: operation.name + " requested"}, nil
+			}})
+		}
 	}
 	return h
 }
@@ -120,7 +160,7 @@ func (h *Handler) model(args []string) (Result, error) {
 		}
 		return Result{Message: message, Change: &change}, nil
 	}
-	if !h.agent.Ready() {
+	if !h.agent.Ready() && !supportsQueue(h.agent) {
 		return Result{}, agent.ErrBusy
 	}
 	selection := &Selection{Command: "model", Title: "Choose a model", Current: h.agent.Settings().Model}
@@ -141,7 +181,7 @@ func (h *Handler) effort(args []string) (Result, error) {
 		}
 		return Result{Message: "Effort set to " + string(change.After.Effort), Change: &change}, nil
 	}
-	if !h.agent.Ready() {
+	if !h.agent.Ready() && !supportsQueue(h.agent) {
 		return Result{}, agent.ErrBusy
 	}
 	settings := h.agent.Settings()
@@ -162,4 +202,9 @@ func (h *Handler) help(_ []string) (Result, error) {
 	}
 	lines = append(lines, "Use // to send a message beginning with a literal /.")
 	return Result{Message: strings.Join(lines, "\n")}, nil
+}
+
+func supportsQueue(a Agent) bool {
+	q, ok := a.(interface{ AcceptsQueuedInput() bool })
+	return ok && q.AcceptsQueuedInput()
 }

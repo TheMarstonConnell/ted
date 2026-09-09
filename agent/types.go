@@ -180,6 +180,9 @@ func (c *Content) UnmarshalJSON(data []byte) error {
 type ReasoningDetails []json.RawMessage
 
 type Message struct {
+	// SourceModel preserves reasoning provenance in exported checkpoints. It is
+	// removed from provider requests by messagesForModel.
+	SourceModel      string `json:"source_model,omitempty"`
 	sourceModel      string
 	Role             string           `json:"role"`
 	Content          Content          `json:"content"`

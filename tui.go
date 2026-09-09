@@ -85,7 +85,7 @@ type model struct {
 	agentStyle     lipgloss.Style
 	toolCallStyle  lipgloss.Style
 	err            error
-	agent          *agent.Agent
+	agent          tuiAgent
 	commands       *commands.Handler
 	picker         *pickerState
 	busy           bool
@@ -142,7 +142,22 @@ func newMarkdownRenderer(width int) (*glamour.TermRenderer, error) {
 	)
 }
 
-func initialModel(agent *agent.Agent) model {
+// tuiAgent keeps rendering independent of execution and persistence ownership.
+// *agent.Agent still satisfies it for renderer tests; production uses remote.Agent.
+type tuiAgent interface {
+	commands.Agent
+	WorkingDir() string
+	Messages() []agent.Message
+	ContextUsage() agent.ContextUsage
+	Turn(string) error
+}
+
+func (m model) acceptsQueuedInput() bool {
+	client, ok := m.agent.(interface{ AcceptsQueuedInput() bool })
+	return ok && client.AcceptsQueuedInput()
+}
+
+func initialModel(agent tuiAgent) model {
 	ta := textarea.New()
 	ta.Placeholder = "Send a message..."
 	ta.SetVirtualCursor(false)
@@ -189,6 +204,9 @@ func initialModel(agent *agent.Agent) model {
 				text = "[Image attachment]"
 			}
 			entries = append(entries, transcriptEntry{kind: userMessage, content: text})
+		case "tool":
+			// Results stay in server history, not the visible transcript.
+			continue
 		case "assistant":
 			if text := message.Content.Text(); text != "" {
 				entries = append(entries, transcriptEntry{kind: agentMessage, content: text})
@@ -337,10 +355,11 @@ func (m *model) layout() {
 }
 
 func (m model) Init() tea.Cmd {
+	branch := m.readBranch()
 	if strings.TrimSpace(m.initialPrompt) != "" {
-		return tea.Batch(textarea.Blink, readGitBranch(m.directory), func() tea.Msg { return initialPromptMsg{} })
+		return tea.Batch(textarea.Blink, branch, func() tea.Msg { return initialPromptMsg{} })
 	}
-	return tea.Batch(textarea.Blink, readGitBranch(m.directory))
+	return tea.Batch(textarea.Blink, branch)
 }
 
 // styleFor returns the style used to render entries of the given kind.
@@ -434,23 +453,35 @@ func (m model) isScrollKey(msg tea.KeyPressMsg) bool {
 
 // startTurn reserves the UI turn before the asynchronous agent command runs.
 func (m model) startTurn(prompt string) (tea.Model, tea.Cmd) {
-	m.appendMessage(userMessage, prompt)
+	// API messages are rendered from message.queued events, so another client
+	// submitting identical text cannot be mistaken for our optimistic message.
+	if !m.acceptsQueuedInput() {
+		m.appendMessage(userMessage, prompt)
+	}
 	m.busy = true
 	m.workingSpinner = spinner.New(spinner.WithSpinner(spinner.Line))
 	m.refreshTranscript()
 	m.layout()
 	m.viewport.GotoBottom()
 	instance := m.agent
-	return m, tea.Batch(m.workingSpinner.Tick, func() tea.Msg { return turnDoneMsg{err: instance.Turn(prompt)} })
+	return m, tea.Batch(m.workingSpinner.Tick, func() tea.Msg {
+		err := instance.Turn(prompt)
+		if m.acceptsQueuedInput() {
+			return submitDoneMsg{err: err}
+		}
+		return turnDoneMsg{err: err}
+	})
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case gitBranchErrorMsg:
+		return m, scheduleGitBranchRefresh()
 	case gitBranchMsg:
 		m.gitBranch = string(msg)
 		return m, scheduleGitBranchRefresh()
 	case gitBranchRefreshMsg:
-		return m, readGitBranch(m.directory)
+		return m, m.readBranch()
 	case spinner.TickMsg:
 		if !m.busy || msg.ID != m.workingSpinner.ID() {
 			return m, nil
@@ -484,15 +515,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.GotoBottom()
 	case agent.AgentResponse:
-		if msg.ResponseType == "usage" {
+		if msg.ResponseType == "user" {
+			m.appendMessage(userMessage, msg.Content)
+		} else if msg.ResponseType == "usage" {
 			return m, nil // Usage changed; redraw the toolbar without transcript noise.
 		} else if msg.ResponseType == "status" {
 			m.appendMessage(commandMessage, msg.Content)
+		} else if msg.ResponseType == "tool_result" {
+			return m, nil // Keep results in the session without displaying them.
 		} else if msg.ResponseType == "tool" {
 			m.appendMessage(toolCallMessage, msg.Content)
 		} else {
 			m.appendMessage(agentMessage, msg.Content)
 		}
+		return m, nil
+	case remoteStateMsg:
+		wasBusy := m.busy
+		m.busy = bool(msg)
+		m.refreshTranscript()
+		if m.busy && !wasBusy {
+			m.workingSpinner = spinner.New(spinner.WithSpinner(spinner.Line))
+			return m, m.workingSpinner.Tick
+		}
+		return m, nil
+	case submitDoneMsg:
+		if msg.err != nil {
+			m.appendMessage(commandMessage, "Error: "+msg.err.Error())
+		}
+		m.busy = !m.agent.Ready()
+		m.refreshTranscript()
 		return m, nil
 	case turnDoneMsg:
 		m.busy = false
@@ -522,7 +573,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Reserve the turn in the UI immediately, before its tea.Cmd starts.
 			fields := strings.Fields(userInput)
-			if m.busy && (fields[0] == "/model" || fields[0] == "/effort") {
+			if m.busy && !m.acceptsQueuedInput() && (fields[0] == "/model" || fields[0] == "/effort") {
 				m.appendMessage(commandMessage, agent.ErrBusy.Error())
 				return m, nil
 			}
@@ -536,7 +587,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.layout()
 				return m, nil
 			}
-			if m.busy {
+			if m.busy && !m.acceptsQueuedInput() {
 				m.appendMessage(commandMessage, agent.ErrBusy.Error())
 				return m, nil
 			}

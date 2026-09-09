@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -82,8 +83,26 @@ func (s *CodexAuthStore) Exists() bool {
 // Credentials returns a usable access token, refreshing it first when it is
 // about to expire or has not been refreshed for the interval the CLI uses.
 func (s *CodexAuthStore) Credentials(logger *zap.Logger) (*CodexCredentials, error) {
-	s.mu.Lock()
+	return s.CredentialsContext(context.Background(), logger)
+}
+
+// CredentialsContext is the cancellable variant of Credentials.
+func (s *CodexAuthStore) CredentialsContext(ctx context.Context, logger *zap.Logger) (*CodexCredentials, error) {
+	// A store may be shared by independent runtimes. Do not wait indefinitely
+	// behind another runtime's token refresh when this turn is cancelled.
+	for !s.mu.TryLock() {
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	file, tokens, err := s.load()
 	if err != nil {
@@ -92,7 +111,7 @@ func (s *CodexAuthStore) Credentials(logger *zap.Logger) (*CodexCredentials, err
 
 	if shouldRefresh(file, tokens, time.Now()) {
 		logger.Debug("codex access token is stale, refreshing")
-		tokens, err = s.refreshAndSave(logger, file, tokens)
+		tokens, err = s.refreshAndSaveContext(ctx, logger, file, tokens)
 		if err != nil {
 			return nil, err
 		}
@@ -104,15 +123,33 @@ func (s *CodexAuthStore) Credentials(logger *zap.Logger) (*CodexCredentials, err
 // Refresh discards the current access token and obtains a new one. It is the
 // recovery path when the backend rejects a token the store believed valid.
 func (s *CodexAuthStore) Refresh(logger *zap.Logger) (*CodexCredentials, error) {
-	s.mu.Lock()
+	return s.RefreshContext(context.Background(), logger)
+}
+
+// RefreshContext is the cancellable variant of Refresh.
+func (s *CodexAuthStore) RefreshContext(ctx context.Context, logger *zap.Logger) (*CodexCredentials, error) {
+	// A store may be shared by independent runtimes. Do not wait indefinitely
+	// behind another runtime's token refresh when this turn is cancelled.
+	for !s.mu.TryLock() {
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	file, tokens, err := s.load()
 	if err != nil {
 		return nil, err
 	}
 
-	tokens, err = s.refreshAndSave(logger, file, tokens)
+	tokens, err = s.refreshAndSaveContext(ctx, logger, file, tokens)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +215,10 @@ type codexRefreshResponse struct {
 }
 
 func (s *CodexAuthStore) refreshAndSave(logger *zap.Logger, file map[string]json.RawMessage, tokens *codexTokens) (*codexTokens, error) {
+	return s.refreshAndSaveContext(context.Background(), logger, file, tokens)
+}
+
+func (s *CodexAuthStore) refreshAndSaveContext(ctx context.Context, logger *zap.Logger, file map[string]json.RawMessage, tokens *codexTokens) (*codexTokens, error) {
 	bodyData, err := json.Marshal(codexRefreshRequest{
 		ClientId:     codexOAuthClientId,
 		GrantType:    "refresh_token",
@@ -187,7 +228,7 @@ func (s *CodexAuthStore) refreshAndSave(logger *zap.Logger, file map[string]json
 		return nil, fmt.Errorf("could not build token refresh request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", codexTokenRefreshURL, bytes.NewReader(bodyData))
+	req, err := http.NewRequestWithContext(ctx, "POST", codexTokenRefreshURL, bytes.NewReader(bodyData))
 	if err != nil {
 		return nil, fmt.Errorf("could not build token refresh request: %w", err)
 	}

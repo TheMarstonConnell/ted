@@ -1,0 +1,1398 @@
+openapi: 3.0.3
+info:
+  title: Ted control plane API
+  version: 1.0.0
+  description: Local unauthenticated control plane. Bind to loopback unless protected
+    by a trusted proxy. All request objects reject unknown properties. IDs and cursors
+    are opaque runtime identifiers; cursors are nonnegative integers. Bodies limited
+    to 2 MiB. JSON errors share one envelope. No wildcard CORS.
+paths:
+  /health:
+    get:
+      operationId: GetHealth
+      description: GetHealth
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '400': &id001
+          description: 'Invalid request: unknown or missing fields, malformed JSON
+            or parameters, bounds violations.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404': &id002
+          description: Project, agent, message, or event not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405': &id003
+          description: HTTP method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409': &id004
+          description: Conflicting state, idempotency key reused with different payload,
+            or message not pending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410': &id005
+          description: Cursor invalid (ahead of retained stream or outside lifetime).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413': &id006
+          description: Request body exceeds 2 MiB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415': &id007
+          description: Expected application/json.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500': &id008
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503': &id009
+          description: Service shutting down or durable storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/projects:
+    get:
+      operationId: ListProjects
+      description: ListProjects
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+    post:
+      operationId: CreateProject
+      description: CreateProject
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+  /v1/projects/{project_id}:
+    get:
+      operationId: GetProject
+      description: GetProject
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: &id010
+          type: string
+          minLength: 1
+          maxLength: 256
+    patch:
+      operationId: PatchProject
+      description: Update project name or defaults; defaults affect future agents
+        only.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: *id010
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchProjectRequest'
+    delete:
+      operationId: DeleteProject
+      description: Delete an empty project. Returns 409 while agents belong to it.
+      responses:
+        '204':
+          description: Success
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: *id010
+  /v1/agents:
+    get:
+      operationId: ListAgents
+      description: ListAgents
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Agent'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: include_settled
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - name: project_id
+        in: query
+        required: false
+        schema: *id010
+    post:
+      operationId: CreateAgent
+      description: Create an agent; optional prompt queues its first turn. Optional
+        Idempotency-Key makes retries safe; differing payload with the same key returns
+        409.
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - &id011
+        name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 256
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentRequest'
+  /v1/agents/{agent_id}:
+    get:
+      operationId: GetAgent
+      description: GetAgent
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+    patch:
+      operationId: PatchAgent
+      description: PatchAgent
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchAgentRequest'
+  /v1/agents/{agent_id}/settings:
+    patch:
+      operationId: PatchAgentSettings
+      description: Change settings for future turns; the active turn keeps its captured
+        settings.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsPatch'
+  /v1/agents/{agent_id}/messages:
+    get:
+      operationId: ListMessages
+      description: Inspect the queue, including terminal entries.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QueuedMessage'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+    post:
+      operationId: SubmitMessage
+      description: Queue a message. Optional Idempotency-Key deduplicates submissions
+        across HTTP and WebSocket; different text with the same key returns 409.
+      responses:
+        '202':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueuedMessage'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+      - *id011
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitMessageRequest'
+  /v1/agents/{agent_id}/messages/{message_id}:
+    delete:
+      operationId: DeletePending
+      description: DeletePending
+      responses:
+        '204':
+          description: Success
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+      - name: message_id
+        in: path
+        required: true
+        schema: *id010
+  /v1/agents/{agent_id}/stop:
+    post:
+      operationId: StopAgent
+      description: Stop only the named turn (turn_id is its queued message ID); advance
+        pending queue. Safe to retry without stopping a newer turn.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopRequest'
+  /v1/agents/{agent_id}/continue:
+    post:
+      operationId: ContinueAgent
+      description: Release queue hold and schedule pending messages. No request body.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+  /v1/agents/{agent_id}/history:
+    get:
+      operationId: GetHistory
+      description: Conversation messages after a zero-based consumed-message cursor.
+        next_cursor equals after plus returned count. Ahead-of-history cursors return
+        410; conversation compaction may invalidate a cursor.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryPage'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+      - &id012
+        name: after
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+          default: 0
+      - &id013
+        name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1000
+          default: 100
+  /v1/agents/{agent_id}/events:
+    get:
+      operationId: GetEvents
+      description: Lifetime event log, exclusive after cursor. next_cursor is last
+        returned cursor or after on empty page. Invalid cursors return 410. Full oversized
+        output is retained.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventPage'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+      - *id012
+      - *id013
+  /v1/agents/{agent_id}/events/{cursor}:
+    get:
+      operationId: GetEvent
+      description: Fetch one complete retained event, including output referenced
+        by an event_ref WebSocket frame. No output truncation.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+      - name: cursor
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+  /v1/models:
+    get:
+      operationId: ListModels
+      description: ListModels
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Model'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+  /v1/ws:
+    get:
+      operationId: WebSocket
+      description: Upgrade to multiplexed WebSocket. Same-host browser Origin only
+        (or absent Origin); forbidden origins return 403. See websocket.md for protocol;
+        client frames are WSSubscribe or WSSubmit. No query parameters.
+      responses:
+        '101':
+          description: Success
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+        '403':
+          description: Origin is not this server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    Settings:
+      type: object
+      additionalProperties: false
+      properties: &id014
+        model:
+          type: string
+          minLength: 1
+          maxLength: 256
+        effort:
+          type: string
+          maxLength: 64
+      required: &id026
+      - model
+      - effort
+    SettingsPatch:
+      type: object
+      additionalProperties: false
+      properties: *id014
+      minProperties: 1
+    Project:
+      type: object
+      additionalProperties: false
+      properties:
+        git_branch:
+          type: string
+          description: Live server-side Git branch (or detached commit), populated on GET project; omitted outside Git repositories.
+        id: *id010
+        name:
+          type: string
+        root:
+          type: string
+        defaults:
+          $ref: '#/components/schemas/Settings'
+      required:
+      - id
+      - name
+      - root
+      - defaults
+    CreateProjectRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        root:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        defaults:
+          $ref: '#/components/schemas/Settings'
+      required:
+      - name
+      - root
+      - defaults
+    PatchProjectRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        defaults:
+          $ref: '#/components/schemas/Settings'
+      minProperties: 1
+    CreateAgentRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        project_id: *id010
+        title:
+          type: string
+          maxLength: 256
+        prompt: &id015
+          type: string
+          minLength: 1
+          maxLength: 1048576
+        settings:
+          $ref: '#/components/schemas/SettingsPatch'
+      required:
+      - project_id
+    PatchAgentRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        settled:
+          type: boolean
+      required:
+      - settled
+    SubmitMessageRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        text: *id015
+      required:
+      - text
+    StopRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        turn_id: *id010
+      required:
+      - turn_id
+    QueuedMessage:
+      type: object
+      additionalProperties: false
+      properties:
+        id: *id010
+        text:
+          type: string
+        status:
+          type: string
+          enum:
+          - pending
+          - running
+          - completed
+          - failed
+          - interrupted
+          - cancelled
+        error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - id
+      - text
+      - status
+      - created_at
+    FunctionCall:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        arguments:
+          type: string
+          description: JSON-encoded function arguments.
+      required:
+      - name
+      - arguments
+    ToolCall:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        index:
+          type: integer
+          format: int64
+          minimum: 0
+        function:
+          $ref: '#/components/schemas/FunctionCall'
+      required:
+      - id
+      - type
+      - index
+      - function
+    ImageURL:
+      type: object
+      additionalProperties: true
+      properties:
+        url:
+          type: string
+        detail:
+          type: string
+      required:
+      - url
+    ContentPart:
+      type: object
+      additionalProperties: true
+      properties:
+        type:
+          type: string
+        text:
+          type: string
+        image_url:
+          oneOf:
+          - $ref: '#/components/schemas/ImageURL'
+          - type: string
+      required:
+      - type
+    MessageContent:
+      description: 'Original provider body: plain text, typed multimodal parts, or
+        null. Replayed without normalization.'
+      nullable: true
+      oneOf:
+      - type: string
+      - type: array
+        items:
+          $ref: '#/components/schemas/ContentPart'
+    ReasoningDetail:
+      type: object
+      additionalProperties: true
+      description: Opaque extended thinking record. Unknown provider fields, encrypted
+        data and signatures must be preserved unchanged.
+      properties:
+        type:
+          type: string
+        id:
+          type: string
+        format:
+          type: string
+        index:
+          type: integer
+          format: int64
+          minimum: 0
+        text:
+          type: string
+        summary:
+          nullable: true
+          x-go-type: json.RawMessage
+        data:
+          nullable: true
+          x-go-type: json.RawMessage
+        signature:
+          type: string
+    Message:
+      type: object
+      description: Provider-neutral retained conversation message, including reasoning
+        provenance and tool results. Unknown provider fields are preserved.
+      additionalProperties: true
+      properties:
+        role:
+          type: string
+        content:
+          $ref: '#/components/schemas/MessageContent'
+        reasoning:
+          type: string
+        reasoning_details:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReasoningDetail'
+        tool_calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolCall'
+        tool_call_id:
+          type: string
+        source_model:
+          type: string
+          description: Origin model for opaque reasoning replay; not forwarded as
+            a provider message field.
+      required:
+      - role
+      - content
+    Agent:
+      type: object
+      additionalProperties: false
+      properties:
+        id: *id010
+        project_id: *id010
+        title: &id016
+          type: string
+        settings: &id017
+          $ref: '#/components/schemas/Settings'
+        active_settings: &id018
+          $ref: '#/components/schemas/Settings'
+        settled: &id019
+          type: boolean
+        state: &id020
+          type: string
+          enum:
+          - idle
+          - running
+          - stopping
+        held: &id021
+          type: boolean
+        queue:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueuedMessage'
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        cursor: &id022
+          type: integer
+          format: int64
+          minimum: 0
+        created_at: &id023
+          type: string
+          format: date-time
+        updated_at: &id024
+          type: string
+          format: date-time
+        context_usage: &id025
+          $ref: '#/components/schemas/ContextUsage'
+      required:
+      - id
+      - project_id
+      - title
+      - settings
+      - settled
+      - state
+      - held
+      - cursor
+      - created_at
+      - updated_at
+    ContextUsage:
+      type: object
+      additionalProperties: false
+      properties:
+        model:
+          type: string
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+        estimated_tokens:
+          type: integer
+          format: int64
+        context_window:
+          type: integer
+          format: int64
+        known:
+          type: boolean
+        estimated:
+          type: boolean
+      required:
+      - model
+      - input_tokens
+      - output_tokens
+      - estimated_tokens
+      - context_window
+      - known
+      - estimated
+    AgentSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        id: *id010
+        project_id: *id010
+        title: *id016
+        settings: *id017
+        active_settings: *id018
+        settled: *id019
+        state: *id020
+        held: *id021
+        cursor: *id022
+        created_at: *id023
+        updated_at: *id024
+        context_usage: *id025
+      required:
+      - id
+      - project_id
+      - title
+      - settings
+      - settled
+      - state
+      - held
+      - cursor
+      - created_at
+      - updated_at
+    NullableSettings:
+      type: object
+      additionalProperties: false
+      properties: *id014
+      required: *id026
+      nullable: true
+    AgentUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        id: *id010
+        project_id: *id010
+        title:
+          type: string
+        settings:
+          $ref: '#/components/schemas/Settings'
+        active_settings:
+          $ref: '#/components/schemas/NullableSettings'
+        settled:
+          type: boolean
+        state:
+          type: string
+          enum:
+          - idle
+          - running
+          - stopping
+        held:
+          type: boolean
+        context_usage:
+          $ref: '#/components/schemas/ContextUsage'
+      required:
+      - id
+      - project_id
+      - title
+      - settings
+      - active_settings
+      - settled
+      - state
+      - held
+      - context_usage
+      description: State payload for agent.created and agent.updated. The enclosing
+        Event supplies agent_id, cursor and created_at. This is not a complete Agent
+        resource; it deliberately excludes history and queue.
+    AgentOutput:
+      type: object
+      additionalProperties: false
+      properties:
+        Content:
+          type: string
+          description: Display/provider-context output, possibly capped for tool results.
+        ResponseType:
+          type: string
+          enum:
+          - agent
+          - tool
+          - tool_result
+          - status
+          - usage
+        ToolCallID:
+          type: string
+        ToolName:
+          type: string
+        FullToolOutput:
+          type: string
+          description: Complete uncapped tool stdout/stderr including cancellation/failure
+            annotations; empty on non-tool-result output.
+      required:
+      - Content
+      - ResponseType
+      - ToolCallID
+      - ToolName
+      - FullToolOutput
+      description: Retained agent.AgentResponse. PascalCase field names are intentional
+        compatibility with the existing runtime output payload.
+    ConversationDelta:
+      type: array
+      items:
+        $ref: '#/components/schemas/Message'
+      description: New committed messages appended since the previous conversation
+        event, not a full conversation snapshot.
+    EventData:
+      oneOf:
+      - $ref: '#/components/schemas/AgentUpdate'
+      - $ref: '#/components/schemas/QueuedMessage'
+      - $ref: '#/components/schemas/AgentOutput'
+      - $ref: '#/components/schemas/ConversationDelta'
+      description: Payload selected by Event.type; see x-event-data-schemas on Event
+        and websocket.md.
+    Event:
+      type: object
+      additionalProperties: false
+      properties:
+        agent_id: *id010
+        cursor:
+          type: integer
+          format: int64
+          minimum: 1
+        type:
+          type: string
+          enum:
+          - agent.created
+          - agent.updated
+          - message.queued
+          - message.cancelled
+          - turn.started
+          - turn.completed
+          - turn.failed
+          - turn.interrupted
+          - turn.cancelled
+          - output
+          - conversation
+        data:
+          $ref: '#/components/schemas/EventData'
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - agent_id
+      - cursor
+      - type
+      - data
+      - created_at
+      x-event-data-schemas:
+        agent.created: '#/components/schemas/AgentUpdate'
+        agent.updated: '#/components/schemas/AgentUpdate'
+        message.queued: '#/components/schemas/QueuedMessage'
+        message.cancelled: '#/components/schemas/QueuedMessage'
+        turn.started: '#/components/schemas/QueuedMessage'
+        turn.completed: '#/components/schemas/QueuedMessage'
+        turn.failed: '#/components/schemas/QueuedMessage'
+        turn.interrupted: '#/components/schemas/QueuedMessage'
+        turn.cancelled: '#/components/schemas/QueuedMessage'
+        output: '#/components/schemas/AgentOutput'
+        conversation: '#/components/schemas/ConversationDelta'
+    ErrorCode:
+      type: string
+      enum:
+      - invalid
+      - invalid_project
+      - invalid_settings
+      - invalid_message
+      - invalid_limit
+      - turn_required
+      - not_found
+      - conflict
+      - project_exists
+      - project_not_empty
+      - idempotency_conflict
+      - not_pending
+      - not_running
+      - settled
+      - cursor_invalid
+      - shutting_down
+      - storage_failed
+      - internal
+      - method_not_allowed
+      - too_large
+      - unsupported_media_type
+      - forbidden
+    Error:
+      type: object
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          properties:
+            code:
+              $ref: '#/components/schemas/ErrorCode'
+            message:
+              type: string
+          required:
+          - code
+          - message
+      required:
+      - error
+    EventPage:
+      type: object
+      additionalProperties: false
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+        next_cursor:
+          type: integer
+          format: int64
+          minimum: 0
+      required:
+      - events
+      - next_cursor
+    HistoryPage:
+      type: object
+      additionalProperties: false
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        next_cursor:
+          type: integer
+          format: int64
+          minimum: 0
+      required:
+      - messages
+      - next_cursor
+    Model:
+      type: object
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+        context_window:
+          type: integer
+          format: int64
+          minimum: 0
+        efforts:
+          type: array
+          items:
+            type: string
+        default_effort:
+          type: string
+      required:
+      - id
+      - name
+      - provider
+      - context_window
+      - efforts
+      - default_effort
+    Health:
+      type: object
+      additionalProperties: false
+      properties:
+        api_version:
+          type: string
+          enum:
+          - '1'
+      required:
+      - api_version
+    WSSubscribe:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum:
+          - subscribe
+        request_id: *id010
+        subscribe_all:
+          type: boolean
+          default: false
+        agent_ids:
+          type: array
+          items: *id010
+        cursors:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+            minimum: 0
+      required:
+      - type
+      - request_id
+    WSSubmit:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum:
+          - submit
+        request_id: *id010
+        agent_id: *id010
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 256
+        text: *id015
+      required:
+      - type
+      - request_id
+      - agent_id
+      - idempotency_key
+      - text
+    WSError:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum:
+          - error
+        request_id:
+          type: string
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+      required:
+      - type
+      - code
+      - message
+    WSAck:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum:
+          - ack
+        request_id: *id010
+        agent_id: *id010
+        message_id: *id010
+        status:
+          type: string
+      required:
+      - type
+      - request_id
+      - agent_id
+      - message_id
+      - status
+    WSSubscribed:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum:
+          - subscribed
+        request_id: *id010
+      required:
+      - type
+      - request_id
+    WSInventory:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum:
+          - inventory
+        agent:
+          $ref: '#/components/schemas/AgentSummary'
+      required:
+      - type
+      - agent
+    WSEvent:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum:
+          - event
+        event:
+          $ref: '#/components/schemas/Event'
+      required:
+      - type
+      - event
+    WSEventReference:
+      type: object
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          enum:
+          - event_ref
+        agent_id: *id010
+        cursor:
+          type: integer
+          format: int64
+          minimum: 1
+        url:
+          type: string
+      required:
+      - type
+      - agent_id
+      - cursor
+      - url

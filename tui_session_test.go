@@ -31,6 +31,16 @@ func TestRestoredTranscriptFromAgentHistory(t *testing.T) {
 	if err := b.RestoreSession(a.ThreadID(), "", ""); err != nil {
 		t.Fatal(err)
 	}
+
+	foundResult := false
+	for _, message := range b.Messages() {
+		if message.Role == "tool" && message.Content.Text() == "hello\n" {
+			foundResult = true
+		}
+	}
+	if !foundResult {
+		t.Fatal("tool result missing from restored session data")
+	}
 	m := initialModel(b)
 	if len(m.messages) != 4 {
 		t.Fatalf("entries: %+v", m.messages)

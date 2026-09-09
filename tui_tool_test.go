@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/TheMarstonConnell/ted/agent"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -32,5 +33,22 @@ func TestToolCommandResizesWithoutLosingContent(t *testing.T) {
 	wide := ansi.Strip(m.renderEntry(entry, 120))
 	if wide != original || entry.content != original {
 		t.Fatalf("full command not preserved: %q", wide)
+	}
+}
+
+func TestToolResultsHidden(t *testing.T) {
+	m := tuiTestModel()
+	next, _ := m.Update(agent.AgentResponse{ResponseType: "tool", Content: `Ran shell command - "echo hello"`})
+	m = next.(model)
+	count, transcript := len(m.messages), m.transcriptContent
+	for _, full := range []string{"", "full output\nlast line"} {
+		next, cmd := m.Update(agent.AgentResponse{ResponseType: "tool_result", Content: "hello", FullToolOutput: full})
+		m = next.(model)
+		if cmd != nil || len(m.messages) != count || m.transcriptContent != transcript {
+			t.Fatal("tool result changed the visible transcript")
+		}
+	}
+	if m.messages[count-1].kind != toolCallMessage {
+		t.Fatal("command missing")
 	}
 }
