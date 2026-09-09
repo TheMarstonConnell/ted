@@ -36,28 +36,19 @@ func TestToolCommandResizesWithoutLosingContent(t *testing.T) {
 	}
 }
 
-func TestFullToolResultPreservedButPreviewTruncated(t *testing.T) {
+func TestToolResultsHidden(t *testing.T) {
 	m := tuiTestModel()
-	output := "first line\n" + strings.Repeat("full output ", 40) + "\nlast line"
-	next, _ := m.Update(agent.AgentResponse{ResponseType: "tool_result", Content: "provider-capped", FullToolOutput: output})
+	next, _ := m.Update(agent.AgentResponse{ResponseType: "tool", Content: `Ran shell command - "echo hello"`})
 	m = next.(model)
-	entry := m.messages[len(m.messages)-1]
-	if entry.kind != toolResultMessage || entry.content != output {
-		t.Fatal("full result lost")
-	}
-	rendered := ansi.Strip(m.renderEntry(entry, 80))
-	if !strings.Contains(rendered, "first line") || strings.Contains(rendered, "last line") || strings.Contains(rendered, "provider-capped") {
-		t.Fatal(rendered)
-	}
-}
-
-func TestToolResultsSingleLine(t *testing.T) {
-	m := model{}
-	for _, width := range []int{0, 1, 2, 8, 40, 80} {
-		entry := transcriptEntry{kind: toolResultMessage, content: strings.Repeat("界🙂\n\t\x1b[31moutput", 50)}
-		out := ansi.Strip(m.renderEntry(entry, width))
-		if strings.ContainsAny(out, "\n\r\t\x1b") || ansi.StringWidth(out) > width*3/4 {
-			t.Fatalf("width %d: %q", width, out)
+	count, transcript := len(m.messages), m.transcriptContent
+	for _, full := range []string{"", "full output\nlast line"} {
+		next, cmd := m.Update(agent.AgentResponse{ResponseType: "tool_result", Content: "hello", FullToolOutput: full})
+		m = next.(model)
+		if cmd != nil || len(m.messages) != count || m.transcriptContent != transcript {
+			t.Fatal("tool result changed the visible transcript")
 		}
+	}
+	if m.messages[count-1].kind != toolCallMessage {
+		t.Fatal("command missing")
 	}
 }

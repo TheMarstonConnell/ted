@@ -47,7 +47,6 @@ const (
 	agentMessage
 	toolCallMessage
 	commandMessage
-	toolResultMessage
 )
 
 // transcriptEntry is one message in the conversation. Entries hold raw text
@@ -206,7 +205,8 @@ func initialModel(agent tuiAgent) model {
 			}
 			entries = append(entries, transcriptEntry{kind: userMessage, content: text})
 		case "tool":
-			entries = append(entries, transcriptEntry{kind: toolCallMessage, content: message.Content.Text()})
+			// Results stay in server history, not the visible transcript.
+			continue
 		case "assistant":
 			if text := message.Content.Text(); text != "" {
 				entries = append(entries, transcriptEntry{kind: agentMessage, content: text})
@@ -369,7 +369,7 @@ func (m model) styleFor(kind messageKind) lipgloss.Style {
 		return m.bannerStyle
 	case userMessage:
 		return m.senderStyle
-	case toolCallMessage, commandMessage, toolResultMessage:
+	case toolCallMessage, commandMessage:
 		return m.toolCallStyle
 	default:
 		return m.agentStyle
@@ -381,7 +381,7 @@ func (m model) styleFor(kind messageKind) lipgloss.Style {
 // with terminal styling; if the markdown renderer is unavailable or fails,
 // the raw text is shown instead.
 func (m *model) renderEntry(entry transcriptEntry, width int) string {
-	if entry.kind == toolCallMessage || entry.kind == toolResultMessage {
+	if entry.kind == toolCallMessage {
 		// Keep the raw entry intact so resizing can reveal more of the command.
 		// Strip terminal escapes and collapse whitespace before measuring cells,
 		// not bytes, so wide Unicode characters cannot cause wrapping.
@@ -522,11 +522,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if msg.ResponseType == "status" {
 			m.appendMessage(commandMessage, msg.Content)
 		} else if msg.ResponseType == "tool_result" {
-			output := msg.FullToolOutput
-			if output == "" {
-				output = msg.Content
-			}
-			m.appendMessage(toolResultMessage, output)
+			return m, nil // Keep results in the session without displaying them.
 		} else if msg.ResponseType == "tool" {
 			m.appendMessage(toolCallMessage, msg.Content)
 		} else {
