@@ -368,7 +368,7 @@ export function Chat() {
   const contextPercent =
     context && context.context_window > 0
       ? Math.round((context.estimated_tokens / context.context_window) * 100)
-      : undefined;
+      : 0;
   const action = async (fn: () => Promise<unknown>) => {
     if (inFlight.has(agentId)) return;
     inFlight.add(agentId);
@@ -729,19 +729,14 @@ export function Chat() {
                 variant="ghost"
                 size="sm"
                 aria-label="View context"
-                title={
-                  contextPercent === undefined
-                    ? "Context usage unavailable. View chat settings."
-                    : `Context usage: ${contextPercent}%. View chat settings.`
-                }
+                title={`Context usage: ${contextPercent}%. View chat settings.`}
                 onClick={() => open("panel", "settings")}
               >
                 <span className="hidden md:inline">
-                  Context
-                  {contextPercent === undefined ? "" : ` ${contextPercent}%`}
+                  Context {contextPercent}%
                 </span>
                 <span className="md:hidden">
-                  {contextPercent === undefined ? "—" : `${contextPercent}%`}
+                  {contextPercent}%
                 </span>
               </Button>
               <Button

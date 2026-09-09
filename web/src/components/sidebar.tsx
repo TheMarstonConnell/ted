@@ -51,7 +51,10 @@ export function AgentLink({ agent }: { agent: Agent }) {
     }
   };
   return (
-    <div data-agent-id={agent.id} className="space-y-1">
+    <div
+      data-agent-id={agent.id}
+      className={`space-y-1 ${agent.settled ? "opacity-60 hover:opacity-100 focus-within:opacity-100" : ""}`}
+    >
       <div className="group/agent flex items-center gap-1 transition-[gap] duration-150 [@media(hover:hover)_and_(pointer:fine)]:gap-0 hover:gap-1 focus-within:gap-1">
         <Button
           variant={agentId === agent.id ? "secondary" : "ghost"}
@@ -208,7 +211,7 @@ function SidebarContent() {
         <Collapsible>
           <CollapsibleTrigger
             render={
-              <Button variant="ghost" className="group w-full justify-start" />
+              <Button variant="ghost" className="group w-full justify-start opacity-60 hover:opacity-100 focus-visible:opacity-100" />
             }
           >
             <ChevronRight className="size-4 group-data-panel-open:rotate-90" />

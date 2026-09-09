@@ -916,7 +916,7 @@ for (const width of [1440, 390, 320]) {
       .toBe(48);
     await expect(model).toHaveText("Test model");
     await expect(effort).toHaveText("medium");
-    await expect(context).toHaveText(width < 768 ? "—" : "Context", {
+    await expect(context).toHaveText(width < 768 ? "0%" : "Context 0%", {
       useInnerText: true,
     });
     const location = page.getByRole("group", {
@@ -2201,7 +2201,7 @@ test.describe("mobile composer footer", () => {
       name: "View context",
       exact: true,
     });
-    await expect(context).toHaveText("—", { useInnerText: true });
+    await expect(context).toHaveText("0%", { useInnerText: true });
     await expect(location.getByText(root, { exact: true })).toHaveAttribute(
       "title",
       root,

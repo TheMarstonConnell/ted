@@ -21,7 +21,7 @@ the draft up to 208px, then scrolls without covering the toolbar. Model/effort
 changes save immediately for the next turn.
 
 Context lives in the footer below the input on every screen and opens the full
-usage/settings dialog. Mobile shows only its percentage (or “—” when usage is
+usage/settings dialog. Mobile shows only its percentage (or “0%” when usage is
 unavailable), while desktop retains the Context label. On mobile, the footer has
 the branch on the left and context plus the sidebar menu on the right; the file
 path is hidden. Desktop shows the directory and branch on the left, with context
@@ -98,7 +98,8 @@ action with an accessible label and hover title. Project creation is no longer r
 - Active agents are ordered newest-created first within project groups. Misc
   agents come first. Each sidebar entry shows its project’s current Git branch on
   a second line, with a settle button on the right. Settled chats are in one
-  ungrouped, collapsed section below, with restore buttons. On hover-capable
+  ungrouped, collapsed section below, with restore buttons. Settled rows and their
+  heading are subtly faded until hovered or keyboard-focused. On hover-capable
   pointer devices, settle/restore buttons appear only while their row is hovered
   or keyboard-focused. Entries use the full width at rest, then smoothly shrink
   by the action’s width and gap on reveal without changing row height. Reduced
