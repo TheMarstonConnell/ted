@@ -77,6 +77,7 @@ type model struct {
 	// directory is the working directory at startup, shown in the status
 	// line so the user can see where the agent's tools operate.
 	directory      string
+	gitBranch      string
 	messages       []transcriptEntry
 	textarea       textarea.Model
 	bannerStyle    lipgloss.Style
@@ -266,7 +267,11 @@ func (m model) statusView() string {
 	if available < 0 {
 		return m.statusStyle.Width(width).Render(ansi.Truncate(meter, width, "…"))
 	}
-	prefix := ansi.Truncate(label+"  "+m.directory, available, "…")
+	directory := m.directory
+	if m.gitBranch != "" {
+		directory += " (" + m.gitBranch + ")"
+	}
+	prefix := ansi.Truncate(label+"  "+directory, available, "…")
 	meterStyle := lipgloss.NewStyle()
 	if percent >= 90 {
 		meterStyle = meterStyle.Foreground(lipgloss.Color("1"))
@@ -313,9 +318,9 @@ func (m *model) layout() {
 
 func (m model) Init() tea.Cmd {
 	if strings.TrimSpace(m.initialPrompt) != "" {
-		return tea.Batch(textarea.Blink, func() tea.Msg { return initialPromptMsg{} })
+		return tea.Batch(textarea.Blink, readGitBranch(m.directory), func() tea.Msg { return initialPromptMsg{} })
 	}
-	return textarea.Blink
+	return tea.Batch(textarea.Blink, readGitBranch(m.directory))
 }
 
 // styleFor returns the style used to render entries of the given kind.
@@ -421,6 +426,11 @@ func (m model) startTurn(prompt string) (tea.Model, tea.Cmd) {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case gitBranchMsg:
+		m.gitBranch = string(msg)
+		return m, scheduleGitBranchRefresh()
+	case gitBranchRefreshMsg:
+		return m, readGitBranch(m.directory)
 	case spinner.TickMsg:
 		if !m.busy || msg.ID != m.workingSpinner.ID() {
 			return m, nil

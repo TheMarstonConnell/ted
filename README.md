@@ -41,6 +41,10 @@ supply a fixed supported-model catalog. The CLI fetches OpenRouter context-windo
 metadata at startup with a three-second deadline; unavailable metadata does not
 prevent startup. Codex models in the catalog use a 1,050,000-token window.
 
+The TUI shows the current Git branch beside the working directory, refreshing
+every three seconds. Detached HEADs show a short commit ID; outside a Git
+repository (or when Git is unavailable), the branch indicator is hidden.
+
 ### Context usage
 
 The TUI starts at `ctx 100% left` until usage metrics arrive, then shows the

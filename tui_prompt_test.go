@@ -74,8 +74,12 @@ func TestEmptyInitialPrompt(t *testing.T) {
 	for _, prompt := range []string{"", " \n\t "} {
 		m := tuiTestModel()
 		m.initialPrompt = prompt
-		if _, ok := m.Init()().(tea.BatchMsg); ok {
-			t.Fatal("empty prompt scheduled")
+		if batch, ok := m.Init()().(tea.BatchMsg); ok {
+			for _, cmd := range batch {
+				if _, ok := cmd().(initialPromptMsg); ok {
+					t.Fatal("empty prompt scheduled")
+				}
+			}
 		}
 		next, cmd := m.Update(initialPromptMsg{})
 		m = next.(model)
