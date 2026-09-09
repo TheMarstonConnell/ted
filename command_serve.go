@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/TheMarstonConnell/ted/controlplane"
+	"github.com/TheMarstonConnell/ted/web"
 	"github.com/spf13/cobra"
 )
 
@@ -90,7 +91,7 @@ func runServe(ctx context.Context, addr, dir string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "Ted API listening on %s (API version 1). WARNING: no authentication; use a trusted network or protected proxy.\n", listener.Addr())
+	fmt.Fprintf(os.Stderr, "Ted control plane listening on %s (API version 1). WARNING: no authentication; use a trusted network or protected proxy.\n", listener.Addr())
 	return serveControlPlane(ctx, listener, service)
 }
 
@@ -99,7 +100,7 @@ func serveControlPlane(ctx context.Context, listener net.Listener, service *cont
 	// net/http does not close hijacked (WebSocket) connections in Close.
 	// Keep all accepted sockets so owner shutdown intentionally disconnects every client.
 	tracked := &trackedListener{Listener: listener}
-	server := &http.Server{Handler: controlplane.NewHandler(service), ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Handler: web.Handler(controlplane.NewHandler(service)), ReadHeaderTimeout: 10 * time.Second}
 
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(tracked) }()

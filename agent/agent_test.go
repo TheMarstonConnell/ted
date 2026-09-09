@@ -103,7 +103,7 @@ func TestToolNotificationIncludesQuotedCommand(t *testing.T) {
 	a := testAgent()
 	var replies []AgentResponse
 	a.SetOutput(func(reply AgentResponse) { replies = append(replies, reply) })
-	result := a.runToolCall(ToolCall{Function: FunctionCall{
+	result := a.runToolCall(ToolCall{Id: "call_notification", Function: FunctionCall{
 		Name: "bash", Arguments: `{"command":"echo one\necho two"}`,
 	}})
 	if strings.TrimSpace(result) != "one\ntwo" {
@@ -111,5 +111,8 @@ func TestToolNotificationIncludesQuotedCommand(t *testing.T) {
 	}
 	if len(replies) != 1 || replies[0].ResponseType != "tool" || replies[0].Content != `Ran shell command - "echo one\necho two"` {
 		t.Fatalf("unexpected tool notification: %+v", replies)
+	}
+	if replies[0].ToolCallID != "call_notification" || replies[0].ToolName != "bash" {
+		t.Fatalf("tool notification missing correlation metadata: %+v", replies[0])
 	}
 }

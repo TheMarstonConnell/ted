@@ -1,7 +1,7 @@
 # Ted
 
 A Go coding agent with a server-owned control plane, an OpenAPI HTTP/WebSocket API,
-and a Bubble Tea terminal client.
+a React web control plane, and a Bubble Tea terminal client.
 
 ## System prompt
 
@@ -65,6 +65,18 @@ prevent startup. Codex models in the catalog use a 1,050,000-token window.
 The TUI shows the current Git branch beside the working directory, refreshing
 every three seconds. Detached HEADs show a short commit ID; outside a Git
 repository (or when Git is unavailable), the branch indicator is hidden.
+
+### Web control plane
+
+`ted serve` also serves the React web UI at **http://localhost:8281**. Start a
+chat by picking a project, follow live agent output, manage queues and settings,
+and send a message to restore a settled chat. The built UI is embedded in the Go
+binary; no separate frontend process is needed.
+
+For Vite development, rebuilding the embedded assets, and web tests, see
+[`web/README.md`](web/README.md). The same server security warning applies to the
+browser UI: there is no authentication, and tools run with the server user's
+permissions.
 
 ### Projects, agents, and durable conversations
 

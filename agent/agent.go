@@ -113,7 +113,9 @@ func (a *Agent) runToolCallContext(ctx context.Context, toolCall ToolCall, retai
 	a.emit(
 		AgentResponse{
 			Content:      fmt.Sprintf("Ran shell command - %q", command),
-			ResponseType: "tool"},
+			ResponseType: "tool",
+			ToolCallID:   toolCall.Id,
+			ToolName:     toolCall.Function.Name},
 	)
 
 	result, full := runBashInContext(ctx, command, DefaultToolTimeout, a.workingDir, toolEnvironment(a.threadID, a.projectRoot, a.home), retainFull)
