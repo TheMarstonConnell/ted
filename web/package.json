@@ -10,8 +10,9 @@
     "preview": "vite preview",
     "test": "vitest run src",
     "generate:api": "openapi-typescript ../api/openapi.yaml -o src/lib/api.generated.ts",
-    "format": "prettier --write src vite.config.ts playwright.config.ts e2e",
-    "test:e2e": "playwright test"
+    "format": "prettier --write src vite.config.ts playwright*.config.ts e2e",
+    "test:e2e": "playwright test",
+    "test:iphone": "playwright test --config playwright.iphone.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

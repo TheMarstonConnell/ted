@@ -6,7 +6,7 @@ async function chooseOption(page: Page, trigger: Locator, label: string) {
   await expect(page.getByRole("listbox")).toHaveCount(0);
 }
 
-import { openAgentSettings, workspace } from "./fixtures";
+import { openProjectDefaults, workspace } from "./fixtures";
 
 test("complete project-first workflow, settlement, Markdown, drafts and deep links", async ({
   page,
@@ -69,14 +69,13 @@ test("complete project-first workflow, settlement, Markdown, drafts and deep lin
     page.getByRole("textbox", { name: "Message", exact: true }),
   ).toHaveValue("");
   await expect(page.locator(".markdown strong")).toHaveCount(1);
-  await openAgentSettings(page);
-  await expect(page).toHaveURL(/panel=settings/);
   await chooseOption(
     page,
-    page.getByRole("dialog").getByLabel("Reasoning effort"),
+    page
+      .getByRole("group", { name: "Chat settings", exact: true })
+      .getByLabel("Reasoning effort"),
     "high",
   );
-  await page.getByRole("button", { name: "Save settings" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(agents.a1.settings.effort).toBe("high");
   expect(errors).toEqual([]);
@@ -278,7 +277,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     ).toBeVisible();
     await capture(`chat-${colorScheme}`);
 
-    await openAgentSettings(page);
+    await openProjectDefaults(page);
     await expect(
       page.getByRole("dialog").getByLabel("Model", { exact: true }),
     ).toBeVisible();
@@ -373,9 +372,9 @@ test("mobile project options dismiss back to the same chat without leaving a blo
     .getByRole("button", { name: "Close sidebar", exact: true })
     .click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await openAgentSettings(page);
+  await openProjectDefaults(page);
   await expect(
-    page.getByRole("dialog", { name: "Agent settings", exact: true }),
+    page.getByRole("dialog", { name: "harness defaults", exact: true }),
   ).toBeVisible();
 });
 
@@ -480,9 +479,9 @@ test.describe("mobile modal hand-offs", () => {
     await expect(
       page.getByRole("textbox", { name: "Message", exact: true }),
     ).toBeFocused();
-    await openAgentSettings(page);
+    await openProjectDefaults(page);
     await expect(
-      page.getByRole("dialog", { name: "Agent settings", exact: true }),
+      page.getByRole("dialog", { name: "harness defaults", exact: true }),
     ).toBeVisible();
   });
 });
@@ -557,7 +556,9 @@ test("mobile composer navigation uses a bottom sheet", async ({ page }) => {
   await expect(page.locator("aside")).toBeVisible();
 });
 
-test("tool call expands in place as its output arrives", async ({ page }) => {
+test("tool call waits with a spinner and becomes expandable when output arrives", async ({
+  page,
+}) => {
   const { emit } = await workspace(page);
   await page.goto("/?dialog=new-agent");
   await page.getByRole("button", { name: "harness /srv/harness" }).click();
@@ -570,8 +571,10 @@ test("tool call expands in place as its output arrives", async ({ page }) => {
   };
   emit("a1", "output", call);
   const toggle = page.getByRole("button", { name: "echo hello", exact: true });
-  await toggle.click();
-  await expect(page.getByText("Waiting for output…")).toBeVisible();
+  await expect(toggle).toBeDisabled();
+  await expect(toggle).toHaveAttribute("aria-busy", "true");
+  await expect(toggle.locator('[data-slot="tool-waiting"]')).toBeVisible();
+  await expect(toggle.locator('[data-slot="tool-expand"]')).toHaveCount(0);
   emit("a1", "output", {
     ...call,
     ResponseType: "tool_result",
@@ -579,6 +582,12 @@ test("tool call expands in place as its output arrives", async ({ page }) => {
     Content: "capped",
     FullToolOutput: "hello from the tool",
   });
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toHaveAttribute("aria-busy", "false");
+  await expect(toggle.locator('[data-slot="tool-waiting"]')).toHaveCount(0);
+  await expect(toggle.locator('[data-slot="tool-expand"]')).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(
     page.getByText("hello from the tool", { exact: true }),
@@ -783,11 +792,7 @@ for (const width of [1440, 390, 320]) {
     await expect(
       page.locator("header").getByRole("button", { name: "Agent settings" }),
     ).toHaveCount(0);
-    await openAgentSettings(page);
-    await expect(
-      page.getByRole("dialog").getByText("Context usage is not available yet."),
-    ).toBeVisible();
-    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
 
     await composer.fill("Keep this draft while changing settings");
     await expect(settings.locator("select")).toHaveCount(0);
@@ -878,18 +883,8 @@ for (const width of [1440, 390, 320]) {
     await expect(context).toHaveText(width < 768 ? "25%" : "Context 25%", {
       useInnerText: true,
     });
-    await openAgentSettings(page);
-    const dialog = page.getByRole("dialog", {
-      name: "Agent settings",
-      exact: true,
-    });
-    await expect(
-      dialog.getByText("Context: 25,000 estimated / 100,000 tokens"),
-    ).toBeVisible();
-    await expect(
-      dialog.getByText("Usage: 24,000 input / 1,000 output tokens"),
-    ).toBeVisible();
-    await page.keyboard.press("Escape");
+    await context.click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(
       actions.getByRole("button", { name: "Continue", exact: true }),
     ).toBeEnabled();
@@ -1434,11 +1429,11 @@ test("consecutive tools use 8px spacing while message boundaries keep 24px", asy
     });
   }
   // Expansion and correlated output update only the tool card's height, not its surrounding gaps.
-  await page.getByRole("button", { name: "ls src", exact: true }).click();
   await expect(
-    page.getByText("Waiting for output…", { exact: true }),
-  ).toBeVisible();
+    page.getByRole("button", { name: "ls src", exact: true }),
+  ).toBeDisabled();
   output("tool_result", "App.tsx\ncomponents/\nlib/", "files");
+  await page.getByRole("button", { name: "ls src", exact: true }).click();
   await expect(
     page.getByText("App.tsx\ncomponents/\nlib/", { exact: true }),
   ).toBeVisible();
@@ -2090,9 +2085,9 @@ test.describe("mobile composer footer", () => {
     };
     emit("a1", "output", { ResponseType: "usage", Content: "" });
     await expect(context).toHaveText("0%", { useInnerText: true });
-    await openAgentSettings(page);
+    await openProjectDefaults(page);
     await expect(
-      page.getByRole("dialog", { name: "Agent settings", exact: true }),
+      page.getByRole("dialog", { name: "harness defaults", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Close", exact: true }).tap();
     await menu.tap();
@@ -2714,4 +2709,210 @@ test.describe("mobile drawer animation", () => {
     await expect(input).toBeFocused();
     await input.fill("Still responsive after closing the drawer");
   });
+});
+
+for (const width of [320, 1440]) {
+  test(`retired agent settings links leave chat usable and project defaults independent (${width}px)`, async ({
+    page,
+  }) => {
+    const { agents } = await workspace(page);
+    await page.setViewportSize({ width, height: 960 });
+    await page.goto("/?dialog=new-agent");
+    await page
+      .getByRole("button", { name: "harness /srv/harness", exact: true })
+      .click();
+    await page.goto("/agents/a1?panel=settings");
+    const composer = page.getByRole("textbox", {
+      name: "Message",
+      exact: true,
+    });
+    await expect(composer).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Save settings", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.locator('[data-slot="context-usage"]')).toBeVisible();
+    await composer.fill("Keep this draft while changing defaults");
+    const settings = page.getByRole("group", {
+      name: "Chat settings",
+      exact: true,
+    });
+    await expect(settings.getByLabel("Model", { exact: true })).toBeEnabled();
+    await chooseOption(
+      page,
+      settings.getByLabel("Reasoning effort", { exact: true }),
+      "high",
+    );
+    await expect.poll(() => agents.a1.settings.effort).toBe("high");
+    await openProjectDefaults(page);
+    const defaults = page.getByRole("dialog", {
+      name: "harness defaults",
+      exact: true,
+    });
+    await expect(
+      defaults.getByLabel("Reasoning effort", { exact: true }),
+    ).toHaveText("medium");
+    await chooseOption(
+      page,
+      defaults.getByLabel("Reasoning effort", { exact: true }),
+      "low",
+    );
+    await defaults
+      .getByRole("button", { name: "Save defaults", exact: true })
+      .click();
+    await expect(defaults).toHaveCount(0);
+    await expect(composer).toHaveValue(
+      "Keep this draft while changing defaults",
+    );
+    await expect(
+      settings.getByLabel("Reasoning effort", { exact: true }),
+    ).toHaveText("high");
+    await openProjectDefaults(page);
+    await expect(
+      defaults.getByLabel("Reasoning effort", { exact: true }),
+    ).toHaveText("low");
+    await defaults.getByRole("button", { name: "Close", exact: true }).click();
+    await page.goto("/projects/p?panel=settings");
+    await expect(defaults).toBeVisible();
+    await expect(
+      defaults.getByLabel("Reasoning effort", { exact: true }),
+    ).toHaveText("low");
+  });
+}
+
+for (const width of [390, 1440]) {
+  test(`tool spinners distinguish missing output from empty results (${width}px)`, async ({
+    page,
+  }) => {
+    const { emit } = await workspace(page);
+    await page.setViewportSize({ width, height: 960 });
+    await page.goto("/?dialog=new-agent");
+    await page
+      .getByRole("button", { name: "harness /srv/harness", exact: true })
+      .click();
+    const output = (
+      ResponseType: string,
+      ToolCallID: string,
+      Content: string,
+    ) =>
+      emit("a1", "output", {
+        ResponseType,
+        ToolCallID,
+        Content,
+        ToolName: "bash",
+        FullToolOutput: "",
+      });
+    output("tool", "one", "first command");
+    output("tool", "two", "second command");
+    const first = page.getByRole("button", {
+      name: "first command",
+      exact: true,
+    });
+    const second = page.getByRole("button", {
+      name: "second command",
+      exact: true,
+    });
+    await expect(first).toBeDisabled();
+    await expect(second).toBeDisabled();
+    await expect(second).toHaveAttribute("aria-expanded", "false");
+    const spinner = second.locator('[data-slot="tool-waiting"]');
+    await expect(spinner).toHaveCSS("animation-name", "spin");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(spinner).toHaveCSS("animation-name", "none");
+    const before = (await second.boundingBox())!;
+    output("tool_result", "two", "");
+    await expect(first).toBeDisabled();
+    await expect(second).toBeEnabled();
+    await expect(spinner).toHaveCount(0);
+    await expect(second.locator('[data-slot="tool-expand"]')).toBeVisible();
+    expect((await second.boundingBox())!.height).toBe(before.height);
+    await second.focus();
+    await second.press("Enter");
+    await expect(
+      page.getByText("No output returned.", { exact: true }),
+    ).toBeVisible();
+    await second.press("Space");
+    await expect(second).toHaveAttribute("aria-expanded", "false");
+    output("tool_result", "one", "exit status 1");
+    await expect(first).toBeEnabled();
+    await first.click();
+    await expect(
+      page.getByText("exit status 1", { exact: true }),
+    ).toBeVisible();
+    output("tool_result", "unmatched", "Recovered output");
+    await page
+      .getByRole("button", { name: "bash output", exact: true })
+      .click();
+    await expect(
+      page.getByText("Recovered output", { exact: true }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(first).toBeEnabled();
+    await expect(second).toBeEnabled();
+    await expect(page.locator('[data-slot="tool-waiting"]')).toHaveCount(0);
+  });
+}
+
+test("project settings reveal like chat actions on hover and keyboard focus", async ({
+  page,
+}, testInfo) => {
+  await workspace(page);
+  await page.goto("/?dialog=new-agent");
+  await page
+    .getByRole("button", { name: "harness /srv/harness", exact: true })
+    .click();
+  const row = page.locator('[data-project-id="p"]');
+  const project = row.getByRole("button", { name: "harness", exact: true });
+  const settings = row.getByRole("button", {
+    name: "Settings for harness",
+    exact: true,
+  });
+  const chat = page.locator('[data-agent-id="a1"]');
+  await page.getByRole("textbox", { name: "Message", exact: true }).focus();
+  await page.mouse.move(1200, 100);
+  await expect(settings).toHaveCSS("opacity", "0");
+  await expect(settings).toHaveCSS("width", "0px");
+  const initial = (await project.boundingBox())!;
+  await project.hover();
+  await expect(settings).toHaveCSS("opacity", "1");
+  await expect(settings).toHaveCSS("width", "32px");
+  await expect
+    .poll(async () => (await project.boundingBox())!.width)
+    .toBeCloseTo(initial.width - 40, 0);
+  expect((await project.boundingBox())!.height).toBe(initial.height);
+  const screenshot = testInfo.outputPath("project-action-hover.png");
+  await page.screenshot({ path: screenshot });
+  await testInfo.attach("project-action-hover", {
+    path: screenshot,
+    contentType: "image/png",
+  });
+  await project.focus();
+  await page.mouse.move(1200, 100);
+  await page.keyboard.press("Tab");
+  await expect(settings).toBeFocused();
+  await expect(settings).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", {
+    name: "harness defaults",
+    exact: true,
+  });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(project).toHaveAttribute("aria-expanded", "true");
+  await chat.getByRole("link").focus();
+  await expect(settings).toHaveCSS("width", "0px");
+  await expect(settings).toHaveCSS("opacity", "0");
+  await expect(chat.getByRole("button", { name: /^Settle chat:/ })).toHaveCSS(
+    "opacity",
+    "1",
+  );
+  await project.focus();
+  await page.keyboard.press("Enter");
+  await expect(project).toHaveAttribute("aria-expanded", "false");
+  await expect(settings).toHaveCSS("opacity", "1");
+  await settings.click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(project).toHaveAttribute("aria-expanded", "false");
 });

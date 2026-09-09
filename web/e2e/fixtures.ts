@@ -56,8 +56,10 @@ export async function workspace(page: Page) {
     if (url.pathname === "/v1/projects") {
       if (method === "POST") project = { ...project, ...body };
       result = method === "POST" ? project : [project];
-    } else if (url.pathname === "/v1/projects/p") result = project;
-    else if (url.pathname === "/v1/models")
+    } else if (url.pathname === "/v1/projects/p") {
+      if (method === "PATCH") project = { ...project, ...body };
+      result = project;
+    } else if (url.pathname === "/v1/models")
       result = [
         {
           id: "test/model",
@@ -151,13 +153,22 @@ export async function workspace(page: Page) {
   return { agents, events, emit };
 }
 
-// Open the supported settings deep link without resetting in-memory drafts.
-// Context is read-only; model/effort editing remains in the composer toolbar.
-export async function openAgentSettings(page: Page) {
-  await page.evaluate(() => {
-    const url = new URL(location.href);
-    url.searchParams.set("panel", "settings");
-    history.pushState(null, "", url);
-    dispatchEvent(new PopStateEvent("popstate"));
+// Project defaults remain accessible from the sidebar on desktop and mobile.
+export async function openProjectDefaults(page: Page) {
+  const settings = page.getByRole("button", {
+    name: "Settings for harness",
+    exact: true,
   });
+  const project = page.getByRole("button", { name: "harness", exact: true });
+  if (!(await project.isVisible())) {
+    await page
+      .getByRole("button", { name: "Open sidebar", exact: true })
+      .click();
+  }
+  // Focusing the project row reveals its action on desktop without relying on hover.
+  await project.focus();
+  await settings.click();
+  await expect(
+    page.getByRole("dialog", { name: "harness defaults", exact: true }),
+  ).toBeVisible();
 }

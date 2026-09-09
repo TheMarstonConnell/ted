@@ -6,6 +6,7 @@ import {
   ChevronRight,
   GitBranch,
   FolderPlus,
+  Folder,
   Plus,
   Settings2,
   X,
@@ -27,12 +28,20 @@ import { control, useControl } from "@/lib/store";
 import { usePanel } from "@/lib/navigation";
 import { ErrorNotice } from "@/components/common";
 
+// Projects and chats share the same reveal behavior. Each group wraps only its
+// own row, so hovering/focusing a child chat never reveals the project action.
+const sidebarRowClass =
+  "group/sidebar-row flex items-center gap-2 transition-[gap] duration-150 [@media(hover:hover)_and_(pointer:fine)]:gap-0 hover:gap-2 focus-within:gap-2";
+const sidebarActionClass =
+  "overflow-hidden border-x-0 [@media(hover:hover)_and_(pointer:fine)]:w-0 group-hover/sidebar-row:w-8 group-focus-within/sidebar-row:w-8 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:disabled:opacity-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:disabled:opacity-50 group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:disabled:opacity-50";
+
 export function AgentLink({ agent }: { agent: Agent }) {
   const { agentId } = useParams();
   const { projects, status } = useControl();
   const project = projects.find((p) => p.id === agent.project_id);
   const branch = project?.git_branch;
   const title = agentTitle(agent);
+  const selected = agentId === agent.id;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef(false);
@@ -53,25 +62,31 @@ export function AgentLink({ agent }: { agent: Agent }) {
   return (
     <div
       data-agent-id={agent.id}
-      className={`space-y-2 ${agent.settled ? "opacity-60 hover:opacity-100 focus-within:opacity-100" : ""}`}
+      className={`space-y-2 ${agent.settled && !selected ? "opacity-60 hover:opacity-100 focus-within:opacity-100" : ""}`}
     >
-      <div className="group/agent flex items-center gap-2 transition-[gap] duration-150 [@media(hover:hover)_and_(pointer:fine)]:gap-0 hover:gap-2 focus-within:gap-2">
+      <div className={sidebarRowClass}>
         <Button
-          variant={agentId === agent.id ? "secondary" : "ghost"}
+          variant={selected ? "default" : "ghost"}
           className="h-auto min-w-0 flex-1 justify-start py-2 font-normal"
           render={
             <Link
               to={`/agents/${encodeURIComponent(agent.id)}`}
               title={title}
-              aria-current={agentId === agent.id ? "page" : undefined}
+              aria-current={selected ? "page" : undefined}
             />
           }
         >
           <span className="min-w-0 flex-1 text-left">
             <span className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate">{title}</span>
+              <span
+                className={`min-w-0 flex-1 truncate ${selected ? "font-semibold" : "font-medium"}`}
+              >
+                {title}
+              </span>
               {!agent.settled && (agent.held || agent.state !== "idle") && (
-                <span className="shrink-0 text-xs text-muted-foreground">
+                <span
+                  className={`shrink-0 text-xs font-medium ${selected ? "text-primary-foreground" : "text-foreground"}`}
+                >
                   {agent.held
                     ? "Held"
                     : agent.state === "stopping"
@@ -81,7 +96,7 @@ export function AgentLink({ agent }: { agent: Agent }) {
               )}
             </span>
             <span
-              className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground"
+              className={`flex min-w-0 items-center gap-2 text-xs ${selected ? "text-primary-foreground/80" : "text-muted-foreground"}`}
               title={branch || undefined}
             >
               {branch && (
@@ -100,7 +115,7 @@ export function AgentLink({ agent }: { agent: Agent }) {
           type="button"
           variant="ghost"
           size="icon"
-          className="overflow-hidden border-x-0 [@media(hover:hover)_and_(pointer:fine)]:w-0 group-hover/agent:w-8 group-focus-within/agent:w-8 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:disabled:opacity-0 group-hover/agent:opacity-100 group-hover/agent:disabled:opacity-50 group-focus-within/agent:opacity-100 group-focus-within/agent:disabled:opacity-50"
+          className={sidebarActionClass}
           aria-label={`${agent.settled ? "Restore" : "Settle"} chat: ${title}`}
           title={agent.settled ? "Restore chat" : "Settle chat"}
           disabled={busy || status !== "live"}
@@ -163,7 +178,9 @@ function SidebarContent() {
       >
         {groups.misc.length > 0 && (
           <div className="space-y-2">
-            <p className="px-2 py-2 text-xs text-muted-foreground">Misc</p>
+            <p className="px-4 py-2 text-xs font-semibold text-foreground">
+              Misc
+            </p>
             {groups.misc.map((a) => (
               <AgentLink key={a.id} agent={a} />
             ))}
@@ -171,22 +188,33 @@ function SidebarContent() {
         )}
         {groups.projects.map(({ project, agents: projectAgents }) => (
           <Collapsible key={project.id} defaultOpen>
-            <div className="flex items-center gap-2">
+            <div data-project-id={project.id} className={sidebarRowClass}>
               <CollapsibleTrigger
                 render={
                   <Button
                     variant="ghost"
-                    className="group min-w-0 flex-1 justify-start"
+                    className="group min-w-0 flex-1 justify-start font-semibold"
                   />
                 }
               >
-                <ChevronRight className="size-4 group-data-panel-open:rotate-90" />
-                <span className="truncate">{project.name}</span>
+                <Folder className="size-4" aria-hidden="true" />
+                <span
+                  data-slot="project-heading"
+                  className="min-w-0 flex-1 truncate"
+                >
+                  {project.name}
+                </span>
+                <ChevronRight
+                  className="size-4 group-data-panel-open:rotate-90"
+                  aria-hidden="true"
+                />
               </CollapsibleTrigger>
               <Button
                 variant="ghost"
                 size="icon"
+                className={sidebarActionClass}
                 aria-label={`Settings for ${project.name}`}
+                title="Project settings"
                 onClick={() => openProjectSettings(project.id)}
               >
                 <Settings2 />

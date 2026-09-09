@@ -15,19 +15,22 @@ touch targets, shared scrollbar alignment, and reduced-motion support. Avoid
 decorative badges, marketing copy, and duplicate metadata in chat chrome.
 Model and effort controls sit on the left of the input’s bottom toolbar, using
 natural widths. Their shadcn Select menus open upward in the composer (with
-selected-item/trigger overlap disabled). Settings dialogs use the same selects
+selected-item/trigger overlap disabled). Project-default dialogs use the same selects
 with normal downward positioning. Send, Stop, and Continue have a separate,
 non-shrinking area on the right. Settings wrap on narrow screens without
 crowding the action buttons. The message field starts at 64px tall on desktop
 (48px on mobile), grows with the draft up to 208px, then scrolls without covering
-the toolbar. Model/effort changes save immediately for the next turn.
+the toolbar. On narrow screens, its growth is also capped at 25dvh to leave room
+for controls in short viewports. Model/effort changes save immediately for the next turn.
 
 Context is read-only, muted monospace text in the footer below the input on every
-screen, matching the path and branch metadata. It is not clickable or focusable;
-model and effort remain editable in the composer toolbar. The full settings
-dialog remains available through the `?panel=settings` deep link. Footer content
-aligns with the input text area, not the outer input border. Mobile shows only its percentage (or “0%” when usage is
-unavailable), while desktop retains the Context label. On mobile, the footer has
+screen, matching the path and branch metadata. It is not clickable or focusable.
+Model and effort are edited only in the composer toolbar for existing chats.
+There is no separate agent settings dialog; old `/agents/:id?panel=settings`
+links render the normal chat without opening an overlay. Project defaults remain
+available from the sidebar and apply only to new chats. Footer content aligns
+with the input text area, not the outer input border. Mobile shows only its
+percentage (or “0%” when usage is unavailable), while desktop retains the Context label. On mobile, the footer has
 the branch on the left and context plus the sidebar menu on the right; the file
 path is hidden. Desktop shows the directory and branch on the left, with context
 on the right. Full paths and branches remain in their titles if truncated. The
@@ -42,7 +45,10 @@ bubbles; assistant replies stay unboxed. Sender names are accessible labels rath
 than visible headings. Messages show only their body, with no timestamp or copy
 button footer; normal text selection/copy remains available. Working/stopping status uses the same type size and line
 height as message body text. Consecutive tool entries are separated by 8px;
-all other transcript boundaries retain the normal 24px spacing. Tool headers
+all other transcript boundaries retain the normal 24px spacing. Tool calls show a spinner instead of a chevron while waiting for output and
+cannot be expanded yet. Once output arrives (even an empty result), the spinner
+becomes the normal expand chevron. This does not imply success or failure.
+Reduced motion keeps the loading icon static. Tool headers
 use 16px horizontal / 8px vertical padding; expanded output uses 16px padding
 and compact 12px/20px monospace text. Chat images have a subtle theme-aware border and a drop shadow with 16px of surrounding padding to prevent clipping at
 message edges, and open in a near-full-window, aspect-ratio-preserving lightbox
@@ -50,6 +56,33 @@ with a dark backdrop.
 Escape, the close button, or the space outside the image dismisses the preview
 and restores focus to its thumbnail. Linked images open the preview rather than
 a new browser tab; normal text links retain their behavior.
+
+The selected sidebar chat uses a high-contrast neutral fill and semibold title;
+its branch remains secondary but readable. Other chat titles use medium weight.
+Project headings use a folder icon and semibold text, with a trailing expand
+chevron. Their settings action uses the same row-scoped hover/focus reveal as
+chat settle/restore actions: no reserved width on desktop until revealed, and
+always visible with a 48px target on touch devices. Running/Held/Stopping remain plain status text, not additional badges.
+Selected settled chats retain their selection contrast instead of fading out.
+
+## iPhone checks
+
+The normal browser suite includes iPhone-sized touch contexts in Chromium.
+For WebKit coverage, install the browser and its system dependencies, then run:
+
+```sh
+cd web
+npx playwright install --with-deps webkit
+npm run test:iphone
+```
+
+`WEBKIT_PATH` can override the executable for a locally provisioned WebKit build.
+The focused suite checks light/dark selection contrast, tool spinner-to-chevron
+behavior, 48px tool targets, 16px input text, short viewport containment, and
+project-dialog focus/draft preservation, and send/scroll regressions (including
+queued turns, slow/failed sends, and chat switches). It also records screenshots when run
+with `TED_WEB_RECORD=1`. This is browser/device emulation: verify actual iOS
+keyboard occlusion, Safari toolbar resizing, and safe areas on a real iPhone.
 
 ## Run
 
@@ -137,12 +170,18 @@ action with an accessible label and hover title. Project creation is no longer r
   is not re-parsed when typing or when new messages arrive.
 - Chat switches start at the bottom, without restoring scroll position. Message
   Scroller follows new output at the bottom and respects scrolling up to read.
+  A successful local send explicitly resumes following, even when a touch or
+  horizontal-scroll gesture paused it without moving the viewport. This also
+  covers queued messages whose turn starts later. Transcript interaction during
+  a pending send takes precedence over its late acknowledgement; failed sends,
+  slash commands, and responses from another chat do not force a jump. The
+  composer and transcript share a per-chat provider; no scroll timeouts or
+  remount-to-bottom tricks are used.
 - Desktop sidebar, mobile drawer, system-aware light/dark colors.
 
 ### URL state
 
 - `/agents/:agentId`
-- `/agents/:agentId?panel=settings`
 - `/agents/:agentId?panel=project-settings&project=:projectId` for project options
   over the current chat (also supported on the workspace route)
 - `/?dialog=new-agent`
@@ -151,7 +190,7 @@ action with an accessible label and hover title. Project creation is no longer r
 - `?sidebar=open` for the mobile drawer
 
 Project options from the sidebar preserve the current viewport, transcript scroll,
-and draft. The drawer and settings dialogs are mutually exclusive; dismissing an
+and draft. The drawer and project-default dialogs are mutually exclusive; dismissing an
 overlay never navigates to a different project or leaves an inactive modal mounted.
 
 Components read navigation state directly from the router. Server settings,

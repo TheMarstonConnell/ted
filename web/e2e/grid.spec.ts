@@ -1,5 +1,5 @@
 import { test, expect, type Locator } from "@playwright/test";
-import { openAgentSettings, workspace } from "./fixtures";
+import { openProjectDefaults, workspace } from "./fixtures";
 
 async function style(element: Locator, property: string) {
   return element.evaluate(
@@ -199,7 +199,7 @@ for (const width of [320, 390, 768, 1440, 1920]) {
           path: screen,
           contentType: "image/png",
         });
-        await openAgentSettings(page);
+        await openProjectDefaults(page);
         const dialog = page.getByRole("dialog");
         await expect(dialog).toHaveCSS("padding", "24px");
         await expect(dialog).toHaveCSS("border-radius", "24px");

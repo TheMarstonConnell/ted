@@ -249,85 +249,9 @@ function ProjectForm() {
     </>
   );
 }
-function AgentSettings() {
-  const { agentId = "" } = useParams();
-  const { agents } = useControl();
-  const agent = agents[agentId];
-  const { close } = usePanel();
-  const [model, setModel] = useState(agent?.settings.model || "");
-  const [effort, setEffort] = useState(agent?.settings.effort || "");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle>Agent settings</DialogTitle>
-        <DialogDescription>
-          Changes apply to the next turn. Your current turn keeps its original
-          settings.
-        </DialogDescription>
-      </DialogHeader>
-      <ErrorNotice error={error} />
-      <form
-        className="space-y-6"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (busy) return;
-          setBusy(true);
-          setError(null);
-          void control
-            .settings(agentId, { model, effort })
-            .then(() => close("panel"))
-            .catch((e) => setError(String(e)))
-            .finally(() => setBusy(false));
-        }}
-      >
-        <ModelFields
-          model={model}
-          effort={effort}
-          onChange={(m, e) => {
-            setModel(m);
-            setEffort(e);
-          }}
-        />
-        <div className="space-y-2">
-          {agent?.active_settings && (
-            <p className="text-xs text-muted-foreground">
-              Current turn: {agent.active_settings.model} ·{" "}
-              {agent.active_settings.effort || "default"}
-            </p>
-          )}
-          {!agent?.context_usage && (
-            <p className="text-xs text-muted-foreground">
-              Context usage is not available yet.
-            </p>
-          )}
-          {agent?.context_usage && (
-            <p className="text-xs text-muted-foreground">
-              Context: {agent.context_usage.estimated_tokens.toLocaleString()}{" "}
-              estimated / {agent.context_usage.context_window.toLocaleString()}{" "}
-              tokens
-            </p>
-          )}
-          {agent?.context_usage?.known && (
-            <p className="text-xs text-muted-foreground">
-              Usage: {agent.context_usage.input_tokens.toLocaleString()} input /{" "}
-              {agent.context_usage.output_tokens.toLocaleString()} output tokens
-            </p>
-          )}
-        </div>
-        <div className="flex justify-end">
-          <Button type="submit" disabled={busy || !model}>
-            {busy ? "Saving…" : "Save settings"}
-          </Button>
-        </div>
-      </form>
-    </>
-  );
-}
 export function Dialogs() {
   const { agentId, projectId } = useParams();
-  const { agents, projects, loaded } = useControl();
+  const { projects, loaded } = useControl();
   const { params, close } = usePanel();
   const dialog = params.get("dialog");
   const settingsProjectId =
@@ -338,10 +262,8 @@ export function Dialogs() {
     ["settings", "project-settings"].includes(params.get("panel") || "") &&
     !!settingsProjectId &&
     projects.some((p) => p.id === settingsProjectId);
-  const isSettings =
-    isProjectSettings ||
-    (params.get("panel") === "settings" && !!agents[agentId || ""]);
-  const show = dialog === "new-agent" || dialog === "new-project" || isSettings;
+  const show =
+    dialog === "new-agent" || dialog === "new-project" || isProjectSettings;
   if (!show || !loaded) return null;
   return (
     <Dialog
@@ -356,12 +278,8 @@ export function Dialogs() {
           <ProjectPicker />
         ) : dialog === "new-project" ? (
           <ProjectForm key="new" />
-        ) : isSettings ? (
-          isProjectSettings ? (
-            <ProjectForm key={settingsProjectId} />
-          ) : (
-            <AgentSettings />
-          )
+        ) : isProjectSettings ? (
+          <ProjectForm key={settingsProjectId} />
         ) : null}
       </DialogContent>
     </Dialog>

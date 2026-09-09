@@ -1,6 +1,7 @@
 import { usePanel } from "@/lib/navigation";
 import {
   memo,
+  useCallback,
   useRef,
   useState,
   useSyncExternalStore,
@@ -15,6 +16,7 @@ import {
   ArrowUp,
   ChevronRight,
   GitBranch,
+  LoaderCircle,
   Menu,
   Play,
   Square,
@@ -46,6 +48,7 @@ import {
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerButton,
+  useMessageScroller,
 } from "@/components/ui/message-scroller";
 import { cn, toolCommand } from "@/lib/utils";
 import {
@@ -113,18 +116,34 @@ const markdownComponents: Components = {
 };
 
 const Message = memo(function Message({ item }: { item: TranscriptItem }) {
-  if (item.kind === "tool" || item.kind === "tool_result")
+  if (item.kind === "tool" || item.kind === "tool_result") {
+    // An empty result is still a result. Do not infer success/failure from text.
+    const waiting = item.kind === "tool" && item.output === undefined;
     return (
-      <Collapsible className="min-w-0 rounded-lg border">
+      <Collapsible disabled={waiting} className="min-w-0 rounded-lg border">
         <CollapsibleTrigger
+          aria-busy={waiting}
+          title={waiting ? "Waiting for tool output" : undefined}
           render={
             <Button
               variant="ghost"
-              className="group h-auto w-full justify-start px-4 py-2"
+              className="group h-auto w-full justify-start px-4 py-2 disabled:opacity-100"
             />
           }
         >
-          <ChevronRight className="size-4 group-data-panel-open:rotate-90" />
+          {waiting ? (
+            <LoaderCircle
+              data-slot="tool-waiting"
+              className="size-4 animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+          ) : (
+            <ChevronRight
+              data-slot="tool-expand"
+              className="size-4 group-data-panel-open:rotate-90"
+              aria-hidden="true"
+            />
+          )}
           <span
             className="min-w-0 truncate font-mono text-xs font-normal"
             title={item.kind === "tool" ? toolCommand(item.text) : undefined}
@@ -139,12 +158,13 @@ const Message = memo(function Message({ item }: { item: TranscriptItem }) {
         <CollapsibleContent>
           <pre className="overflow-x-auto whitespace-pre-wrap break-words border-t p-4 font-mono text-xs leading-5">
             {item.kind === "tool"
-              ? (item.output ?? "Waiting for output…")
-              : item.text}
+              ? item.output || "No output returned."
+              : item.text || "No output returned."}
           </pre>
         </CollapsibleContent>
       </Collapsible>
     );
+  }
   if (item.kind === "status")
     return (
       <Alert>
@@ -173,49 +193,69 @@ const Transcript = memo(function Transcript({
   items,
   ready,
   state,
+  onScrollIntent,
 }: {
   items: TranscriptItem[];
   ready: boolean;
   state: Agent["state"];
+  onScrollIntent: () => void;
 }) {
   return !ready ? (
     <Loading>Replaying chat history…</Loading>
   ) : (
-    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
-      <MessageScroller>
-        <MessageScrollerViewport className="workspace-scroll-gutter">
-          <MessageScrollerContent className="mx-auto max-w-chat gap-0 px-4 py-8 md:px-8 [&>*+*]:mt-6 [&>[data-tool=true]+[data-tool=true]]:mt-2">
-            {!items.length && (
-              <p className="py-12 text-center text-sm text-muted-foreground">
-                Send a message to start this chat.
-              </p>
-            )}
-            {items.map((item) => (
-              <MessageScrollerItem
-                key={item.id}
-                messageId={item.id}
-                data-tool={item.kind === "tool" || item.kind === "tool_result"}
-              >
-                <Message item={item} />
-              </MessageScrollerItem>
-            ))}
-            {state !== "idle" && (
-              <div
-                role="status"
-                className="flex items-center gap-2 py-2 text-sm leading-6 text-muted-foreground"
-              >
-                {state === "stopping" ? (
-                  "Stopping current turn…"
-                ) : (
-                  <span className="shimmer">Ted is working…</span>
-                )}
-              </div>
-            )}
-          </MessageScrollerContent>
-        </MessageScrollerViewport>
-        <MessageScrollerButton />
-      </MessageScroller>
-    </MessageScrollerProvider>
+    <MessageScroller>
+      <MessageScrollerViewport
+        className="workspace-scroll-gutter"
+        onWheel={onScrollIntent}
+        onTouchMove={onScrollIntent}
+        onPointerDown={onScrollIntent}
+        onFocusCapture={onScrollIntent}
+        onKeyDown={(event) => {
+          if (
+            [
+              "ArrowDown",
+              "ArrowUp",
+              "End",
+              "Home",
+              "PageDown",
+              "PageUp",
+              " ",
+            ].includes(event.key)
+          )
+            onScrollIntent();
+        }}
+      >
+        <MessageScrollerContent className="mx-auto max-w-chat gap-0 px-4 py-8 md:px-8 [&>*+*]:mt-6 [&>[data-tool=true]+[data-tool=true]]:mt-2">
+          {!items.length && (
+            <p className="py-12 text-center text-sm text-muted-foreground">
+              Send a message to start this chat.
+            </p>
+          )}
+          {items.map((item) => (
+            <MessageScrollerItem
+              key={item.id}
+              messageId={item.id}
+              data-tool={item.kind === "tool" || item.kind === "tool_result"}
+            >
+              <Message item={item} />
+            </MessageScrollerItem>
+          ))}
+          {state !== "idle" && (
+            <div
+              role="status"
+              className="flex items-center gap-2 py-2 text-sm leading-6 text-muted-foreground"
+            >
+              {state === "stopping" ? (
+                "Stopping current turn…"
+              ) : (
+                <span className="shimmer">Ted is working…</span>
+              )}
+            </div>
+          )}
+        </MessageScrollerContent>
+      </MessageScrollerViewport>
+      <MessageScrollerButton />
+    </MessageScroller>
   );
 });
 
@@ -244,7 +284,7 @@ const ComposerInput = memo(function ComposerInput({
       placeholder={
         settled ? "Send a message to restore this chat…" : "Message Ted…"
       }
-      className="max-h-52 min-h-12 px-4 pt-4 leading-6 md:min-h-16 md:px-inset md:pt-inset md:pb-4"
+      className="max-h-52 max-md:max-h-[min(13rem,25dvh)] min-h-12 px-4 pt-4 leading-6 md:min-h-16 md:px-inset md:pt-inset md:pb-4"
       value={draft}
       onChange={(event) => writeDraft(agentId, event.target.value)}
       onKeyDown={(event) => {
@@ -285,6 +325,17 @@ const SendMessageButton = memo(function SendMessageButton({
 });
 
 export function Chat() {
+  // The composer and transcript share one per-chat scroller. A send can then
+  // explicitly resume following, including when touch/wheel intent paused it
+  // without moving the viewport. App keys Chat by agent ID.
+  return (
+    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+      <ChatWorkspace />
+    </MessageScrollerProvider>
+  );
+}
+
+function ChatWorkspace() {
   const { agentId = "" } = useParams();
   const {
     agents,
@@ -305,6 +356,11 @@ export function Chat() {
   const editingDraft = useSyncExternalStore(subscribeComposer, () =>
     editingDrafts.has(agentId),
   );
+  const { scrollToEnd } = useMessageScroller();
+  const scrollIntentVersion = useRef(0);
+  const onScrollIntent = useCallback(() => {
+    scrollIntentVersion.current++;
+  }, []);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const [editCandidate, setEditCandidate] = useState<QueueMessage | null>(null);
   const error = useSyncExternalStore(
@@ -427,6 +483,7 @@ export function Chat() {
         }
         // Clear the submitted draft before the request, not after an async
         // response that may arrive after more typing or a chat switch.
+        const scrollVersion = scrollIntentVersion.current;
         writeDraft(agentId, "");
         const version = draftVersions.get(agentId);
         try {
@@ -437,6 +494,14 @@ export function Chat() {
           if (draftVersions.get(agentId) === version)
             writeDraft(agentId, original);
           throw error;
+        }
+        // Re-enter following mode, not just a one-off scrollTop assignment:
+        // queued turns and content/composer resizes may land after the ACK.
+        // A user who starts reading while the request is pending takes priority.
+        // On a chat switch the old provider's viewport ref is cleared, so this
+        // cannot scroll another chat (or a newly mounted copy of this chat).
+        if (scrollIntentVersion.current === scrollVersion) {
+          scrollToEnd({ behavior: "auto" });
         }
         return;
       }
@@ -507,7 +572,12 @@ export function Chat() {
         </Button>
       </header>
       <div className="flex min-h-0 flex-1 flex-col">
-        <Transcript items={items} ready={!!ready} state={agent.state} />
+        <Transcript
+          items={items}
+          ready={!!ready}
+          state={agent.state}
+          onScrollIntent={onScrollIntent}
+        />
         <div className="workspace-scroll-gutter scrollbar-thin shrink-0 overflow-y-auto">
           <div className="mx-auto w-full max-w-chat space-y-4 px-4 pb-4 pt-2 md:px-8">
             <ErrorNotice error={error} />

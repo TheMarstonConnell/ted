@@ -136,11 +136,13 @@
   }
 }
 
-/* Touch controls use a 48px target without inflating desktop chrome. Kept in
-   base so explicit layout utilities (e.g. hidden sidebar actions) still work. */
+/* Touch controls use a 48px target without inflating desktop chrome.
+   The button class also covers composed triggers whose data-slot is renamed.
+   Kept in base so explicit layout utilities (e.g. hidden sidebar actions) still work. */
 @layer base {
   @media (max-width: 767px), (pointer: coarse) {
     :where(
+      .group\/button,
       [data-slot="button"],
       [data-slot="select-trigger"],
       [data-slot="select-item"],
@@ -149,7 +151,7 @@
     ) {
       min-height: 3rem;
     }
-    :where([data-slot="button"], [data-slot="select-trigger"]) {
+    :where(.group\/button, [data-slot="button"], [data-slot="select-trigger"]) {
       min-width: 3rem;
     }
   }
