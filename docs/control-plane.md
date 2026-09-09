@@ -35,7 +35,12 @@ model/effort defaults. The directory must already exist on the server. A canonic
 root identifies one project. Roots are immutable; names and defaults can change.
 Only empty projects can be deleted, including checking for settled agents.
 
-Agents start directly in the root, not in an automatically created worktree.
+Each new chat snapshots project workspace defaults and can choose Current checkout
+or Worktree before its first message. Current checkout uses the root as-is;
+Worktree fetches the selected remote branch and provisions a clean linked
+worktree outside the checkout. The first message permanently locks the choice,
+including setup failures. See [chat workspaces](workspaces.md) for setup,
+persistence, failure behavior, and terminal flags.
 Multiple agents can edit the same files concurrently. Project defaults are copied
 into new agents; changes to defaults do not alter existing agents. Agent creation
 accepts overrides and an optional initial prompt. Without a prompt it is idle.

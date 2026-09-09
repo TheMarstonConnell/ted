@@ -202,6 +202,16 @@ func nonnil[T any](v []T) []T {
 	}
 	return v
 }
+func workspaceSelection(v api.WorkspaceSelection) WorkspaceSelection {
+	return WorkspaceSelection{Mode: string(v.Mode), BaseBranch: value(v.BaseBranch)}
+}
+func optionalWorkspaceSelection(v *api.WorkspaceSelection) *WorkspaceSelection {
+	if v == nil {
+		return nil
+	}
+	selection := workspaceSelection(*v)
+	return &selection
+}
 
 // Normalize optional runtime slices without altering detached runtime data.
 type httpAgent struct {
@@ -230,7 +240,7 @@ func (h *httpAPI) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, err := h.service.CreateProject(CreateProjectRequest{Name: b.Name, Root: b.Root, Defaults: Settings{Model: b.Defaults.Model, Effort: b.Defaults.Effort}})
+	p, err := h.service.CreateProject(CreateProjectRequest{Name: b.Name, Root: b.Root, Defaults: Settings{Model: b.Defaults.Model, Effort: b.Defaults.Effort}, WorkspaceDefaults: optionalWorkspaceSelection(b.WorkspaceDefaults)})
 	respond(w, 201, p, err)
 }
 func (h *httpAPI) GetProject(w http.ResponseWriter, r *http.Request, id string) {
@@ -249,8 +259,15 @@ func (h *httpAPI) PatchProject(w http.ResponseWriter, r *http.Request, id string
 	if b.Defaults != nil {
 		defaults = &Settings{Model: b.Defaults.Model, Effort: b.Defaults.Effort}
 	}
-	p, err := h.service.UpdateProject(id, b.Name, defaults)
+	p, err := h.service.UpdateProject(id, b.Name, defaults, optionalWorkspaceSelection(b.WorkspaceDefaults))
 	respond(w, 200, p, err)
+}
+func (h *httpAPI) ListProjectBranches(w http.ResponseWriter, r *http.Request, id string) {
+	branches, err := h.service.ProjectBranches(id)
+	if err == nil {
+		branches.Branches = nonnil(branches.Branches)
+	}
+	respond(w, 200, branches, err)
 }
 func (h *httpAPI) DeleteProject(w http.ResponseWriter, r *http.Request, id string) {
 	if err := h.service.DeleteProject(id); err != nil {
@@ -281,7 +298,7 @@ func (h *httpAPI) CreateAgent(w http.ResponseWriter, r *http.Request, p api.Crea
 	if b.Settings != nil {
 		settings = &Settings{Model: value(b.Settings.Model), Effort: value(b.Settings.Effort)}
 	}
-	a, err := h.service.CreateAgent(CreateAgentRequest{ProjectID: b.ProjectId, Title: value(b.Title), Prompt: value(b.Prompt), Settings: settings}, value(p.IdempotencyKey))
+	a, err := h.service.CreateAgent(CreateAgentRequest{ProjectID: b.ProjectId, Title: value(b.Title), Prompt: value(b.Prompt), Settings: settings, Workspace: optionalWorkspaceSelection(b.Workspace)}, value(p.IdempotencyKey))
 	agentResult(w, 201, a, err)
 }
 func (h *httpAPI) GetAgent(w http.ResponseWriter, r *http.Request, id string) {
@@ -302,6 +319,14 @@ func (h *httpAPI) PatchAgentSettings(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	a, err := h.service.UpdateSettings(id, SettingsPatch{Model: b.Model, Effort: b.Effort})
+	agentResult(w, 200, a, err)
+}
+func (h *httpAPI) PatchAgentWorkspace(w http.ResponseWriter, r *http.Request, id string) {
+	b, ok := decodeBody[api.PatchAgentWorkspaceJSONRequestBody](w, r)
+	if !ok {
+		return
+	}
+	a, err := h.service.UpdateWorkspace(id, workspaceSelection(b))
 	agentResult(w, 200, a, err)
 }
 func (h *httpAPI) ListMessages(w http.ResponseWriter, r *http.Request, id string) {
