@@ -1,7 +1,7 @@
 import { usePanel } from "@/lib/navigation";
 import { useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import Markdown from "react-markdown";
+import Markdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Archive,
@@ -38,6 +38,7 @@ import { cn, toolCommand } from "@/lib/utils";
 import { agentTitle, requestKey } from "@/lib/api";
 import { control, useControl, type TranscriptItem } from "@/lib/store";
 import { ErrorNotice, Loading, ModelFields } from "./common";
+import { ChatImage } from "./chat-image";
 
 // Intentionally ephemeral: agent switches retain drafts, a reload does not.
 const drafts = new Map<string, string>();
@@ -46,6 +47,32 @@ const receipts = new Map<string, { text: string; key: string }>();
 const inFlight = new Set<string>();
 const HELP =
   "/model [provider/model] · /effort [value] · /stop · /settle · /unsettle · /continue · /help · /exit. Use // to send a literal leading slash.";
+
+function containsImage(node: ExtraProps["node"]): boolean {
+  return (
+    !!node &&
+    (node.tagName === "img" ||
+      node.children.some(
+        (child) => child.type === "element" && containsImage(child),
+      ))
+  );
+}
+
+// Keep renderer identities stable so incoming agent events don't remount an
+// image and close its preview. Image links open the preview instead of a new tab.
+const markdownComponents: Components = {
+  a: ({ node, children, ...props }) =>
+    containsImage(node) ? (
+      <span title={props.title}>{children}</span>
+    ) : (
+      <a {...props} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    ),
+  img: ({ src, alt, title }) => (
+    <ChatImage key={src} src={src} alt={alt} title={title} />
+  ),
+};
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -125,18 +152,8 @@ function Message({ item }: { item: TranscriptItem }) {
           "ml-auto w-fit max-w-[90%] rounded-lg bg-muted px-4 py-3",
       )}
     >
-      <div className="markdown text-sm leading-7 [overflow-wrap:anywhere] [&>*+*]:mt-4 [&_p]:whitespace-pre-wrap [&_h1]:text-2xl [&_h2]:text-xl [&_h3]:text-lg [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h4]:font-semibold [&_h5]:font-semibold [&_h6]:font-semibold [&_a]:underline [&_a]:underline-offset-4 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:text-xs [&_code]:font-mono [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_blockquote]:border-l-2 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_th]:border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_img]:max-h-96 [&_img]:max-w-full">
-        <Markdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            a: (props) => (
-              <a {...props} target="_blank" rel="noopener noreferrer" />
-            ),
-            img: (props) => (
-              <img {...props} loading="lazy" referrerPolicy="no-referrer" />
-            ),
-          }}
-        >
+      <div className="markdown text-sm leading-7 [overflow-wrap:anywhere] [&>*+*]:mt-4 [&_p]:whitespace-pre-wrap [&_h1]:text-2xl [&_h2]:text-xl [&_h3]:text-lg [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h4]:font-semibold [&_h5]:font-semibold [&_h6]:font-semibold [&_a]:underline [&_a]:underline-offset-4 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:text-xs [&_code]:font-mono [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_blockquote]:border-l-2 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_th]:border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_td]:border [&_td]:px-3 [&_td]:py-2">
+        <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
           {item.text}
         </Markdown>
       </div>

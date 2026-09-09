@@ -27,7 +27,13 @@ bubbles; assistant replies stay unboxed. Sender names are accessible labels rath
 than visible headings. Working/stopping status uses the same type size and line
 height as message body text. Consecutive tool entries are separated by 6px;
 all other transcript boundaries retain the normal 24px spacing. Tool card
-padding and expanded output are unchanged.
+padding and expanded output are unchanged. Chat images have a subtle theme-aware
+border and a drop shadow with 16px of surrounding padding to prevent clipping at
+message edges, and open in a near-full-window, aspect-ratio-preserving lightbox
+with a dark backdrop.
+Escape, the close button, or the space outside the image dismisses the preview
+and restores focus to its thumbnail. Linked images open the preview rather than
+a new browser tab; normal text links retain their behavior.
 
 ## Run
 
@@ -196,6 +202,10 @@ deterministic API/WebSocket fixtures (no real model calls or project writes):
 - [Sidebar chat rows, mobile](../docs/screenshots/web-sidebar-chats-mobile.png)
 - [Compact tool spacing, desktop](../docs/screenshots/web-tool-spacing.png)
 - [Compact tool spacing, mobile](../docs/screenshots/web-tool-spacing-mobile.png)
+- [Inline image preview](../docs/screenshots/web-inline-image.png)
+- [Image lightbox, desktop](../docs/screenshots/web-image-lightbox.png)
+- [Image lightbox, mobile](../docs/screenshots/web-image-lightbox-mobile.png)
+- [Image lightbox workflow video](../docs/screenshots/web-image-lightbox-demo.webm)
 
 The browser suite attaches desktop, picker, chat, settings, and mobile screenshots
 to its results. To also retain workflow video:

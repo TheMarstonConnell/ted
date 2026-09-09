@@ -1475,3 +1475,274 @@ test("consecutive tools use 6px spacing while message boundaries keep 24px", asy
   await expect(items).toHaveCount(7);
   await expect.poll(gaps).toEqual([24, 24, 6, 6, 24, 24]);
 });
+
+for (const [width, height, colorScheme] of [
+  [1440, 960, "light"],
+  [390, 844, "dark"],
+] as const) {
+  test.describe(`chat image lightbox (${width}px ${colorScheme})`, () => {
+    test.use({
+      viewport: { width, height },
+      hasTouch: width < 768,
+      colorScheme,
+    });
+    test("previews images in the window and closes without losing chat state", async ({
+      page,
+    }, testInfo) => {
+      const { emit } = await workspace(page);
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      const referrers: (string | undefined)[] = [];
+      await page.route("**/preview-image.png", async (route) => {
+        referrers.push(route.request().headers().referer);
+        await route.fulfill({
+          path: "../docs/screenshots/web-tool-spacing.png",
+          contentType: "image/png",
+        });
+      });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto("/?dialog=new-agent");
+      await page
+        .getByRole("button", { name: "harness /srv/harness", exact: true })
+        .click();
+      emit("a1", "output", {
+        ResponseType: "agent",
+        Content:
+          "Here’s the chat preview:\n\n[![Desktop preview](/preview-image.png)](https://example.com/original)\n\n[Documentation](https://example.com/docs)",
+      });
+      const trigger = page.getByRole("button", {
+        name: "Open image: Desktop preview",
+        exact: true,
+      });
+      const thumbnail = trigger.getByRole("img", {
+        name: "Desktop preview",
+        exact: true,
+      });
+      await expect
+        .poll(() => thumbnail.evaluate((e: HTMLImageElement) => e.naturalWidth))
+        .toBeGreaterThan(0);
+      await expect(thumbnail).not.toHaveCSS("box-shadow", "none");
+      await expect(thumbnail).toHaveCSS("border-top-width", "1px");
+      await expect(thumbnail).toHaveCSS("border-top-style", "solid");
+      const thumbnailBox = (await thumbnail.boundingBox())!;
+      const triggerBox = (await trigger.boundingBox())!;
+      // Padding protects the shadow from the scroller item's paint clipping,
+      // including when the image consumes all available width on mobile.
+      expect(thumbnailBox.x - triggerBox.x).toBeGreaterThanOrEqual(16);
+      expect(
+        triggerBox.x + triggerBox.width - thumbnailBox.x - thumbnailBox.width,
+      ).toBeGreaterThanOrEqual(16);
+      expect(thumbnailBox.y - triggerBox.y).toBeGreaterThanOrEqual(16);
+      expect(
+        triggerBox.y + triggerBox.height - thumbnailBox.y - thumbnailBox.height,
+      ).toBeGreaterThanOrEqual(16);
+      const itemBox = await thumbnail.evaluate((e) => {
+        const box = e
+          .closest('[data-slot="message-scroller-item"]')!
+          .getBoundingClientRect();
+        return { left: box.left, right: box.right };
+      });
+      expect(thumbnailBox.x - itemBox.left).toBeGreaterThanOrEqual(16);
+      expect(
+        itemBox.right - thumbnailBox.x - thumbnailBox.width,
+      ).toBeGreaterThanOrEqual(16);
+      await expect(page.locator("a button")).toHaveCount(0);
+      await expect(
+        page.getByRole("link", { name: "Documentation", exact: true }),
+      ).toHaveAttribute("href", "https://example.com/docs");
+      const draft = page.getByRole("textbox", { name: "Message", exact: true });
+      await draft.fill("Keep this draft while viewing the image");
+      const url = page.url();
+      const capture = async (name: string) => {
+        const path = testInfo.outputPath(`${name}-${width}.png`);
+        await page.screenshot({ path });
+        await testInfo.attach(name, { path, contentType: "image/png" });
+      };
+      await capture("inline-image");
+      if (width < 768) await trigger.tap();
+      else {
+        await trigger.focus();
+        await page.keyboard.press("Enter");
+      }
+      const dialog = page.getByRole("dialog", {
+        name: "Image preview",
+        exact: true,
+      });
+      const image = dialog.getByRole("img", {
+        name: "Desktop preview",
+        exact: true,
+      });
+      await expect(image).toBeVisible();
+      const naturalRatio = await image.evaluate(
+        (e: HTMLImageElement) => e.naturalWidth / e.naturalHeight,
+      );
+      await expect
+        .poll(async () => (await image.boundingBox())!.width)
+        .toBeCloseTo(Math.min(width - 32, (height - 96) * naturalRatio), 0);
+      const box = (await image.boundingBox())!;
+      expect(
+        Math.abs(
+          box.width - Math.min(width - 32, (height - 96) * naturalRatio),
+        ),
+      ).toBeLessThan(2);
+      expect(Math.abs(box.width / box.height - naturalRatio)).toBeLessThan(
+        0.01,
+      );
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      expect(box.y + box.height).toBeLessThanOrEqual(height);
+      await expect(page.locator('[data-slot="dialog-overlay"]')).toHaveClass(
+        /bg-black\/80/,
+      );
+      await expect(
+        dialog.getByRole("button", {
+          name: "Close image preview",
+          exact: true,
+        }),
+      ).toBeInViewport();
+      await image.click();
+      await expect(dialog).toBeVisible();
+      await capture("image-lightbox");
+      // Streaming events should not remount the Markdown image and close its dialog.
+      const originalDialog = await dialog.elementHandle();
+      emit("a1", "output", {
+        ResponseType: "agent",
+        Content: "More output while the image is open",
+      });
+      await expect(
+        page
+          .locator("article")
+          .filter({ hasText: "More output while the image is open" }),
+      ).toHaveCount(1);
+      expect(await originalDialog!.evaluate((e) => e.isConnected)).toBe(true);
+      await expect(dialog).toBeVisible();
+      await expect(page).toHaveURL(url);
+      expect(page.context().pages()).toHaveLength(1);
+      await dialog
+        .getByRole("button", { name: "Close image preview", exact: true })
+        .click();
+      for (const close of ["escape", "backdrop", "letterbox"] as const) {
+        await expect(dialog).toHaveCount(0);
+        await expect(trigger).toBeFocused();
+        await expect(draft).toHaveValue(
+          "Keep this draft while viewing the image",
+        );
+        if (width < 768) await trigger.tap();
+        else await trigger.click();
+        await expect(dialog).toBeVisible();
+        if (close === "escape") await page.keyboard.press("Escape");
+        else if (close === "backdrop") {
+          const backdrop = page.locator('[data-slot="dialog-overlay"]');
+          if (width < 768) await backdrop.tap({ position: { x: 4, y: 4 } });
+          else await backdrop.click({ position: { x: 4, y: 4 } });
+        } else {
+          await expect
+            .poll(async () => Math.round((await dialog.boundingBox())!.height))
+            .toBe(height - 32);
+          const bounds = (await dialog.boundingBox())!;
+          await dialog.click({
+            position: { x: bounds.width / 2, y: bounds.height - 4 },
+          });
+        }
+      }
+      await expect(dialog).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+      await expect(draft).toHaveValue(
+        "Keep this draft while viewing the image",
+      );
+      expect(referrers.length).toBeGreaterThan(0);
+      expect(referrers.every((value) => value === undefined)).toBe(true);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      // Browser navigation unmounts the viewer cleanly, even while it is open.
+      await trigger.click();
+      await expect(dialog).toBeVisible();
+      await page.goBack();
+      await expect(
+        page.getByRole("dialog", { name: "New chat", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("dialog")).toHaveCount(1);
+      await page
+        .getByRole("button", { name: "harness /srv/harness", exact: true })
+        .click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page
+        .getByRole("textbox", { name: "Message", exact: true })
+        .fill("Input still works");
+      expect(errors).toEqual([]);
+    });
+  });
+}
+
+test("portrait and failed images remain usable in user-message previews", async ({
+  page,
+}) => {
+  const { emit } = await workspace(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/portrait.svg", (route) =>
+    route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="900"><rect width="300" height="900" fill="#555"/></svg>',
+    }),
+  );
+  await page.route("**/broken-image.png", (route) =>
+    route.fulfill({ status: 404, body: "Not found" }),
+  );
+  await page.goto("/?dialog=new-agent");
+  await page
+    .getByRole("button", { name: "harness /srv/harness", exact: true })
+    .click();
+  emit("a1", "turn.started", {
+    id: "image-message",
+    text: "![Portrait](/portrait.svg)\n\n![Broken](/broken-image.png)",
+    status: "running",
+    created_at: new Date().toISOString(),
+  });
+  const message = page.getByRole("article", {
+    name: "Your message",
+    exact: true,
+  });
+  const portrait = message.getByRole("button", {
+    name: "Open image: Portrait",
+    exact: true,
+  });
+  await expect
+    .poll(() =>
+      portrait
+        .locator("img")
+        .evaluate((e: HTMLImageElement) => e.naturalHeight),
+    )
+    .toBe(900);
+  await portrait.click();
+  const dialog = page.getByRole("dialog", {
+    name: "Image preview",
+    exact: true,
+  });
+  const image = dialog.getByRole("img", { name: "Portrait", exact: true });
+  await expect(image).toBeVisible();
+  await expect
+    .poll(async () => Math.round((await image.boundingBox())!.height))
+    .toBe(748);
+  const box = (await image.boundingBox())!;
+  expect(Math.abs(box.width / box.height - 1 / 3)).toBeLessThan(0.01);
+  await page.keyboard.press("Escape");
+  await message
+    .getByRole("button", { name: "Open image: Broken", exact: true })
+    .click();
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "This image could not be loaded.",
+  );
+  await dialog
+    .getByRole("button", { name: "Close image preview", exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
