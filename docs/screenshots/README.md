@@ -64,3 +64,21 @@ WebKit through `npm run test:iphone`; mobile reading-position setup replays touc
 intent and scroll position because Playwright has no touch-pan API. Separate
 cases cover composer shrink, queued turns, failed/slow sends, reading during a
 pending request, and late acknowledgements after changing chats.
+
+# Chat worktrees
+
+These captures use the real control-plane HTTP/WebSocket server and Git, with a
+local bare remote, an isolated temporary checkout/state directory, and a
+deterministic fake provider. The provider executes a real Bash tool in the
+created worktree. No paid model calls or modifications to real projects were
+used. The original checkout contains a local edit and `.env`; neither is copied
+to or modified by the worktree chat.
+
+- [Project workspace defaults](web-worktree-settings.png)
+- [Draft mode and per-chat starting-branch override](web-worktree-draft.png)
+- [Locked workspace and real tool output](web-worktree-ready.png)
+- [Mobile workspace indicator](web-worktree-mobile.png)
+- [Permanent setup failure, with no retry](web-worktree-failed.png)
+- [Project defaults → per-chat override → first send → locked workspace recording](web-worktree-demo.webm)
+
+The mobile image is a Chromium 390×844 viewport, not a physical-phone capture.

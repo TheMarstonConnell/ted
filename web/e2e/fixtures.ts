@@ -9,6 +9,12 @@ export async function workspace(page: Page) {
     root: "/srv/harness",
     git_branch: "main",
     defaults: { model: "test/model", effort: "medium" },
+    workspace_defaults: { mode: "current_checkout" },
+  };
+  let projectBranches = {
+    is_git: true,
+    branches: ["origin/main", "origin/release", "upstream/trunk"],
+    default_branch: "origin/main",
   };
   const agents: Record<string, any> = {};
   const events: Record<string, any[]> = {};
@@ -56,6 +62,8 @@ export async function workspace(page: Page) {
     if (url.pathname === "/v1/projects") {
       if (method === "POST") project = { ...project, ...body };
       result = method === "POST" ? project : [project];
+    } else if (url.pathname === "/v1/projects/p/branches") {
+      result = projectBranches;
     } else if (url.pathname === "/v1/projects/p") {
       if (method === "PATCH") project = { ...project, ...body };
       result = project;
@@ -85,6 +93,11 @@ export async function workspace(page: Page) {
           cursor: 0,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
+          workspace: {
+            ...(body.workspace || project.workspace_defaults),
+            locked: false,
+            status: "draft",
+          },
         };
         events[id] = [];
         inventory(id);
@@ -95,6 +108,15 @@ export async function workspace(page: Page) {
       if (method === "PATCH" && !operation) {
         agents[id].settled = body.settled;
         inventory(id);
+      }
+      if (operation === "workspace" && method === "PATCH") {
+        agents[id].workspace = {
+          ...body,
+          locked: false,
+          status: "draft",
+        };
+        inventory(id);
+        result = agents[id];
       }
       if (operation === "messages" && method === "DELETE") {
         const messageId = decodeURIComponent(url.pathname.split("/")[5]);
@@ -120,6 +142,24 @@ export async function workspace(page: Page) {
       }
       if (operation === "messages" && method === "POST") {
         expect(agents[id].settled).toBe(false);
+        const selected = agents[id].workspace;
+        agents[id].workspace = {
+          ...selected,
+          locked: true,
+          status: "ready",
+          path:
+            selected.mode === "worktree"
+              ? `/var/lib/ted/worktrees/${id}`
+              : project.root,
+          branch:
+            selected.mode === "worktree"
+              ? selected.base_branch || "origin/main"
+              : project.git_branch,
+          ...(selected.mode === "worktree"
+            ? { base_commit: "0123456789abcdef" }
+            : {}),
+        };
+        inventory(id);
         expect(request.headers()["idempotency-key"]).toBeTruthy();
         const queued = {
           id: `m${events[id].length}`,
@@ -150,7 +190,18 @@ export async function workspace(page: Page) {
       json: result,
     });
   });
-  return { agents, events, emit };
+  return {
+    agents,
+    events,
+    emit,
+    setWorkspace(id: string, workspace: Record<string, unknown>) {
+      agents[id].workspace = workspace;
+      inventory(id);
+    },
+    setProjectBranches(value: typeof projectBranches) {
+      projectBranches = value;
+    },
+  };
 }
 
 // Project defaults remain accessible from the sidebar on desktop and mobile.

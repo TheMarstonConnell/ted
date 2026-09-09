@@ -12,9 +12,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { api, projectName, requestKey, type Project } from "@/lib/api";
+import {
+  api,
+  projectName,
+  projectWorkspaceDefaults,
+  requestKey,
+  type Project,
+  type WorkspaceSelection,
+} from "@/lib/api";
 import { control, useControl } from "@/lib/store";
 import { ErrorNotice, ModelFields } from "./common";
+import { WorkspaceFields } from "./workspace";
 
 function ProjectPicker() {
   const { projects, loaded } = useControl();
@@ -111,6 +119,12 @@ function ProjectForm() {
   const [effort, setEffort] = useState(
     project?.defaults.effort ?? models[0]?.default_effort ?? "",
   );
+  const [workspaceDefaults, setWorkspaceDefaults] =
+    useState<WorkspaceSelection>(
+      (project && projectWorkspaceDefaults(project)) || {
+        mode: "current_checkout",
+      },
+    );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -127,8 +141,16 @@ function ProjectForm() {
           : "/v1/projects",
         project ? "PATCH" : "POST",
         project
-          ? { defaults: { model, effort } }
-          : { name, root: root.trim(), defaults: { model, effort } },
+          ? {
+              defaults: { model, effort },
+              workspace_defaults: workspaceDefaults,
+            }
+          : {
+              name,
+              root: root.trim(),
+              defaults: { model, effort },
+              workspace_defaults: workspaceDefaults,
+            },
       );
       await control.refreshProjects();
       if (project) close("panel");
@@ -161,7 +183,7 @@ function ProjectForm() {
         </DialogTitle>
         <DialogDescription>
           {project
-            ? "Defaults apply to new agents only. Existing agents keep their settings."
+            ? "Model and workspace defaults apply to new chats only. Existing chats keep their settings."
             : "Connect a directory on the server. Its folder name becomes the project name."}
         </DialogDescription>
       </DialogHeader>
@@ -206,6 +228,19 @@ function ProjectForm() {
             setEffort(e);
           }}
         />
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium">Workspace default</h3>
+          <p className="text-xs text-muted-foreground">
+            Choose where new chats run. Each chat can change this before its
+            first message.
+          </p>
+          <WorkspaceFields
+            projectId={project?.id}
+            value={workspaceDefaults}
+            onChange={setWorkspaceDefaults}
+            disabled={busy}
+          />
+        </div>
         <div className="flex justify-end gap-2">
           <Button type="submit" disabled={busy || !model || !name}>
             {busy ? "Saving…" : project ? "Save defaults" : "Create project"}
