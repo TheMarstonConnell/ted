@@ -2043,8 +2043,16 @@ for (const width of [1440, 390]) {
           .getByRole("navigation", { name: "Agents", exact: true })
           .getByRole("button", { name: "New project", exact: true }),
       ).toHaveCount(0);
-      const chatBox = (await chat.boundingBox())!;
-      const projectBox = (await project.boundingBox())!;
+      // Read both rectangles in one frame: the mobile drawer may still be
+      // animating, so separate boundingBox calls can observe different offsets.
+      const [chatBox, projectBox] = await group
+        .getByRole("button")
+        .evaluateAll((buttons) =>
+          buttons.map((button) => {
+            const { x, y, width, height } = button.getBoundingClientRect();
+            return { x, y, width, height };
+          }),
+        );
       expect(projectBox.width).toBe(projectBox.height);
       expect(chatBox.width).toBeGreaterThan(projectBox.width);
       expect(chatBox.height).toBe(projectBox.height);
