@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -50,14 +51,13 @@ func TestTurnCancellationKillsBashProcessGroup(t *testing.T) {
 	// running when TurnContext returns, nor may the direct shell remain unreaped.
 	for i, pid := range pids {
 		data, err := os.ReadFile(fmt.Sprintf("/proc/%s/stat", pid))
-		if errors.Is(err, os.ErrNotExist) {
+		if procStatProcessGone(err) {
 			continue
 		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, tail, _ := strings.Cut(string(data), ") ")
-		if i == 0 || !strings.HasPrefix(tail, "Z ") {
+		if !procStatProcessExited(string(data), i > 0) {
 			t.Fatalf("process %s still running after cancellation: %s", pid, data)
 		}
 	}
@@ -80,5 +80,71 @@ func TestBashContextDeadline(t *testing.T) {
 	capped, full := runBashInContext(ctx, "echo started; sleep 30", time.Minute, "", nil, true)
 	if time.Since(start) > time.Second || !strings.Contains(capped, "context deadline exceeded") || !strings.Contains(full, "started") {
 		t.Fatalf("%q / %q", capped, full)
+	}
+}
+
+// /proc entries are not stable across open and read. A process reaped before
+// open yields ENOENT; one reaped after open may yield ESRCH from read. Both mean
+// the process is gone, not that cancellation failed. Other I/O errors must fail.
+func procStatProcessGone(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
+}
+
+func TestProcStatProcessGone(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		gone bool
+	}{
+		{"read succeeded", nil, false},
+		{"missing entry", os.ErrNotExist, true},
+		{"reaped before open", &os.PathError{Op: "open", Path: "/proc/123/stat", Err: syscall.ENOENT}, true},
+		{"reaped after open", &os.PathError{Op: "read", Path: "/proc/123/stat", Err: syscall.ESRCH}, true},
+		{"no such process", syscall.ESRCH, true},
+		{"permission denied", &os.PathError{Op: "open", Path: "/proc/123/stat", Err: syscall.EACCES}, false},
+		{"read error", &os.PathError{Op: "read", Path: "/proc/123/stat", Err: syscall.EIO}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := procStatProcessGone(tc.err); got != tc.gone {
+				t.Fatalf("procStatProcessGone(%v) = %v, want %v", tc.err, got, tc.gone)
+			}
+		})
+	}
+}
+
+// EXIT_DEAD (X) can briefly be observed while procfs races with reaping. A
+// zombie is acceptable only for the orphaned child, never for our direct shell.
+func procStatProcessExited(stat string, allowZombie bool) bool {
+	end := strings.LastIndex(stat, ") ")
+	if end < 0 {
+		return false
+	}
+	state := stat[end+2:]
+	return strings.HasPrefix(state, "X ") || (allowZombie && strings.HasPrefix(state, "Z "))
+}
+
+func TestProcStatProcessExited(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		stat        string
+		allowZombie bool
+		exited      bool
+	}{
+		{"dead parent", "123 (bash) X 0 0", false, true},
+		{"dead child", "123 (sleep) X 0 0", true, true},
+		{"zombie orphan", "123 (sleep) Z 1 0", true, true},
+		{"unreaped parent", "123 (bash) Z 1 0", false, false},
+		{"running child", "123 (sleep) R 1 0", true, false},
+		{"sleeping child", "123 (sleep) S 1 0", true, false},
+		{"uninterruptible child", "123 (sleep) D 1 0", true, false},
+		{"stopped child", "123 (sleep) T 1 0", true, false},
+		{"name containing delimiter", "123 (name ) Z more) S 1 0", true, false},
+		{"invalid stat", "", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := procStatProcessExited(tc.stat, tc.allowZombie); got != tc.exited {
+				t.Fatalf("procStatProcessExited(%q, %v) = %v, want %v", tc.stat, tc.allowZombie, got, tc.exited)
+			}
+		})
 	}
 }

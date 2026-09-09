@@ -393,6 +393,12 @@ func TestHTTPWebSocketSlowWriterDeadline(t *testing.T) {
 	// production bounded writer on a real TCP socket whose peer stops reading.
 	result := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Local port discovery/health probes are not the slow WebSocket peer.
+		// Do not feed their rejected HTTP requests into the writer result channel.
+		if !websocket.IsWebSocketUpgrade(r) {
+			http.Error(w, "websocket upgrade required", http.StatusBadRequest)
+			return
+		}
 		u := websocket.Upgrader{}
 		c, err := u.Upgrade(w, r, nil)
 		if err != nil {
@@ -415,6 +421,15 @@ func TestHTTPWebSocketSlowWriterDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
+	// A plain HTTP probe must not terminate the deadline assertion early.
+	probe, err := server.Client().Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe.Body.Close()
+	if probe.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected probe status: %d", probe.StatusCode)
+	}
 	if tcp, ok := c.UnderlyingConn().(*net.TCPConn); ok {
 		_ = tcp.SetReadBuffer(1024)
 	}
