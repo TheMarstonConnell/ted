@@ -260,11 +260,32 @@ func (m model) statusView() string {
 	if settings.Effort != "" {
 		label += " · " + string(settings.Effort)
 	}
-	status := []rune(label + "  " + m.directory)
-	if len(status) > width && width > 0 {
-		status = append(status[:width-1], '…')
+	meter, percent := contextMeter(m.agent.ContextUsage())
+	// Reserve space for the meter even when the model or directory is long.
+	available := width - ansi.StringWidth(meter) - 2
+	if available < 0 {
+		return m.statusStyle.Width(width).Render(ansi.Truncate(meter, width, "…"))
 	}
-	return m.statusStyle.Width(width).Render(string(status))
+	prefix := ansi.Truncate(label+"  "+m.directory, available, "…")
+	meterStyle := lipgloss.NewStyle()
+	if percent >= 90 {
+		meterStyle = meterStyle.Foreground(lipgloss.Color("1"))
+	} else if percent >= 80 {
+		meterStyle = meterStyle.Foreground(lipgloss.Color("3"))
+	}
+	return m.statusStyle.Width(width).Render(prefix + "  " + meterStyle.Render(meter))
+}
+
+func contextMeter(usage agent.ContextUsage) (string, float64) {
+	// Default to full capacity until the provider reports usage.
+	if !usage.Known {
+		return "ctx 100% left", 0
+	}
+	percent, known := usage.Percent()
+	if !known {
+		return "ctx —", 0
+	}
+	return fmt.Sprintf("ctx %.0f%% left", max(0, 100-percent)), percent
 }
 
 // toolbarView renders the bottom bar: the framed text area and the status
@@ -433,7 +454,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.GotoBottom()
 	case agent.AgentResponse:
-		if msg.ResponseType == "status" {
+		if msg.ResponseType == "usage" {
+			return m, nil // Usage changed; redraw the toolbar without transcript noise.
+		} else if msg.ResponseType == "status" {
 			m.appendMessage(commandMessage, msg.Content)
 		} else if msg.ResponseType == "tool" {
 			m.appendMessage(toolCallMessage, msg.Content)

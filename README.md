@@ -37,7 +37,31 @@ starts. Model IDs use the same `provider/model-id` format as `/model`.
 
 Configure `OPENROUTER_API_KEY`, or reuse an existing Codex CLI login (`codex
 login`). The CLI loads `.env`; the agent package does not. Configured providers
-supply a static model catalog; there is no live model fetch yet.
+supply a fixed supported-model catalog. The CLI fetches OpenRouter context-window
+metadata at startup with a three-second deadline; unavailable metadata does not
+prevent startup. Codex models in the catalog use a 1,050,000-token window.
+
+### Context usage
+
+The TUI starts at `ctx 100% left` until usage metrics arrive, then shows the
+estimated remaining context (for example, `ctx 58% left`) beside the working
+directory. Warnings turn yellow at 80% used and red at 90% used. `ctx —` means
+usage is available but model capacity is unknown. This is an estimate based on the **latest completion's input + output tokens**, not tokens
+summed across the thread. Cached input and reasoning output are already included
+in those counts. Tool results and user input added after that completion are not
+counted until the next model response.
+
+Tracking is ephemeral and updates after every completion, including tool-call
+iterations. Failed turns restore the previous snapshot; switching models clears
+it. This meter does not trigger automatic compaction, and there is no capacity
+override setting.
+
+Applications can read the concurrency-safe `Agent.ContextUsage()` snapshot and
+its `Percent()` method. `ModelInfo.ContextWindow` is zero when unknown. Output
+callbacks receive a content-free `AgentResponse` with `ResponseType: "usage"`
+when a completion updates the snapshot. Embedded applications using OpenRouter
+can call `LoadModelMetadata(ctx)` with a bounded context to populate capacities;
+provider construction itself does not perform network requests.
 
 ### Discover providers, models, and efforts
 

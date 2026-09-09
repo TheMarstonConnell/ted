@@ -39,10 +39,10 @@ func NewCodexProvider(auth *CodexAuthStore) *CodexProvider {
 
 func (c *CodexProvider) ListModels() []ModelInfo {
 	return []ModelInfo{
-		{ID: "gpt-6-astra", Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
-		{ID: "gpt-5.6-sol", Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
-		{ID: "gpt-5.6-terra", Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
-		{ID: "gpt-5.6-luna", Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
+		{ID: "gpt-6-astra", ContextWindow: 1_050_000, Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
+		{ID: "gpt-5.6-sol", ContextWindow: 1_050_000, Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
+		{ID: "gpt-5.6-terra", ContextWindow: 1_050_000, Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
+		{ID: "gpt-5.6-luna", ContextWindow: 1_050_000, Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
 	}
 }
 
@@ -296,6 +296,11 @@ func buildResponsesInput(messages []Message) (string, []json.RawMessage, error) 
 
 // responsesCompleted is the response object carried by the final stream event.
 type responsesCompleted struct {
+	Usage *struct {
+		InputTokens  int64 `json:"input_tokens"`
+		OutputTokens int64 `json:"output_tokens"`
+		TotalTokens  int64 `json:"total_tokens"`
+	} `json:"usage"`
 	Id     string            `json:"id"`
 	Model  string            `json:"model"`
 	Status string            `json:"status"`
@@ -454,7 +459,12 @@ func buildChatResponse(completed *responsesCompleted) (*Response, error) {
 		ToolCalls:        toolCalls,
 	}
 
+	var usage *TokenUsage
+	if u := completed.Usage; u != nil {
+		usage = &TokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, TotalTokens: u.TotalTokens}
+	}
 	return &Response{
+		Usage:    usage,
 		Id:       completed.Id,
 		Object:   "response",
 		Model:    completed.Model,

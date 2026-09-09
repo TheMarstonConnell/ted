@@ -229,7 +229,7 @@ func TestOutputMayInspectAgent(t *testing.T) {
 	emitted := false
 	a.SetOutput(func(res AgentResponse) {
 		emitted = true
-		if res.Content != "ok" {
+		if res.ResponseType != "usage" && res.Content != "ok" {
 			t.Error(res)
 		}
 		_ = a.Settings()

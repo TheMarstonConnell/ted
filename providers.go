@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/TheMarstonConnell/ted/agent"
 	"github.com/joho/godotenv"
@@ -30,7 +32,13 @@ func configuredProviders(logger *zap.Logger) ([]agent.Provider, error) {
 	}
 
 	if openRouterKey := os.Getenv(openRouterKeyVariable); openRouterKey != "" {
-		providers = append(providers, agent.NewOpenRouterProvider(openRouterKey))
+		provider := agent.NewOpenRouterProvider(openRouterKey)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := provider.LoadModelMetadata(ctx); err != nil {
+			logger.Debug("model capacities unavailable", zap.Error(err))
+		}
+		cancel()
+		providers = append(providers, provider)
 	} else {
 		logger.Debug("no openrouter key found", zap.String("variable", openRouterKeyVariable))
 	}

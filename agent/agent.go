@@ -34,13 +34,14 @@ func makeBashTool() Tool {
 // Agent is an instance-local conversation. One turn may run at a time.
 // Settings and output registration are safe to access concurrently.
 type Agent struct {
-	mu        sync.Mutex
-	settings  Settings
-	messages  []Message
-	busy      bool
-	providers []Provider
-	logger    *zap.Logger
-	respond   func(AgentResponse)
+	mu           sync.Mutex
+	contextUsage ContextUsage
+	settings     Settings
+	messages     []Message
+	busy         bool
+	providers    []Provider
+	logger       *zap.Logger
+	respond      func(AgentResponse)
 
 	threadID       string
 	projectRoot    string
@@ -141,6 +142,7 @@ func (a *Agent) Turn(userInput string) (err error) {
 		return errors.New("no model available")
 	}
 	a.busy = true
+	previousUsage := a.contextUsage
 	messages := cloneMessages(a.messages)
 	a.mu.Unlock()
 	completed := false
@@ -148,6 +150,8 @@ func (a *Agent) Turn(userInput string) (err error) {
 		a.mu.Lock()
 		if completed {
 			a.messages = messages
+		} else {
+			a.contextUsage = previousUsage
 		}
 		a.busy = false
 		a.mu.Unlock()
@@ -166,6 +170,9 @@ func (a *Agent) Turn(userInput string) (err error) {
 		if res == nil || len(res.Choices) == 0 {
 			return fmt.Errorf("completion returned no choices")
 		}
+
+		a.recordContextUsage(settings.Model, res.Usage)
+		a.emit(AgentResponse{ResponseType: "usage"})
 
 		choice := res.Choices[0]
 
@@ -245,6 +252,8 @@ func (a *Agent) SetOutput(respond func(AgentResponse)) {
 	a.respond = respond
 }
 
+// AgentResponse is an output event. ResponseType "usage" has no content and
+// signals that ContextUsage has changed during the current turn.
 type AgentResponse struct {
 	Content      string
 	ResponseType string

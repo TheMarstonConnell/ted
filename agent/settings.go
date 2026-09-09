@@ -20,6 +20,7 @@ var ErrBusy = errors.New("agent is busy; try again after this turn")
 // ModelInfo carries the supported subset of a model's capabilities. An empty
 // Efforts list means this integration does not expose configurable effort.
 type ModelInfo struct {
+	ContextWindow int64 // Tokens; zero means unknown.
 	ID            string
 	Name          string
 	Provider      string
@@ -107,6 +108,9 @@ func (a *Agent) SetModel(id string) (SettingsChange, error) {
 		}
 		if effort != "" && !slices.Contains(model.Efforts, effort) {
 			return SettingsChange{}, fmt.Errorf("model %q has an unsupported default effort", id)
+		}
+		if a.settings.Model != id {
+			a.contextUsage = ContextUsage{}
 		}
 		a.settings = Settings{Model: id, Provider: model.Provider, Effort: effort}
 		change.After = a.settings

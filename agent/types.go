@@ -28,12 +28,13 @@ type Choice struct {
 }
 
 type Response struct {
-	Id       string   `json:"id"`
-	Object   string   `json:"object"`
-	Created  uint64   `json:"created"`
-	Model    string   `json:"model"`
-	Provider string   `json:"provider"`
-	Choices  []Choice `json:"choices"`
+	Usage    *TokenUsage `json:"usage,omitempty"`
+	Id       string      `json:"id"`
+	Object   string      `json:"object"`
+	Created  uint64      `json:"created"`
+	Model    string      `json:"model"`
+	Provider string      `json:"provider"`
+	Choices  []Choice    `json:"choices"`
 }
 
 type FunctionCall struct {

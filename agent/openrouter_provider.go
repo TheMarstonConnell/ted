@@ -2,11 +2,13 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,8 +17,10 @@ import (
 var _ Provider = &OpenRouterProvider{}
 
 type OpenRouterProvider struct {
-	apiKey string
-	client *http.Client
+	metadataMu     sync.RWMutex
+	contextWindows map[string]int64
+	apiKey         string
+	client         *http.Client
 }
 
 func NewOpenRouterProvider(apiKey string) *OpenRouterProvider {
@@ -29,12 +33,54 @@ func NewOpenRouterProvider(apiKey string) *OpenRouterProvider {
 }
 
 func (o *OpenRouterProvider) ListModels() []ModelInfo {
-	return []ModelInfo{
+	models := []ModelInfo{
 		{ID: "meta/muse-spark-1.3-contributor"},
 		{ID: "deepseek/deepseek-v4-flash-0731"},
 		{ID: "openai/gpt-5.6-luna", Efforts: []Effort{EffortLow, EffortMedium, EffortHigh}, DefaultEffort: EffortMedium},
 		{ID: "z-ai/glm-5.3-flash"},
 	}
+	o.metadataMu.RLock()
+	defer o.metadataMu.RUnlock()
+	for i := range models {
+		models[i].ContextWindow = o.contextWindows[models[i].ID]
+	}
+	return models
+}
+
+// LoadModelMetadata refreshes capacities without changing the supported model list.
+// On failure existing metadata is retained. Callers should supply a short deadline.
+func (o *OpenRouterProvider) LoadModelMetadata(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://openrouter.ai/api/v1/models", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := o.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("model metadata returned status %d", resp.StatusCode)
+	}
+	var catalog struct {
+		Data []struct {
+			ID            string `json:"id"`
+			ContextWindow int64  `json:"context_length"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&catalog); err != nil {
+		return err
+	}
+	windows := make(map[string]int64, len(catalog.Data))
+	for _, model := range catalog.Data {
+		if model.ContextWindow > 0 {
+			windows[model.ID] = model.ContextWindow
+		}
+	}
+	o.metadataMu.Lock()
+	o.contextWindows = windows
+	o.metadataMu.Unlock()
+	return nil
 }
 
 func (o *OpenRouterProvider) Name() string {
