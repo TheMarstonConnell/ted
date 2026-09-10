@@ -104,3 +104,25 @@ with `TED_WEB_RECORD=1 npx playwright test e2e/worktree.spec.ts --grep 'Local fo
 - [Mobile dark selector](web-local-footer-dark-draft.png)
 - [Mobile dark locked text](web-local-footer-dark-locked.png)
 - [Local selector → locked footer recording](web-local-footer-demo.webm)
+
+
+## Footer branches and separators
+
+The footer once again shows the Git branch beside Local/Worktree, with subtle
+vertical dividers between workspace, branch, context, and mobile navigation.
+Worktree drafts use the starting-branch picker in that slot. Missing branches
+leave no extra divider; long names truncate and retain their full tooltip.
+
+These are deterministic mocked API/WebSocket captures from the focused worktree
+browser suite, not live Git/provider calls.
+
+- [Desktop draft](web-footer-branch-1440-draft.png)
+- [Desktop locked worktree](web-footer-branch-1440-locked.png)
+- [Mobile draft](web-footer-branch-390-draft.png)
+- [Mobile locked worktree](web-footer-branch-390-locked.png)
+- [Narrow draft](web-footer-branch-320-draft.png)
+- [Narrow locked worktree](web-footer-branch-320-locked.png)
+- [Draft, locked branch, and missing-branch states recording](web-footer-branch-demo.webm)
+
+The Local light/dark captures above were refreshed to include the branch and
+dividers too. Other earlier worktree screenshots document the prior footer.

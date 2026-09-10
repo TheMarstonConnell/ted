@@ -1,7 +1,9 @@
 import { useEffect, useId, useState } from "react";
-import { Folder, LoaderCircle } from "lucide-react";
+import { Folder, GitBranch, LoaderCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import {
   NativeSelect,
   NativeSelectOption,
@@ -49,12 +51,14 @@ export function WorkspaceFields({
   onChange,
   disabled = false,
   compact = false,
+  gitBranch,
 }: {
   projectId?: string;
   value: WorkspaceSelection;
   onChange: (value: WorkspaceSelection) => void;
   disabled?: boolean;
   compact?: boolean;
+  gitBranch?: string;
 }) {
   const locationId = useId();
   const branchId = useId();
@@ -69,7 +73,7 @@ export function WorkspaceFields({
     <div
       className={
         compact
-          ? "flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-0"
+          ? "flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0 md:gap-x-4"
           : "space-y-4"
       }
       role="group"
@@ -113,8 +117,18 @@ export function WorkspaceFields({
           </NativeSelect>
         </div>
       </div>
+      {compact && value.mode === "current_checkout" && gitBranch && (
+        <WorkspaceBranch branch={gitBranch} />
+      )}
       {value.mode === "worktree" && (
-        <div className={compact ? "min-w-0 max-w-full" : "grid min-w-0 gap-2"}>
+        <div
+          className={
+            compact
+              ? "flex min-w-16 max-w-full flex-1 items-center gap-2 md:gap-4"
+              : "grid min-w-0 gap-2"
+          }
+        >
+          {compact && <FooterSeparator />}
           <Label htmlFor={branchId} className={compact ? "sr-only" : undefined}>
             Start from
           </Label>
@@ -123,7 +137,9 @@ export function WorkspaceFields({
               id={branchId}
               size={compact ? "sm" : "default"}
               variant={compact ? "plain" : "default"}
-              className={compact ? "max-w-full" : "w-full font-mono"}
+              className={
+                compact ? "min-w-0 max-w-full flex-1" : "w-full font-mono"
+              }
               title={`Start from: ${value.base_branch || branches?.default_branch || "remote branch"}`}
               value={branchValue}
               disabled={disabled || loading || knownNonGit || !!error}
@@ -243,5 +259,33 @@ export function WorkspaceIndicator({
       )}
       {workspace.mode === "worktree" ? "Worktree" : "Local"}
     </span>
+  );
+}
+
+// Decorative dividers do not add tab stops or screen-reader announcements.
+export function FooterSeparator({ className }: { className?: string }) {
+  return (
+    <Separator
+      orientation="vertical"
+      aria-hidden="true"
+      className={cn("h-4 data-vertical:self-center", className)}
+    />
+  );
+}
+
+export function WorkspaceBranch({ branch }: { branch: string }) {
+  return (
+    <div className="flex min-w-16 max-w-full flex-1 items-center gap-2 md:gap-4">
+      <FooterSeparator />
+      <span
+        role="group"
+        aria-label="Git branch"
+        title={branch}
+        className="inline-flex min-w-0 items-center gap-2 font-mono text-xs text-muted-foreground"
+      >
+        <GitBranch className="size-3 shrink-0" aria-hidden="true" />
+        <span className="truncate">{branch}</span>
+      </span>
+    </div>
   );
 }

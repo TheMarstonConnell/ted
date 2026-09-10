@@ -66,6 +66,8 @@ import {
   WorkspaceFields,
   WorkspaceIndicator,
   WorkspaceSetupBlock,
+  WorkspaceBranch,
+  FooterSeparator,
 } from "./workspace";
 
 // Intentionally ephemeral: agent switches retain drafts, a reload does not.
@@ -402,6 +404,12 @@ function ChatWorkspace() {
     workspace?.status === "fetching" ||
     workspace?.status === "creating" ||
     workspace?.status === "failed";
+  // Local uses live project metadata; a worktree must never borrow the
+  // original checkout's branch (including while setup has not completed).
+  const gitBranch =
+    workspaceSelection.mode === "worktree"
+      ? workspace?.branch
+      : project?.git_branch;
   const context = agent?.context_usage;
   const contextPercent =
     context && context.context_window > 0
@@ -772,28 +780,32 @@ function ChatWorkspace() {
             <div
               role="group"
               aria-label="Composer footer"
-              className="flex min-w-0 items-center gap-4 border-x border-transparent px-4 md:px-inset"
+              className="flex min-w-0 items-center gap-2 border-x border-transparent px-4 md:gap-4 md:px-inset"
             >
               {project && (
                 <div
                   role="group"
                   aria-label="Project location"
-                  className="flex min-w-0 flex-1 items-center font-mono text-xs text-muted-foreground"
+                  className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 font-mono text-xs text-muted-foreground md:gap-x-4"
                 >
                   {workspaceLocked ? (
-                    <WorkspaceIndicator
-                      workspace={
-                        workspace || {
-                          mode: "current_checkout",
-                          locked: true,
-                          status: "ready",
+                    <>
+                      <WorkspaceIndicator
+                        workspace={
+                          workspace || {
+                            mode: "current_checkout",
+                            locked: true,
+                            status: "ready",
+                          }
                         }
-                      }
-                      fallbackPath={project.root}
-                    />
+                        fallbackPath={project.root}
+                      />
+                      {gitBranch && <WorkspaceBranch branch={gitBranch} />}
+                    </>
                   ) : (
                     <WorkspaceFields
                       compact
+                      gitBranch={project.git_branch}
                       projectId={project.id}
                       value={workspaceSelection}
                       disabled={busy || !ready || status !== "live"}
@@ -806,7 +818,8 @@ function ChatWorkspace() {
                   )}
                 </div>
               )}
-              <div className="ml-auto flex shrink-0 items-center gap-2">
+              {project && <FooterSeparator />}
+              <div className="ml-auto flex shrink-0 items-center gap-2 md:gap-4">
                 <span
                   data-slot="context-usage"
                   className="font-mono text-xs text-muted-foreground"
@@ -817,6 +830,7 @@ function ChatWorkspace() {
                   </span>
                   <span className="md:hidden">{contextPercent}%</span>
                 </span>
+                <FooterSeparator className="md:hidden" />
                 <Button
                   type="button"
                   variant="ghost"

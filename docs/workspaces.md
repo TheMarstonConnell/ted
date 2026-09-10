@@ -37,7 +37,10 @@ than placing generated files inside the original working directory.
 The composer footer replaces the directory display with a compact workspace
 selector and, in Worktree mode, a starting-branch picker. After first send these
 become plain **Local** or **Worktree** text, including during setup or
-after failure. The directory is available in the text’s tooltip, and the sidebar
+after failure. The directory is available in the text’s tooltip. The Git branch
+appears beside the workspace in the footer, separated by a subtle vertical line;
+Local uses the project’s live branch, and Worktree uses its recorded branch. The
+starting-branch picker fills that slot before worktree setup. The sidebar also
 shows the generated branch. The recorded branch is the **creation branch**, not
 an enforced constraint on future Git operations.
 Users and agents may switch branches inside the workspace normally.

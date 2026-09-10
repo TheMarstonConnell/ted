@@ -317,3 +317,146 @@ for (const theme of ["light", "dark"] as const) {
     });
   });
 }
+
+for (const width of [320, 390, 1440]) {
+  test(`footer restores workspace-aware branches and vertical dividers (${width}px)`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    const fixture = await workspace(page);
+    await createChat(page);
+    const footer = page.getByRole("group", {
+      name: "Composer footer",
+      exact: true,
+    });
+    const branch = footer.getByRole("group", {
+      name: "Git branch",
+      exact: true,
+    });
+    const separators = footer.locator('[data-slot="separator"]:visible');
+    await expect(branch).toHaveText("main");
+    await expect(separators).toHaveCount(width < 768 ? 3 : 2);
+    for (const divider of await separators.all()) {
+      await expect(divider).toHaveAttribute("aria-hidden", "true");
+      await expect(divider).toHaveCSS("width", "1px");
+      await expect(divider).toHaveCSS("height", "16px");
+    }
+    await footer
+      .getByRole("combobox", { name: "Workspace", exact: true })
+      .selectOption("worktree");
+    await expect(
+      footer.getByRole("combobox", { name: "Start from", exact: true }),
+    ).toBeVisible();
+    await expect(branch).toHaveCount(0); // Don't show the project's branch as this worktree's branch.
+    await expect(separators).toHaveCount(width < 768 ? 3 : 2);
+    await page.screenshot({
+      path: testInfo.outputPath(`footer-branch-${width}-draft.png`),
+    });
+    const worktreeBranch =
+      "ted/isolated-chat-with-a-long-descriptive-branch-name";
+    fixture.setWorkspace("a1", {
+      mode: "worktree",
+      base_branch: "origin/release",
+      branch: worktreeBranch,
+      path: "/worktrees/a1",
+      locked: true,
+      status: "ready",
+    });
+    await expect(branch).toHaveText(worktreeBranch);
+    await expect(branch).toHaveAttribute("title", worktreeBranch);
+    await expect(footer.getByText("main", { exact: true })).toHaveCount(0);
+    await expect(
+      footer.getByRole("group", { name: "Workspace location", exact: true }),
+    ).toHaveText("Worktree");
+    await expect(footer.getByRole("combobox")).toHaveCount(0);
+    await expect(separators).toHaveCount(width < 768 ? 3 : 2);
+    const branchBox = (await branch.boundingBox())!;
+    const contextBox = (await footer
+      .locator('[data-slot="context-usage"]')
+      .boundingBox())!;
+    expect(branchBox.width).toBeGreaterThan(28);
+    expect(branchBox.x + branchBox.width).toBeLessThan(contextBox.x);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    if (width < 768)
+      await expect(
+        footer.getByRole("button", { name: "Open sidebar", exact: true }),
+      ).toBeInViewport();
+    await page.screenshot({
+      path: testInfo.outputPath(`footer-branch-${width}-locked.png`),
+    });
+    // A missing worktree branch must not fall back to the main checkout.
+    fixture.setWorkspace("a1", {
+      mode: "worktree",
+      locked: true,
+      status: "failed",
+      error: "Setup failed",
+    });
+    await expect(branch).toHaveCount(0);
+    await expect(separators).toHaveCount(width < 768 ? 2 : 1);
+  });
+}
+
+test("local footer branch follows project updates, not the worktree base setting", async ({
+  page,
+}) => {
+  const fixture = await workspace(page);
+  await createChat(page);
+  const footer = page.getByRole("group", {
+    name: "Composer footer",
+    exact: true,
+  });
+  fixture.setWorkspace("a1", {
+    mode: "current_checkout",
+    base_branch: "origin/release",
+    locked: true,
+    status: "ready",
+  });
+  const branch = footer.getByRole("group", { name: "Git branch", exact: true });
+  await expect(branch).toHaveText("main");
+  await page.route("**/v1/projects/p", (route) =>
+    route.fulfill({
+      json: {
+        id: "p",
+        name: "harness",
+        root: "/srv/harness",
+        git_branch: "feature/checked-out",
+        defaults: { model: "test/model", effort: "medium" },
+      },
+    }),
+  );
+  await expect(branch).toHaveText("feature/checked-out");
+  await expect(footer.getByText("origin/release", { exact: true })).toHaveCount(
+    0,
+  );
+});
+
+test("footer does not leave branch dividers behind outside Git", async ({
+  page,
+}) => {
+  await workspace(page);
+  await page.route("**/v1/projects/p", (route) =>
+    route.fulfill({
+      json: {
+        id: "p",
+        name: "harness",
+        root: "/srv/harness",
+        defaults: { model: "test/model", effort: "medium" },
+      },
+    }),
+  );
+  await createChat(page);
+  const footer = page.getByRole("group", {
+    name: "Composer footer",
+    exact: true,
+  });
+  await expect(
+    footer.getByRole("group", { name: "Git branch", exact: true }),
+  ).toHaveCount(0);
+  await expect(footer.locator('[data-slot="separator"]:visible')).toHaveCount(
+    1,
+  );
+});

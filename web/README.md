@@ -31,8 +31,8 @@ links render the normal chat without opening an overlay. Project defaults remain
 available from the sidebar and apply only to new chats. Footer content aligns
 with the input text area, not the outer input border. Mobile shows only its
 percentage (or “0%” when usage is unavailable), while desktop retains the Context label. On mobile, the footer has
-workspace controls or locked mode text on the left, and context plus the sidebar
-menu on the right; the file path is not displayed. Desktop shows workspace controls (or locked mode text) on the left, with context
+workspace controls or locked mode text and the Git branch on the left, and context
+plus the sidebar menu on the right; the file path is not displayed. Desktop shows workspace controls (or locked mode text) on the left, with context
 on the right. The path remains in the locked text’s title. The
 context readout and mobile menu remain available for chats without a project.
 Queued-message cancellation stays beside each queued message. The mobile drawer
@@ -72,9 +72,14 @@ Draft chats use compact, borderless **Local / Worktree** controls;
 Worktree exposes a **Start from** remote-branch picker alongside it. These stay
 below the message input, not in a separate settings row above the composer.
 After first send the slot becomes non-interactive **Local** or
-**Worktree** text. No disabled select, directory string, copy button, or extra
-branch row is shown there. The path remains available as a tooltip; the sidebar
-retains the generated worktree branch. This applies to desktop and mobile, with
+**Worktree** text. No disabled select, directory string, or copy button is shown there. The Git
+branch sits beside the workspace: Local uses the live project branch, while
+Worktree uses the thread’s recorded branch. Before worktree setup, the starting-
+branch picker occupies that branch slot instead. Thin, muted vertical dividers
+separate workspace, branch, context, and mobile navigation; absent items do not
+leave extra dividers. Long branches truncate with their full value in a tooltip,
+and the draft controls can wrap on very narrow screens. The path remains available
+as a tooltip; the sidebar also retains the generated worktree branch. This applies to desktop and mobile, with
 context and the mobile navigation button retained on the right. Project-default
 forms keep their normal labeled controls.
 
