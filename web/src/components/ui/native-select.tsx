@@ -5,11 +5,13 @@ import { ChevronDownIcon } from "lucide-react";
 
 type NativeSelectProps = Omit<React.ComponentProps<"select">, "size"> & {
   size?: "sm" | "default";
+  variant?: "default" | "plain";
 };
 
 function NativeSelect({
   className,
   size = "default",
+  variant = "default",
   ...props
 }: NativeSelectProps) {
   return (
@@ -24,7 +26,11 @@ function NativeSelect({
       <select
         data-slot="native-select"
         data-size={size}
-        className="h-10 w-full min-w-0 appearance-none rounded-md border border-input bg-transparent py-2 pr-8 pl-4 text-sm transition-colors outline-none select-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-[size=sm]:h-8 data-[size=sm]:rounded-md data-[size=sm]:py-2 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40"
+        className={cn(
+          "h-10 w-full min-w-0 appearance-none rounded-md border border-input bg-transparent py-2 pr-8 pl-4 text-sm transition-colors outline-none select-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-[size=sm]:h-8 data-[size=sm]:rounded-md data-[size=sm]:py-2 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
+          variant === "plain" &&
+            "border-transparent pl-0 font-mono text-xs text-muted-foreground hover:text-foreground dark:bg-transparent dark:hover:bg-transparent",
+        )}
         {...props}
       />
       <ChevronDownIcon

@@ -1,7 +1,6 @@
 import { useEffect, useId, useState } from "react";
-import { Check, Copy, GitBranch, LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
   NativeSelect,
@@ -69,17 +68,22 @@ export function WorkspaceFields({
   return (
     <div
       className={
-        compact ? "flex min-w-0 flex-1 flex-wrap items-end gap-2" : "space-y-4"
+        compact
+          ? "flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-0"
+          : "space-y-4"
       }
       role="group"
       aria-label="Workspace settings"
     >
-      <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-2">
-        <Label htmlFor={locationId}>Workspace</Label>
+      <div className={compact ? "min-w-0 max-w-full" : "grid min-w-0 gap-2"}>
+        <Label htmlFor={locationId} className={compact ? "sr-only" : undefined}>
+          Workspace
+        </Label>
         <NativeSelect
           id={locationId}
           size={compact ? "sm" : "default"}
-          className="w-full"
+          variant={compact ? "plain" : "default"}
+          className={compact ? "max-w-full" : "w-full"}
           value={value.mode}
           disabled={disabled || loading}
           onChange={(event) => {
@@ -105,13 +109,17 @@ export function WorkspaceFields({
         </NativeSelect>
       </div>
       {value.mode === "worktree" && (
-        <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-2">
-          <Label htmlFor={branchId}>Start from</Label>
+        <div className={compact ? "min-w-0 max-w-full" : "grid min-w-0 gap-2"}>
+          <Label htmlFor={branchId} className={compact ? "sr-only" : undefined}>
+            Start from
+          </Label>
           {projectId ? (
             <NativeSelect
               id={branchId}
               size={compact ? "sm" : "default"}
-              className="w-full font-mono"
+              variant={compact ? "plain" : "default"}
+              className={compact ? "max-w-full" : "w-full font-mono"}
+              title={`Start from: ${value.base_branch || branches?.default_branch || "remote branch"}`}
               value={branchValue}
               disabled={disabled || loading || knownNonGit || !!error}
               onChange={(event) =>
@@ -124,9 +132,11 @@ export function WorkspaceFields({
               }
             >
               <NativeSelectOption value={REPOSITORY_DEFAULT}>
-                {branches?.default_branch
-                  ? `Repository default (${branches.default_branch})`
-                  : "Repository default"}
+                {compact
+                  ? branches?.default_branch || "Start from…"
+                  : branches?.default_branch
+                    ? `Repository default (${branches.default_branch})`
+                    : "Repository default"}
               </NativeSelectOption>
               {branchOptions.map((branch) => (
                 <NativeSelectOption key={branch} value={branch}>
@@ -204,113 +214,26 @@ export function WorkspaceSetupBlock({ workspace }: { workspace: Workspace }) {
   return null;
 }
 
-async function copyText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch {
-      // Plain-HTTP LAN deployments may expose the Clipboard API but deny it.
-    }
-  }
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.append(textarea);
-  let copied = false;
-  try {
-    textarea.select();
-    copied = document.execCommand("copy");
-  } finally {
-    textarea.remove();
-  }
-  if (!copied) throw new Error("Copy is not available in this browser.");
-}
-
+// Once the first message is accepted, this is metadata, not a disabled control.
+// Keep the actual path available as a tooltip without adding directory chrome.
 export function WorkspaceIndicator({
   workspace,
   fallbackPath,
-  fallbackBranch,
 }: {
   workspace: Workspace;
   fallbackPath?: string;
-  fallbackBranch?: string;
 }) {
-  const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(
-    null,
-  );
-  const path =
-    workspace.path ||
-    (workspace.mode === "current_checkout" ? fallbackPath : undefined);
-  // base_branch is only the worktree source. It must never be presented as
-  // the live branch of a current checkout.
-  const branch =
-    workspace.mode === "worktree" ? workspace.branch : fallbackBranch;
-  const startFrom =
-    workspace.mode === "worktree" && !branch
-      ? workspace.base_branch
-      : undefined;
   return (
-    <div
+    <span
       role="group"
       aria-label="Workspace location"
-      className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground"
+      className="font-mono text-xs text-muted-foreground"
+      title={
+        workspace.path ||
+        (workspace.mode === "current_checkout" ? fallbackPath : undefined)
+      }
     >
-      <span className="shrink-0 font-medium text-foreground">
-        {workspace.mode === "worktree" ? "Worktree" : "Current checkout"}
-      </span>
-      {path && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          className="min-w-0 max-w-full justify-start px-0 font-mono font-normal"
-          title={path}
-          aria-label={`Copy workspace path: ${path}`}
-          onClick={() => {
-            setCopyStatus(null);
-            void copyText(path)
-              .then(() => {
-                setCopyStatus("copied");
-                window.setTimeout(() => setCopyStatus(null), 2000);
-              })
-              .catch(() => setCopyStatus("failed"));
-          }}
-        >
-          <span className="hidden truncate md:inline">{path}</span>
-          {copyStatus === "copied" ? (
-            <Check aria-hidden="true" />
-          ) : (
-            <Copy aria-hidden="true" />
-          )}
-        </Button>
-      )}
-      {branch && (
-        <span
-          className="flex min-w-0 max-w-full items-center gap-2"
-          title={branch}
-        >
-          <GitBranch className="size-3 shrink-0" aria-hidden="true" />
-          <span className="truncate font-mono">{branch}</span>
-        </span>
-      )}
-      {startFrom && (
-        <span className="min-w-0 truncate">
-          Start from <span className="font-mono">{startFrom}</span>
-        </span>
-      )}
-      <span
-        role="status"
-        className={copyStatus === "failed" ? "text-destructive" : "sr-only"}
-      >
-        {copyStatus === "copied"
-          ? "Workspace path copied."
-          : copyStatus === "failed"
-            ? "Could not copy workspace path."
-            : ""}
-      </span>
-    </div>
+      {workspace.mode === "worktree" ? "Worktree" : "Current checkout"}
+    </span>
   );
 }

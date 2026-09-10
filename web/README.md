@@ -24,16 +24,16 @@ the toolbar. On narrow screens, its growth is also capped at 25dvh to leave room
 for controls in short viewports. Model/effort changes save immediately for the next turn.
 
 Context is read-only, muted monospace text in the footer below the input on every
-screen, matching the path and branch metadata. It is not clickable or focusable.
+screen, matching the workspace mode metadata. It is not clickable or focusable.
 Model and effort are edited only in the composer toolbar for existing chats.
 There is no separate agent settings dialog; old `/agents/:id?panel=settings`
 links render the normal chat without opening an overlay. Project defaults remain
 available from the sidebar and apply only to new chats. Footer content aligns
 with the input text area, not the outer input border. Mobile shows only its
 percentage (or “0%” when usage is unavailable), while desktop retains the Context label. On mobile, the footer has
-the branch on the left and context plus the sidebar menu on the right; the file
-path is hidden. Desktop shows the directory and branch on the left, with context
-on the right. Full paths and branches remain in their titles if truncated. The
+workspace controls or locked mode text on the left, and context plus the sidebar
+menu on the right; the file path is not displayed. Desktop shows workspace controls (or locked mode text) on the left, with context
+on the right. The path remains in the locked text’s title. The
 context readout and mobile menu remain available for chats without a project.
 Queued-message cancellation stays beside each queued message. The mobile drawer
 opens with a subtle 200ms slide-up/fade and respects reduced-motion preferences.
@@ -64,6 +64,19 @@ chevron. Their settings action uses the same row-scoped hover/focus reveal as
 chat settle/restore actions: no reserved width on desktop until revealed, and
 always visible with a 48px target on touch devices. Running/Held/Stopping remain plain status text, not additional badges.
 Selected settled chats retain their selection contrast instead of fading out.
+
+## Chat workspace footer
+
+The composer footer's left-hand directory slot now holds the workspace choice.
+Draft chats use compact, borderless **Current checkout / Worktree** controls;
+Worktree exposes a **Start from** remote-branch picker alongside it. These stay
+below the message input, not in a separate settings row above the composer.
+After first send the slot becomes non-interactive **Current checkout** or
+**Worktree** text. No disabled select, directory string, copy button, or extra
+branch row is shown there. The path remains available as a tooltip; the sidebar
+retains the generated worktree branch. This applies to desktop and mobile, with
+context and the mobile navigation button retained on the right. Project-default
+forms keep their normal labeled controls.
 
 ## iPhone checks
 

@@ -15,7 +15,6 @@ import {
   Archive,
   ArrowUp,
   ChevronRight,
-  GitBranch,
   LoaderCircle,
   Menu,
   Play,
@@ -683,17 +682,6 @@ function ChatWorkspace() {
                 )}
               </div>
             )}
-            {!workspaceLocked && project && (
-              <WorkspaceFields
-                compact
-                projectId={project.id}
-                value={workspaceSelection}
-                disabled={busy || !ready || status !== "live"}
-                onChange={(selection) =>
-                  void action(() => control.updateWorkspace(agentId, selection))
-                }
-              />
-            )}
             <form onSubmit={submit} aria-label="Message composer">
               <InputGroup
                 aria-label="Message input"
@@ -786,47 +774,38 @@ function ChatWorkspace() {
               aria-label="Composer footer"
               className="flex min-w-0 items-center gap-4 border-x border-transparent px-4 md:px-inset"
             >
-              {project &&
-                (workspaceLocked && workspace ? (
-                  <div
-                    role="group"
-                    aria-label="Project location"
-                    className="flex min-w-0 flex-1"
-                  >
+              {project && (
+                <div
+                  role="group"
+                  aria-label="Project location"
+                  className="flex min-w-0 flex-1 items-center font-mono text-xs text-muted-foreground"
+                >
+                  {workspaceLocked ? (
                     <WorkspaceIndicator
-                      workspace={workspace}
+                      workspace={
+                        workspace || {
+                          mode: "current_checkout",
+                          locked: true,
+                          status: "ready",
+                        }
+                      }
                       fallbackPath={project.root}
-                      fallbackBranch={project.git_branch}
                     />
-                  </div>
-                ) : (
-                  <div
-                    role="group"
-                    aria-label="Project location"
-                    className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground"
-                  >
-                    <span
-                      className="hidden min-w-0 max-w-full truncate font-mono md:inline"
-                      title={project.root}
-                    >
-                      {project.root}
-                    </span>
-                    {project.git_branch && (
-                      <span
-                        className="flex min-w-0 max-w-full items-center gap-2"
-                        title={project.git_branch}
-                      >
-                        <GitBranch
-                          className="size-3 shrink-0"
-                          aria-hidden="true"
-                        />
-                        <span className="truncate font-mono">
-                          {project.git_branch}
-                        </span>
-                      </span>
-                    )}
-                  </div>
-                ))}
+                  ) : (
+                    <WorkspaceFields
+                      compact
+                      projectId={project.id}
+                      value={workspaceSelection}
+                      disabled={busy || !ready || status !== "live"}
+                      onChange={(selection) =>
+                        void action(() =>
+                          control.updateWorkspace(agentId, selection),
+                        )
+                      }
+                    />
+                  )}
+                </div>
+              )}
               <div className="ml-auto flex shrink-0 items-center gap-2">
                 <span
                   data-slot="context-usage"

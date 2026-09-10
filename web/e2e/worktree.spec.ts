@@ -9,9 +9,7 @@ async function createChat(page: Page) {
 
 test("an empty chat can override its worktree base before first send", async ({
   page,
-  context,
 }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const { agents } = await workspace(page);
   await createChat(page);
 
@@ -34,19 +32,14 @@ test("an empty chat can override its worktree base before first send", async ({
 
   await expect(location).toHaveCount(0);
   const indicator = page.getByRole("group", { name: "Workspace location" });
-  await expect(indicator).toContainText("Worktree");
-  await expect(indicator).toContainText("origin/release");
+  await expect(indicator).toHaveText("Worktree");
   await expect(indicator).not.toContainText("/srv/harness");
   await expect(indicator).not.toContainText("main");
   await expect(page.locator('[data-agent-id="a1"]')).toContainText(
     "origin/release",
   );
-  const copy = indicator.getByRole("button", { name: "Copy workspace path" });
-  await expect(copy).toHaveAttribute("title", "/var/lib/ted/worktrees/a1");
-  await copy.click();
-  await expect
-    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toBe("/var/lib/ted/worktrees/a1");
+  await expect(indicator).toHaveAttribute("title", "/var/lib/ted/worktrees/a1");
+  await expect(indicator.locator("button, select, [tabindex]")).toHaveCount(0);
   await expect.poll(() => agents.a1.workspace.locked).toBe(true);
 });
 
@@ -145,8 +138,8 @@ test("a current checkout ignores stored worktree base metadata", async ({
     path: "/srv/harness",
   });
   const indicator = page.getByRole("group", { name: "Workspace location" });
-  await expect(indicator).toContainText("Current checkout");
-  await expect(indicator).toContainText("main");
+  await expect(indicator).toHaveText("Current checkout");
+  await expect(indicator).toHaveAttribute("title", "/srv/harness");
   await expect(indicator).not.toContainText("origin/release");
 });
 
@@ -182,30 +175,74 @@ test("compact workspace settings explain branch-list failures", async ({
   ).toBeVisible();
 });
 
-test("path copy reports failure when clipboard APIs are unavailable", async ({
-  page,
-}) => {
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: undefined,
+for (const width of [320, 390, 1440]) {
+  for (const mode of ["current_checkout", "worktree"] as const) {
+    test(`footer workspace selector becomes plain text (${width}px, ${mode})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 844 });
+      const fixture = await workspace(page);
+      await createChat(page);
+      const footer = page.getByRole("group", {
+        name: "Composer footer",
+        exact: true,
+      });
+      const selector = footer.getByRole("combobox", {
+        name: "Workspace",
+        exact: true,
+      });
+      await expect(selector).toBeVisible();
+      await expect(
+        page
+          .getByRole("group", { name: "Message input", exact: true })
+          .getByRole("combobox", { name: "Workspace", exact: true }),
+      ).toHaveCount(0);
+      await selector.selectOption(mode);
+      if (mode === "worktree")
+        await expect(
+          footer.getByRole("combobox", { name: "Start from", exact: true }),
+        ).toBeVisible();
+      const inputBox = (await page
+        .getByRole("group", { name: "Message input", exact: true })
+        .boundingBox())!;
+      const selectorBox = (await selector.boundingBox())!;
+      expect(selectorBox.y).toBeGreaterThan(inputBox.y + inputBox.height);
+      expect(selectorBox.width).toBeLessThan(200);
+      await expect(
+        page.getByRole("group", { name: "Workspace settings", exact: true }),
+      ).toHaveCount(1);
+      if (width < 768) {
+        expect(selectorBox.height).toBeGreaterThanOrEqual(48);
+        await expect(
+          footer.getByRole("button", { name: "Open sidebar", exact: true }),
+        ).toBeInViewport();
+      }
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await page
+        .getByRole("textbox", { name: "Message", exact: true })
+        .fill("Start working");
+      await page
+        .getByRole("button", { name: "Send message", exact: true })
+        .click();
+      const indicator = footer.getByRole("group", {
+        name: "Workspace location",
+        exact: true,
+      });
+      await expect(indicator).toHaveText(
+        mode === "worktree" ? "Worktree" : "Current checkout",
+      );
+      await expect(footer.getByRole("combobox")).toHaveCount(0);
+      await expect(indicator.locator("button, select, [tabindex]")).toHaveCount(
+        0,
+      );
+      await expect(
+        footer.getByRole("button", { name: /Copy workspace path/ }),
+      ).toHaveCount(0);
+      await expect.poll(() => fixture.agents.a1.workspace.locked).toBe(true);
     });
-    Object.defineProperty(Document.prototype, "execCommand", {
-      configurable: true,
-      value: () => false,
-    });
-  });
-  const fixture = await workspace(page);
-  await createChat(page);
-  fixture.setWorkspace("a1", {
-    mode: "current_checkout",
-    base_branch: "origin/main",
-    locked: true,
-    status: "ready",
-    path: "/srv/harness",
-  });
-  await page
-    .getByRole("button", { name: "Copy workspace path: /srv/harness" })
-    .click();
-  await expect(page.getByText("Could not copy workspace path.")).toBeVisible();
-});
+  }
+}

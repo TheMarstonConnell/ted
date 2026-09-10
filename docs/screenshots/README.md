@@ -77,8 +77,14 @@ to or modified by the worktree chat.
 - [Project workspace defaults](web-worktree-settings.png)
 - [Draft mode and per-chat starting-branch override](web-worktree-draft.png)
 - [Locked workspace and real tool output](web-worktree-ready.png)
-- [Mobile workspace indicator](web-worktree-mobile.png)
+- [Mobile draft footer controls](web-worktree-footer-mobile-draft.png)
+- [Mobile locked workspace text](web-worktree-mobile.png)
 - [Permanent setup failure, with no retry](web-worktree-failed.png)
 - [Project defaults → per-chat override → first send → locked workspace recording](web-worktree-demo.webm)
 
 The mobile image is a Chromium 390×844 viewport, not a physical-phone capture.
+
+The worktree captures now reflect the footer refinement: editable workspace/base
+branch controls replace the directory slot below the composer. After the first
+message, that slot is plain mode text rather than a disabled selector, path/copy
+button, or extra branch row. Project-default forms remain unchanged.
