@@ -68,10 +68,10 @@ Selected settled chats retain their selection contrast instead of fading out.
 ## Chat workspace footer
 
 The composer footer's left-hand directory slot now holds the workspace choice.
-Draft chats use compact, borderless **Current checkout / Worktree** controls;
+Draft chats use compact, borderless **Local / Worktree** controls;
 Worktree exposes a **Start from** remote-branch picker alongside it. These stay
 below the message input, not in a separate settings row above the composer.
-After first send the slot becomes non-interactive **Current checkout** or
+After first send the slot becomes non-interactive **Local** or
 **Worktree** text. No disabled select, directory string, copy button, or extra
 branch row is shown there. The path remains available as a tooltip; the sidebar
 retains the generated worktree branch. This applies to desktop and mobile, with

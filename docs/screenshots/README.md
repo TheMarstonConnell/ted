@@ -88,3 +88,19 @@ The worktree captures now reflect the footer refinement: editable workspace/base
 branch controls replace the directory slot below the composer. After the first
 message, that slot is plain mode text rather than a disabled selector, path/copy
 button, or extra branch row. Project-default forms remain unchanged.
+
+## Local label and folder icon
+
+The local workspace choice is labeled **Local** in both the selector and locked
+footer, with a small muted folder icon. The locked path is tooltip-only and has
+no copy button. The API mode remains `current_checkout`.
+
+These focused captures use deterministic mocked API/WebSocket fixtures (unlike
+the live-Git worktree captures above), at 1440px/light and 390px/dark. Generated
+with `TED_WEB_RECORD=1 npx playwright test e2e/worktree.spec.ts --grep 'Local footer uses'`.
+
+- [Desktop selector](web-local-footer-light-draft.png)
+- [Desktop locked text](web-local-footer-light-locked.png)
+- [Mobile dark selector](web-local-footer-dark-draft.png)
+- [Mobile dark locked text](web-local-footer-dark-locked.png)
+- [Local selector → locked footer recording](web-local-footer-demo.webm)

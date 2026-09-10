@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { Folder, LoaderCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Label } from "@/components/ui/label";
 import {
@@ -79,34 +79,39 @@ export function WorkspaceFields({
         <Label htmlFor={locationId} className={compact ? "sr-only" : undefined}>
           Workspace
         </Label>
-        <NativeSelect
-          id={locationId}
-          size={compact ? "sm" : "default"}
-          variant={compact ? "plain" : "default"}
-          className={compact ? "max-w-full" : "w-full"}
-          value={value.mode}
-          disabled={disabled || loading}
-          onChange={(event) => {
-            const mode = event.target.value as WorkspaceSelection["mode"];
-            onChange(
-              mode === "worktree"
-                ? {
-                    mode,
-                    ...(value.base_branch
-                      ? { base_branch: value.base_branch }
-                      : {}),
-                  }
-                : { mode },
-            );
-          }}
-        >
-          <NativeSelectOption value="current_checkout">
-            Current checkout
-          </NativeSelectOption>
-          <NativeSelectOption value="worktree" disabled={knownNonGit}>
-            Worktree
-          </NativeSelectOption>
-        </NativeSelect>
+        <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+          {compact && value.mode === "current_checkout" && (
+            <Folder className="size-3 shrink-0" aria-hidden="true" />
+          )}
+          <NativeSelect
+            id={locationId}
+            size={compact ? "sm" : "default"}
+            variant={compact ? "plain" : "default"}
+            className={compact ? "max-w-full" : "w-full"}
+            value={value.mode}
+            disabled={disabled || loading}
+            onChange={(event) => {
+              const mode = event.target.value as WorkspaceSelection["mode"];
+              onChange(
+                mode === "worktree"
+                  ? {
+                      mode,
+                      ...(value.base_branch
+                        ? { base_branch: value.base_branch }
+                        : {}),
+                    }
+                  : { mode },
+              );
+            }}
+          >
+            <NativeSelectOption value="current_checkout">
+              Local
+            </NativeSelectOption>
+            <NativeSelectOption value="worktree" disabled={knownNonGit}>
+              Worktree
+            </NativeSelectOption>
+          </NativeSelect>
+        </div>
       </div>
       {value.mode === "worktree" && (
         <div className={compact ? "min-w-0 max-w-full" : "grid min-w-0 gap-2"}>
@@ -227,13 +232,16 @@ export function WorkspaceIndicator({
     <span
       role="group"
       aria-label="Workspace location"
-      className="font-mono text-xs text-muted-foreground"
+      className="inline-flex min-w-0 items-center gap-2 font-mono text-xs text-muted-foreground"
       title={
         workspace.path ||
         (workspace.mode === "current_checkout" ? fallbackPath : undefined)
       }
     >
-      {workspace.mode === "worktree" ? "Worktree" : "Current checkout"}
+      {workspace.mode === "current_checkout" && (
+        <Folder className="size-3 shrink-0" aria-hidden="true" />
+      )}
+      {workspace.mode === "worktree" ? "Worktree" : "Local"}
     </span>
   );
 }

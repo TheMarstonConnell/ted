@@ -138,7 +138,7 @@ test("a current checkout ignores stored worktree base metadata", async ({
     path: "/srv/harness",
   });
   const indicator = page.getByRole("group", { name: "Workspace location" });
-  await expect(indicator).toHaveText("Current checkout");
+  await expect(indicator).toHaveText("Local");
   await expect(indicator).toHaveAttribute("title", "/srv/harness");
   await expect(indicator).not.toContainText("origin/release");
 });
@@ -193,6 +193,9 @@ for (const width of [320, 390, 1440]) {
       });
       await expect(selector).toBeVisible();
       await expect(
+        selector.locator('option[value="current_checkout"]'),
+      ).toHaveText("Local");
+      await expect(
         page
           .getByRole("group", { name: "Message input", exact: true })
           .getByRole("combobox", { name: "Workspace", exact: true }),
@@ -233,9 +236,19 @@ for (const width of [320, 390, 1440]) {
         exact: true,
       });
       await expect(indicator).toHaveText(
-        mode === "worktree" ? "Worktree" : "Current checkout",
+        mode === "worktree" ? "Worktree" : "Local",
       );
       await expect(footer.getByRole("combobox")).toHaveCount(0);
+      const folder = indicator.locator("svg.lucide-folder");
+      await expect(folder).toHaveCount(mode === "current_checkout" ? 1 : 0);
+      if (mode === "current_checkout") {
+        await expect(folder).toHaveAttribute("aria-hidden", "true");
+        await expect(folder).toHaveCSS("width", "12px");
+      }
+      const muted = await footer
+        .locator('[data-slot="context-usage"]')
+        .evaluate((node) => getComputedStyle(node).color);
+      await expect(indicator).toHaveCSS("color", muted);
       await expect(indicator.locator("button, select, [tabindex]")).toHaveCount(
         0,
       );
@@ -245,4 +258,62 @@ for (const width of [320, 390, 1440]) {
       await expect.poll(() => fixture.agents.a1.workspace.locked).toBe(true);
     });
   }
+}
+
+for (const theme of ["light", "dark"] as const) {
+  test(`Local footer uses a muted folder icon (${theme})`, async ({
+    page,
+  }, testInfo) => {
+    await page.emulateMedia({ colorScheme: theme });
+    await page.setViewportSize({
+      width: theme === "light" ? 1440 : 390,
+      height: 844,
+    });
+    await workspace(page);
+    await createChat(page);
+    const footer = page.getByRole("group", {
+      name: "Composer footer",
+      exact: true,
+    });
+    const selector = footer.getByRole("combobox", {
+      name: "Workspace",
+      exact: true,
+    });
+    await expect(selector).toHaveValue("current_checkout");
+    await expect(selector.locator("option:checked")).toHaveText("Local");
+    const muted = await footer
+      .locator('[data-slot="context-usage"]')
+      .evaluate((node) => getComputedStyle(node).color);
+    await expect(selector).toHaveCSS("color", muted);
+    await expect(footer.locator("svg.lucide-folder")).toHaveCSS("color", muted);
+    await expect(footer.locator("svg.lucide-folder")).toHaveCSS(
+      "width",
+      "12px",
+    );
+    await page
+      .getByRole("textbox", { name: "Message", exact: true })
+      .fill("Work in this local checkout.");
+    await page.screenshot({
+      path: testInfo.outputPath(`local-footer-${theme}-draft.png`),
+    });
+    await page
+      .getByRole("button", { name: "Send message", exact: true })
+      .click();
+    const location = footer.getByRole("group", {
+      name: "Workspace location",
+      exact: true,
+    });
+    await expect(location).toHaveText("Local");
+    await expect(location).toHaveCSS("color", muted);
+    await expect(location.locator("svg.lucide-folder")).toHaveCSS(
+      "color",
+      muted,
+    );
+    await expect(location).toHaveAttribute("title", "/srv/harness");
+    await expect(footer.getByRole("combobox")).toHaveCount(0);
+    await expect(footer.getByRole("button", { name: /copy/i })).toHaveCount(0);
+    await page.screenshot({
+      path: testInfo.outputPath(`local-footer-${theme}-locked.png`),
+    });
+  });
 }

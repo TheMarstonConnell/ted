@@ -1,7 +1,8 @@
 # Chat workspaces
 
 A chat thread owns its workspace independently of its model, agent runtime, and
-connected clients. Choose **Current checkout** or **Worktree** before sending the
+connected clients. **Local** means the project’s current checkout (the API mode
+remains `current_checkout`). Choose **Local** or **Worktree** before sending the
 first message. Worktree mode also exposes **Start from**, a remote-qualified base
 branch such as `origin/main` or `upstream/develop`.
 
@@ -19,7 +20,7 @@ the same durable transaction that queues the message. This is enforced by the
 server, including concurrent requests and clients other than the web interface.
 Creating an empty chat does not create a worktree or lock the choice.
 
-- **Current checkout** runs directly in the project's original directory, sharing
+- **Local** runs directly in the project's original directory, sharing
   its branch, local modifications, and untracked files with other checkout chats.
   No fetch or branch switch occurs.
 - **Worktree** first fetches the selected remote branch into a thread-private Git
@@ -35,7 +36,7 @@ than placing generated files inside the original working directory.
 
 The composer footer replaces the directory display with a compact workspace
 selector and, in Worktree mode, a starting-branch picker. After first send these
-become plain **Current checkout** or **Worktree** text, including during setup or
+become plain **Local** or **Worktree** text, including during setup or
 after failure. The directory is available in the text’s tooltip, and the sidebar
 shows the generated branch. The recorded branch is the **creation branch**, not
 an enforced constraint on future Git operations.
