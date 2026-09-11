@@ -1,5 +1,21 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { openProjectDefaults, workspace } from "./fixtures";
+
+async function choose(selector: Locator, value: string) {
+  await selector.click();
+  await selector
+    .page()
+    .getByRole("option", {
+      name:
+        value === "worktree"
+          ? "Worktree"
+          : value === "current_checkout"
+            ? "Local"
+            : value,
+      exact: true,
+    })
+    .click();
+}
 
 async function createChat(page: Page) {
   await page.goto("/?dialog=new-agent");
@@ -14,11 +30,11 @@ test("an empty chat can override its worktree base before first send", async ({
   await createChat(page);
 
   const location = page.getByRole("combobox", { name: "Workspace" });
-  await expect(location).toHaveValue("current_checkout");
-  await location.selectOption("worktree");
+  await expect(location).toHaveText("Local");
+  await choose(location, "worktree");
   const branch = page.getByRole("combobox", { name: "Start from" });
   await expect(branch).toBeEnabled();
-  await branch.selectOption("origin/release");
+  await choose(branch, "origin/release");
   await expect
     .poll(() => agents.a1.workspace)
     .toMatchObject({
@@ -53,12 +69,11 @@ test("project settings save workspace defaults for newly created chats", async (
   ).toBeVisible();
   await openProjectDefaults(page);
   const dialog = page.getByRole("dialog", { name: "harness defaults" });
-  await dialog
-    .getByRole("combobox", { name: "Workspace" })
-    .selectOption("worktree");
-  await dialog
-    .getByRole("combobox", { name: "Start from" })
-    .selectOption("upstream/trunk");
+  await choose(dialog.getByRole("combobox", { name: "Workspace" }), "worktree");
+  await choose(
+    dialog.getByRole("combobox", { name: "Start from" }),
+    "upstream/trunk",
+  );
   await dialog.getByRole("button", { name: "Save defaults" }).click();
   await expect(dialog).toHaveCount(0);
 
@@ -71,10 +86,10 @@ test("project settings save workspace defaults for newly created chats", async (
       base_branch: "upstream/trunk",
       locked: false,
     });
-  await expect(page.getByRole("combobox", { name: "Workspace" })).toHaveValue(
-    "worktree",
+  await expect(page.getByRole("combobox", { name: "Workspace" })).toHaveText(
+    "Worktree",
   );
-  await expect(page.getByRole("combobox", { name: "Start from" })).toHaveValue(
+  await expect(page.getByRole("combobox", { name: "Start from" })).toHaveText(
     "upstream/trunk",
   );
 });
@@ -152,8 +167,12 @@ test("worktrees are disabled for a non-Git project", async ({ page }) => {
   });
   await createChat(page);
   const location = page.getByRole("combobox", { name: "Workspace" });
-  await expect(location.locator('option[value="worktree"]')).toBeDisabled();
-  await expect(location).toHaveValue("current_checkout");
+  await location.click();
+  await expect(
+    page.getByRole("option", { name: "Worktree", exact: true }),
+  ).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(location).toHaveText("Local");
   await expect(
     page.getByText("Worktrees aren’t available", { exact: false }),
   ).toBeVisible();
@@ -192,15 +211,13 @@ for (const width of [320, 390, 1440]) {
         exact: true,
       });
       await expect(selector).toBeVisible();
-      await expect(
-        selector.locator('option[value="current_checkout"]'),
-      ).toHaveText("Local");
+      await expect(selector).toHaveText("Local");
       await expect(
         page
           .getByRole("group", { name: "Message input", exact: true })
           .getByRole("combobox", { name: "Workspace", exact: true }),
       ).toHaveCount(0);
-      await selector.selectOption(mode);
+      await choose(selector, mode);
       if (mode === "worktree")
         await expect(
           footer.getByRole("combobox", { name: "Start from", exact: true }),
@@ -279,8 +296,8 @@ for (const theme of ["light", "dark"] as const) {
       name: "Workspace",
       exact: true,
     });
-    await expect(selector).toHaveValue("current_checkout");
-    await expect(selector.locator("option:checked")).toHaveText("Local");
+    await expect(selector).toHaveText("Local");
+    await expect(selector).toHaveAttribute("data-slot", "select-trigger");
     const muted = await footer
       .locator('[data-slot="context-usage"]')
       .evaluate((node) => getComputedStyle(node).color);
@@ -341,9 +358,10 @@ for (const width of [320, 390, 1440]) {
       await expect(divider).toHaveCSS("width", "1px");
       await expect(divider).toHaveCSS("height", "16px");
     }
-    await footer
-      .getByRole("combobox", { name: "Workspace", exact: true })
-      .selectOption("worktree");
+    await choose(
+      footer.getByRole("combobox", { name: "Workspace", exact: true }),
+      "worktree",
+    );
     await expect(
       footer.getByRole("combobox", { name: "Start from", exact: true }),
     ).toBeVisible();
@@ -459,4 +477,111 @@ test("footer does not leave branch dividers behind outside Git", async ({
   await expect(footer.locator('[data-slot="separator"]:visible')).toHaveCount(
     1,
   );
+});
+
+for (const defaults of [{ mode: "" }, {}]) {
+  test(`legacy project workspace defaults show Local (${JSON.stringify(defaults)})`, async ({
+    page,
+  }) => {
+    const fixture = await workspace(page);
+    fixture.setProjectWorkspaceDefaults(defaults);
+    await page.goto("/");
+    await expect(
+      page.getByRole("button", { name: "harness", exact: true }),
+    ).toBeVisible();
+    await openProjectDefaults(page);
+    const dialog = page.getByRole("dialog", { name: "harness defaults" });
+    const selector = dialog.getByRole("combobox", { name: "Workspace" });
+    await expect(selector).toHaveText("Local");
+    await choose(selector, "worktree");
+    await expect(selector).toHaveText("Worktree");
+    await choose(selector, "current_checkout");
+    await dialog.getByRole("button", { name: "Save defaults" }).click();
+    await expect(dialog).toHaveCount(0);
+    await openProjectDefaults(page);
+    await expect(
+      dialog.getByRole("combobox", { name: "Workspace" }),
+    ).toHaveText("Local");
+  });
+}
+
+test("workspace menus match the model menu padding", async ({ page }) => {
+  await workspace(page);
+  await page.goto("/");
+  await expect(
+    page.getByRole("button", { name: "harness", exact: true }),
+  ).toBeVisible();
+  await openProjectDefaults(page);
+  const dialog = page.getByRole("dialog", { name: "harness defaults" });
+  await dialog.getByRole("combobox", { name: "Model", exact: true }).click();
+  const padding = await page
+    .locator('[data-slot="select-group"]')
+    .first()
+    .evaluate((node) => getComputedStyle(node).padding);
+  await page.keyboard.press("Escape");
+  for (const name of ["Workspace", "Start from"]) {
+    await dialog.getByRole("combobox", { name, exact: true }).click();
+    const group = page.locator(
+      '[data-slot="select-content"][data-open] [data-slot="select-group"]',
+    );
+    await expect(group).toHaveCount(1);
+    await expect(group).toHaveCSS("padding", padding);
+    if (name === "Workspace")
+      await page.getByRole("option", { name: "Worktree", exact: true }).click();
+    else await page.keyboard.press("Escape");
+  }
+});
+
+test("worktree selection supplies a Git branch even without a remote HEAD", async ({
+  page,
+}) => {
+  const fixture = await workspace(page);
+  fixture.setProjectBranches({
+    is_git: true,
+    branches: ["origin/release", "upstream/trunk"],
+    default_branch: "",
+  });
+  await createChat(page);
+  fixture.setWorkspace("a1", {
+    mode: "current_checkout",
+    base_branch: "origin/deleted",
+    locked: false,
+    status: "draft",
+  });
+  await choose(
+    page.getByRole("combobox", { name: "Workspace", exact: true }),
+    "worktree",
+  );
+  await expect
+    .poll(() => fixture.agents.a1.workspace)
+    .toMatchObject({ mode: "worktree", base_branch: "origin/release" });
+  const branch = page.getByRole("combobox", {
+    name: "Start from",
+    exact: true,
+  });
+  await expect(branch).toBeVisible();
+  await choose(branch, "upstream/trunk");
+  await expect
+    .poll(() => fixture.agents.a1.workspace.base_branch)
+    .toBe("upstream/trunk");
+});
+
+test("repositories without remote branches explain why worktrees are unavailable", async ({
+  page,
+}) => {
+  const fixture = await workspace(page);
+  fixture.setProjectBranches({
+    is_git: true,
+    branches: [],
+    default_branch: "",
+  });
+  await createChat(page);
+  await page.getByRole("combobox", { name: "Workspace", exact: true }).click();
+  await expect(
+    page.getByRole("option", { name: "Worktree", exact: true }),
+  ).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByText("No remote branches are available.", { exact: false }),
+  ).toBeVisible();
 });

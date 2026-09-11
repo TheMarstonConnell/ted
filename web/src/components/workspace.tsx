@@ -5,9 +5,13 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@/components/ui/native-select";
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+} from "@/components/ui/select";
 import {
   api,
   type ProjectBranches,
@@ -16,6 +20,9 @@ import {
 } from "@/lib/api";
 
 const REPOSITORY_DEFAULT = "__repository_default__";
+const COMPACT_TRIGGER_CLASS =
+  "min-w-0 max-w-full border-transparent bg-transparent px-2 font-mono text-xs dark:bg-transparent dark:hover:bg-accent";
+const FIELD_CLASS = "grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-2";
 
 function useProjectBranches(projectId?: string) {
   const [state, setState] = useState<{
@@ -64,22 +71,39 @@ export function WorkspaceFields({
   const branchId = useId();
   const { branches, error, loading } = useProjectBranches(projectId);
   const knownNonGit = branches?.is_git === false;
+  const availableBranches = branches?.branches || [];
+  const defaultBranch = branches?.default_branch || availableBranches[0];
+  const initialBranch = availableBranches.includes(value.base_branch || "")
+    ? value.base_branch
+    : defaultBranch;
+  const noRemoteBranches = !!branches?.is_git && !availableBranches.length;
   const branchValue = value.base_branch || REPOSITORY_DEFAULT;
   const branchOptions = [...(branches?.branches || [])];
   if (value.base_branch && !branchOptions.includes(value.base_branch))
     branchOptions.unshift(value.base_branch);
+  const branchItems = [
+    {
+      value: REPOSITORY_DEFAULT,
+      label: compact
+        ? defaultBranch || "Start from…"
+        : defaultBranch
+          ? `Repository default (${defaultBranch})`
+          : "Repository default",
+    },
+    ...branchOptions.map((branch) => ({ value: branch, label: branch })),
+  ];
 
   return (
     <div
       className={
         compact
-          ? "flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0 md:gap-x-4"
-          : "space-y-4"
+          ? "flex min-w-0 flex-1 flex-wrap items-center gap-2"
+          : "grid min-w-0 gap-4 sm:grid-cols-2"
       }
       role="group"
       aria-label="Workspace settings"
     >
-      <div className={compact ? "min-w-0 max-w-full" : "grid min-w-0 gap-2"}>
+      <div className={compact ? "min-w-0 max-w-full" : FIELD_CLASS}>
         <Label htmlFor={locationId} className={compact ? "sr-only" : undefined}>
           Workspace
         </Label>
@@ -87,34 +111,50 @@ export function WorkspaceFields({
           {compact && value.mode === "current_checkout" && (
             <Folder className="size-3 shrink-0" aria-hidden="true" />
           )}
-          <NativeSelect
-            id={locationId}
-            size={compact ? "sm" : "default"}
-            variant={compact ? "plain" : "default"}
-            className={compact ? "max-w-full" : "w-full"}
+          <Select
+            items={[
+              { value: "current_checkout", label: "Local" },
+              { value: "worktree", label: "Worktree" },
+            ]}
             value={value.mode}
             disabled={disabled || loading}
-            onChange={(event) => {
-              const mode = event.target.value as WorkspaceSelection["mode"];
+            onValueChange={(mode) => {
+              if (mode !== "worktree" && mode !== "current_checkout") return;
               onChange(
                 mode === "worktree"
                   ? {
                       mode,
-                      ...(value.base_branch
-                        ? { base_branch: value.base_branch }
-                        : {}),
+                      ...(initialBranch ? { base_branch: initialBranch } : {}),
                     }
                   : { mode },
               );
             }}
           >
-            <NativeSelectOption value="current_checkout">
-              Local
-            </NativeSelectOption>
-            <NativeSelectOption value="worktree" disabled={knownNonGit}>
-              Worktree
-            </NativeSelectOption>
-          </NativeSelect>
+            <SelectTrigger
+              id={locationId}
+              size={compact ? "sm" : "default"}
+              className={
+                compact ? COMPACT_TRIGGER_CLASS : "w-full text-foreground"
+              }
+            >
+              <SelectValue className="min-w-0 truncate" />
+            </SelectTrigger>
+            <SelectContent
+              side={compact ? "top" : "bottom"}
+              align="start"
+              alignItemWithTrigger={false}
+            >
+              <SelectGroup>
+                <SelectItem value="current_checkout">Local</SelectItem>
+                <SelectItem
+                  value="worktree"
+                  disabled={knownNonGit || noRemoteBranches || !!error}
+                >
+                  Worktree
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
       </div>
       {compact && value.mode === "current_checkout" && gitBranch && (
@@ -124,8 +164,8 @@ export function WorkspaceFields({
         <div
           className={
             compact
-              ? "flex min-w-16 max-w-full flex-1 items-center gap-2 md:gap-4"
-              : "grid min-w-0 gap-2"
+              ? "flex min-w-16 max-w-full flex-1 items-center gap-2"
+              : FIELD_CLASS
           }
         >
           {compact && <FooterSeparator />}
@@ -133,38 +173,45 @@ export function WorkspaceFields({
             Start from
           </Label>
           {projectId ? (
-            <NativeSelect
-              id={branchId}
-              size={compact ? "sm" : "default"}
-              variant={compact ? "plain" : "default"}
-              className={
-                compact ? "min-w-0 max-w-full flex-1" : "w-full font-mono"
-              }
-              title={`Start from: ${value.base_branch || branches?.default_branch || "remote branch"}`}
+            <Select
+              items={branchItems}
               value={branchValue}
               disabled={disabled || loading || knownNonGit || !!error}
-              onChange={(event) =>
+              onValueChange={(branch) =>
+                branch &&
                 onChange({
                   mode: "worktree",
-                  ...(event.target.value === REPOSITORY_DEFAULT
-                    ? {}
-                    : { base_branch: event.target.value }),
+                  ...(branch === REPOSITORY_DEFAULT
+                    ? defaultBranch
+                      ? { base_branch: defaultBranch }
+                      : {}
+                    : { base_branch: branch }),
                 })
               }
             >
-              <NativeSelectOption value={REPOSITORY_DEFAULT}>
-                {compact
-                  ? branches?.default_branch || "Start from…"
-                  : branches?.default_branch
-                    ? `Repository default (${branches.default_branch})`
-                    : "Repository default"}
-              </NativeSelectOption>
-              {branchOptions.map((branch) => (
-                <NativeSelectOption key={branch} value={branch}>
-                  {branch}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
+              <SelectTrigger
+                id={branchId}
+                size={compact ? "sm" : "default"}
+                className={compact ? COMPACT_TRIGGER_CLASS : "w-full font-mono"}
+                title={`Start from: ${value.base_branch || defaultBranch || "remote branch"}`}
+              >
+                <SelectValue className="min-w-0 truncate" />
+              </SelectTrigger>
+              <SelectContent
+                side={compact ? "top" : "bottom"}
+                align="start"
+                alignItemWithTrigger={false}
+                className="w-max max-w-[calc(100vw-2rem)]"
+              >
+                <SelectGroup>
+                  {branchItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           ) : (
             <p className="flex min-h-10 items-center text-xs text-muted-foreground">
               The repository’s default remote branch will be used. You can
@@ -178,11 +225,20 @@ export function WorkspaceFields({
           className={
             compact
               ? "basis-full text-xs text-muted-foreground"
-              : "text-xs text-muted-foreground"
+              : "col-span-full text-xs text-muted-foreground"
           }
         >
           Worktrees aren’t available because this directory is not a Git
           repository.
+        </p>
+      )}
+      {noRemoteBranches && (
+        <p
+          role="status"
+          className="col-span-full basis-full text-xs text-muted-foreground"
+        >
+          No remote branches are available. Fetch branches from a Git remote,
+          then reopen this chat or settings to choose a worktree base.
         </p>
       )}
       {error && (
@@ -191,7 +247,7 @@ export function WorkspaceFields({
           className={
             compact
               ? "basis-full text-xs text-destructive"
-              : "text-xs text-destructive"
+              : "col-span-full text-xs text-destructive"
           }
         >
           Could not load remote branches. {error}
@@ -275,7 +331,7 @@ export function FooterSeparator({ className }: { className?: string }) {
 
 export function WorkspaceBranch({ branch }: { branch: string }) {
   return (
-    <div className="flex min-w-16 max-w-full flex-1 items-center gap-2 md:gap-4">
+    <div className="flex min-w-16 max-w-full flex-1 items-center gap-2">
       <FooterSeparator />
       <span
         role="group"

@@ -780,13 +780,13 @@ function ChatWorkspace() {
             <div
               role="group"
               aria-label="Composer footer"
-              className="flex min-w-0 items-center gap-2 border-x border-transparent px-4 md:gap-4 md:px-inset"
+              className="flex min-w-0 min-h-8 items-center gap-2 border-x border-transparent px-4 md:px-inset"
             >
               {project && (
                 <div
                   role="group"
                   aria-label="Project location"
-                  className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 font-mono text-xs text-muted-foreground md:gap-x-4"
+                  className="flex min-w-0 flex-1 flex-wrap items-center gap-2 font-mono text-xs text-muted-foreground"
                 >
                   {workspaceLocked ? (
                     <>

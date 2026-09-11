@@ -198,6 +198,9 @@ export async function workspace(page: Page) {
       agents[id].workspace = workspace;
       inventory(id);
     },
+    setProjectWorkspaceDefaults(value: { mode?: string }) {
+      project.workspace_defaults = value as typeof project.workspace_defaults;
+    },
     setProjectBranches(value: typeof projectBranches) {
       projectBranches = value;
     },

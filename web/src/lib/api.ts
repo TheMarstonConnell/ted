@@ -18,7 +18,11 @@ export function agentWorkspace(agent: Agent): Workspace | undefined {
 export function projectWorkspaceDefaults(
   project: Project,
 ): WorkspaceSelection | undefined {
-  return project.workspace_defaults;
+  const defaults = project.workspace_defaults;
+  if (!defaults) return undefined;
+  // Projects saved before workspace support can have an empty mode. Match
+  // the server's normalization rather than passing an unmatched select value.
+  return { ...defaults, mode: defaults.mode || "current_checkout" };
 }
 export type Frame =
   | Schema["WSInventory"]
