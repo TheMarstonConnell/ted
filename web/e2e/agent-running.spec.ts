@@ -79,8 +79,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         .evaluate((el) => getComputedStyle(el).backgroundColor);
       const selectedBackground =
         colorScheme === "dark" ? "oklch(0.38 0 0)" : sidebarBackground;
-      const headingBackground =
-        colorScheme === "dark" ? "oklch(0.29 0 0)" : sidebarBackground;
+      const headingBackground = selectedBackground;
       await expect(active).toHaveCSS("background-color", selectedBackground);
       await active.hover();
       await expect(active).toHaveCSS("background-color", selectedBackground);

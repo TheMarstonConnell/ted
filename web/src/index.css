@@ -104,7 +104,7 @@
     --ring: oklch(0.556 0 0);
     --sidebar: oklch(0.205 0 0);
     --sidebar-selected: oklch(0.38 0 0);
-    --sidebar-heading: oklch(0.29 0 0);
+    --sidebar-heading: var(--sidebar-selected);
   }
 }
 
