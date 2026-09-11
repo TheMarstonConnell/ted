@@ -35,6 +35,8 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
+  --color-sidebar-selected: var(--sidebar-selected);
+  --color-sidebar-heading: var(--sidebar-heading);
   /* 8px layout grid; Tailwind's 4px unit remains available for optical exceptions. */
   --spacing: 0.25rem;
   --spacing-inset: 1.5rem;
@@ -75,6 +77,8 @@
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
   --sidebar: oklch(0.985 0 0);
+  --sidebar-selected: var(--sidebar);
+  --sidebar-heading: var(--sidebar);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -99,6 +103,8 @@
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
     --sidebar: oklch(0.205 0 0);
+    --sidebar-selected: oklch(0.38 0 0);
+    --sidebar-heading: oklch(0.29 0 0);
   }
 }
 

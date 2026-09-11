@@ -77,11 +77,15 @@ for (const colorScheme of ["light", "dark"] as const) {
       const sidebarBackground = await page
         .locator("aside > div")
         .evaluate((el) => getComputedStyle(el).backgroundColor);
-      await expect(active).toHaveCSS("background-color", sidebarBackground);
+      const selectedBackground =
+        colorScheme === "dark" ? "oklch(0.38 0 0)" : sidebarBackground;
+      const headingBackground =
+        colorScheme === "dark" ? "oklch(0.29 0 0)" : sidebarBackground;
+      await expect(active).toHaveCSS("background-color", selectedBackground);
       await active.hover();
-      await expect(active).toHaveCSS("background-color", sidebarBackground);
+      await expect(active).toHaveCSS("background-color", selectedBackground);
       const heading = page.locator('[data-project-id="p"] button').first();
-      await expect(heading).toHaveCSS("background-color", sidebarBackground);
+      await expect(heading).toHaveCSS("background-color", headingBackground);
       for (const raised of [active, heading]) {
         expect(
           await raised.evaluate((el) => getComputedStyle(el).boxShadow),
@@ -90,7 +94,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       }
       await expect(other).not.toHaveClass(/shadow-sm/);
       await heading.hover();
-      await expect(heading).toHaveCSS("background-color", sidebarBackground);
+      await expect(heading).toHaveCSS("background-color", headingBackground);
       await page.mouse.move(500, 500);
       const initialDistance = await active.evaluate((el) =>
         getComputedStyle(
