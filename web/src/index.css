@@ -162,35 +162,34 @@
   scrollbar-gutter: stable both-edges;
 }
 
-/* A masked overlay leaves row contents, hit targets and focus rings untouched. */
-@property --agent-beam-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
+/* Mask the moving light to the border without clipping content or focus rings.
+   A motion path gives constant perimeter speed even on wide, short rows. */
 .agent-running {
   position: relative;
 }
 
-.agent-running::before {
-  content: "";
+.agent-running-border {
   position: absolute;
   inset: 0;
   border-radius: inherit;
   padding: 1px;
   pointer-events: none;
-  background: conic-gradient(
-    from var(--agent-beam-angle),
-    color-mix(in srgb, currentColor 18%, transparent) 0deg 260deg,
-    currentColor 320deg,
-    color-mix(in srgb, currentColor 18%, transparent) 360deg
-  );
+  background: color-mix(in srgb, currentColor 18%, transparent);
   mask:
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
   mask-composite: exclude;
-  animation: agent-border-beam 8s linear infinite;
+}
+
+.agent-running-border::before {
+  content: "";
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  background: radial-gradient(circle, currentColor 0 15%, transparent 70%);
+  offset-path: inset(0 round var(--radius-md));
+  offset-anchor: center;
+  animation: agent-border-beam 3s linear infinite;
 }
 
 .agent-running-label {
@@ -210,7 +209,7 @@
 
 @keyframes agent-border-beam {
   to {
-    --agent-beam-angle: 360deg;
+    offset-distance: 100%;
   }
 }
 
@@ -224,7 +223,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-running::before {
+  .agent-running-border::before {
+    display: none;
+    animation: none;
+  }
+  .agent-running-border {
     animation: none;
     background: color-mix(in srgb, currentColor 40%, transparent);
   }
@@ -236,7 +239,11 @@
 }
 
 @media (forced-colors: active) {
-  .agent-running::before {
+  .agent-running-border::before {
+    display: none;
+    animation: none;
+  }
+  .agent-running-border {
     animation: none;
     background: none;
     border: 1px solid currentColor;
