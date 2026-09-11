@@ -6,6 +6,20 @@ export type Model = Schema["Model"];
 export type Event = Schema["Event"];
 export type QueueMessage = Schema["QueuedMessage"];
 export type Output = Schema["AgentOutput"];
+
+// Workspace fields remain optional in generated response types for legacy
+// fixtures, although current servers always return them.
+export type WorkspaceSelection = Schema["WorkspaceSelection"];
+export type Workspace = Schema["Workspace"];
+export type ProjectBranches = Schema["ProjectBranches"];
+export function agentWorkspace(agent: Agent): Workspace | undefined {
+  return agent.workspace;
+}
+export function projectWorkspaceDefaults(
+  project: Project,
+): WorkspaceSelection | undefined {
+  return project.workspace_defaults;
+}
 export type Frame =
   | Schema["WSInventory"]
   | Schema["WSEvent"]

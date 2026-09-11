@@ -64,3 +64,65 @@ WebKit through `npm run test:iphone`; mobile reading-position setup replays touc
 intent and scroll position because Playwright has no touch-pan API. Separate
 cases cover composer shrink, queued turns, failed/slow sends, reading during a
 pending request, and late acknowledgements after changing chats.
+
+# Chat worktrees
+
+These captures use the real control-plane HTTP/WebSocket server and Git, with a
+local bare remote, an isolated temporary checkout/state directory, and a
+deterministic fake provider. The provider executes a real Bash tool in the
+created worktree. No paid model calls or modifications to real projects were
+used. The original checkout contains a local edit and `.env`; neither is copied
+to or modified by the worktree chat.
+
+- [Project workspace defaults](web-worktree-settings.png)
+- [Draft mode and per-chat starting-branch override](web-worktree-draft.png)
+- [Locked workspace and real tool output](web-worktree-ready.png)
+- [Mobile draft footer controls](web-worktree-footer-mobile-draft.png)
+- [Mobile locked workspace text](web-worktree-mobile.png)
+- [Permanent setup failure, with no retry](web-worktree-failed.png)
+- [Project defaults → per-chat override → first send → locked workspace recording](web-worktree-demo.webm)
+
+The mobile image is a Chromium 390×844 viewport, not a physical-phone capture.
+
+The worktree captures now reflect the footer refinement: editable workspace/base
+branch controls replace the directory slot below the composer. After the first
+message, that slot is plain mode text rather than a disabled selector, path/copy
+button, or extra branch row. Project-default forms remain unchanged.
+
+## Local label and folder icon
+
+The local workspace choice is labeled **Local** in both the selector and locked
+footer, with a small muted folder icon. The locked path is tooltip-only and has
+no copy button. The API mode remains `current_checkout`.
+
+These focused captures use deterministic mocked API/WebSocket fixtures (unlike
+the live-Git worktree captures above), at 1440px/light and 390px/dark. Generated
+with `TED_WEB_RECORD=1 npx playwright test e2e/worktree.spec.ts --grep 'Local footer uses'`.
+
+- [Desktop selector](web-local-footer-light-draft.png)
+- [Desktop locked text](web-local-footer-light-locked.png)
+- [Mobile dark selector](web-local-footer-dark-draft.png)
+- [Mobile dark locked text](web-local-footer-dark-locked.png)
+- [Local selector → locked footer recording](web-local-footer-demo.webm)
+
+
+## Footer branches and separators
+
+The footer once again shows the Git branch beside Local/Worktree, with subtle
+vertical dividers between workspace, branch, context, and mobile navigation.
+Worktree drafts use the starting-branch picker in that slot. Missing branches
+leave no extra divider; long names truncate and retain their full tooltip.
+
+These are deterministic mocked API/WebSocket captures from the focused worktree
+browser suite, not live Git/provider calls.
+
+- [Desktop draft](web-footer-branch-1440-draft.png)
+- [Desktop locked worktree](web-footer-branch-1440-locked.png)
+- [Mobile draft](web-footer-branch-390-draft.png)
+- [Mobile locked worktree](web-footer-branch-390-locked.png)
+- [Narrow draft](web-footer-branch-320-draft.png)
+- [Narrow locked worktree](web-footer-branch-320-locked.png)
+- [Draft, locked branch, and missing-branch states recording](web-footer-branch-demo.webm)
+
+The Local light/dark captures above were refreshed to include the branch and
+dividers too. Other earlier worktree screenshots document the prior footer.

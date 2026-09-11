@@ -12,6 +12,7 @@ import {
   type Output,
   type QueueMessage,
   type Schema,
+  type WorkspaceSelection,
 } from "./api";
 
 export type TranscriptItem = {
@@ -369,19 +370,44 @@ export class ControlPlane {
   };
   // HTTP is used for mutations: it supports large messages and durable retry keys.
   // WebSocket events remain the single source of transcript/queue updates.
-  createAgent = async (project: string, key: string) => {
-    const agent = await api<Agent>(
-      "/v1/agents",
-      "POST",
-      { project_id: project },
-      key,
-    );
+  private mergeAgent(agent: Agent) {
+    const current = this.state.agents[agent.id];
+    // HTTP responses may arrive after newer websocket metadata. In particular,
+    // a delayed draft PATCH must never reopen a permanently locked selector.
+    if (
+      current &&
+      (agent.cursor < current.cursor ||
+        (current.workspace?.locked && !agent.workspace?.locked))
+    )
+      return;
     this.set({
       agents: {
         ...this.state.agents,
         [agent.id]: { ...this.state.agents[agent.id], ...agent },
       },
     });
+  }
+  createAgent = async (
+    project: string,
+    key: string,
+    workspace?: WorkspaceSelection,
+  ) => {
+    const agent = await api<Agent>(
+      "/v1/agents",
+      "POST",
+      { project_id: project, ...(workspace ? { workspace } : {}) },
+      key,
+    );
+    this.mergeAgent(agent);
+    return agent;
+  };
+  updateWorkspace = async (id: string, workspace: WorkspaceSelection) => {
+    const agent = await api<Agent>(
+      `${agentPath(id)}/workspace`,
+      "PATCH",
+      workspace,
+    );
+    this.mergeAgent(agent);
     return agent;
   };
   settle = (id: string, settled: boolean) =>
@@ -399,13 +425,39 @@ export class ControlPlane {
   send = async (id: string, text: string, key: string) => {
     // Check current server state, not a potentially stale sidebar summary.
     const agent = await api<Agent>(agentPath(id));
+    this.mergeAgent(agent);
     if (agent.settled) await this.settle(id, false);
-    return api<QueueMessage>(
-      `${agentPath(id)}/messages`,
-      "POST",
-      { text },
-      key,
-    );
+    try {
+      const message = await api<QueueMessage>(
+        `${agentPath(id)}/messages`,
+        "POST",
+        { text },
+        key,
+      );
+      // The message response is intentionally queue-only, but a successful
+      // first submission guarantees the server locked the location. Reflect
+      // that immediately if its WebSocket update has not arrived yet.
+      const latest = this.state.agents[id];
+      if (agent.workspace && !latest?.workspace?.locked)
+        this.mergeAgent({
+          ...agent,
+          workspace: {
+            ...agent.workspace,
+            locked: true,
+            status: agent.workspace.mode === "worktree" ? "fetching" : "ready",
+          },
+        });
+      return message;
+    } catch (error) {
+      // First send locks a workspace even when setup or submission fails. Pull
+      // the authoritative state so a stale draft UI never offers a retry.
+      try {
+        this.mergeAgent(await api<Agent>(agentPath(id)));
+      } catch {
+        // Preserve the original submission error.
+      }
+      throw error;
+    }
   };
 }
 export const control = new ControlPlane();

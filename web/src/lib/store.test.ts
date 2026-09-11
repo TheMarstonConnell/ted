@@ -219,6 +219,50 @@ describe("workspace", () => {
 
 afterEach(() => vi.unstubAllGlobals());
 describe("mutations", () => {
+  it("ignores a delayed draft response after the workspace has locked", async () => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    );
+    const client = new ControlPlane();
+    client.state = state();
+    const request = client.updateWorkspace("a", {
+      mode: "worktree",
+      base_branch: "origin/main",
+    });
+    const locked = agent("a", {
+      cursor: 10,
+      workspace: {
+        mode: "worktree",
+        base_branch: "origin/main",
+        locked: true,
+        status: "ready",
+        path: "/worktree/a",
+      },
+    });
+    client.state = { ...client.state, agents: { a: locked } };
+    finish(
+      Response.json(
+        agent("a", {
+          cursor: 5,
+          workspace: {
+            mode: "worktree",
+            base_branch: "origin/main",
+            locked: false,
+            status: "draft",
+          },
+        }),
+      ),
+    );
+    await request;
+    expect(client.snapshot().agents.a).toEqual(locked);
+  });
   it("restores before sending with a durable retry key, without calling Continue", async () => {
     const fetcher = vi
       .fn()
@@ -255,6 +299,46 @@ describe("mutations", () => {
     );
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
+  it("refreshes the irrevocable workspace lock after a failed first send", async () => {
+    const draft = agent("a", {
+      workspace: {
+        mode: "worktree",
+        base_branch: "origin/main",
+        locked: false,
+        status: "draft",
+      },
+    });
+    const failed = agent("a", {
+      workspace: {
+        mode: "worktree",
+        base_branch: "origin/main",
+        locked: true,
+        status: "failed",
+        error: "fetch failed",
+      },
+    });
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(draft))
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: "workspace_failed", message: "fetch failed" } },
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json(failed));
+    vi.stubGlobal("fetch", fetcher);
+    const client = new ControlPlane();
+    await expect(client.send("a", "Hello", "key")).rejects.toThrow(
+      "fetch failed",
+    );
+    expect(client.snapshot().agents.a.workspace).toEqual(failed.workspace);
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "/v1/agents/a",
+      "/v1/agents/a/messages",
+      "/v1/agents/a",
+    ]);
+  });
   it("creates agents with only a project and idempotency key", async () => {
     const fetcher = vi.fn().mockResolvedValue(Response.json(agent()));
     vi.stubGlobal("fetch", fetcher);
@@ -263,6 +347,35 @@ describe("mutations", () => {
       project_id: "p",
     });
     expect(fetcher.mock.calls[0][1].headers["Idempotency-Key"]).toBe("key");
+  });
+  it("patches an empty agent workspace and stores the returned lock state", async () => {
+    const updated = {
+      ...agent("a"),
+      workspace: {
+        mode: "worktree",
+        base_branch: "origin/release",
+        locked: false,
+        status: "draft",
+      },
+    };
+    const fetcher = vi.fn().mockResolvedValue(Response.json(updated));
+    vi.stubGlobal("fetch", fetcher);
+    const client = new ControlPlane();
+    await client.updateWorkspace("a", {
+      mode: "worktree",
+      base_branch: "origin/release",
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      "/v1/agents/a/workspace",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
+      mode: "worktree",
+      base_branch: "origin/release",
+    });
+    expect((client.snapshot().agents.a as any).workspace).toEqual(
+      updated.workspace,
+    );
   });
 });
 

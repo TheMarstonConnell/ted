@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -200,7 +202,11 @@ func TestHTTPStrictValidationBeforeMutation(t *testing.T) {
 		{"POST", "/v1/projects", `{"name":"x","root":"/tmp","defaults":{"model":"http-test/one","effort":"low","typo":true}}`, 400},
 		{"POST", "/v1/projects", `{"name":"x","root":"/tmp","defaults":{"model":"http-test/one"}}`, 400},
 		{"PATCH", "/v1/projects/" + p.ID, `{}`, 400},
+		{"PATCH", "/v1/projects/" + p.ID, `{"workspace_defaults":{}}`, 400},
+		{"PATCH", "/v1/projects/" + p.ID, `{"workspace_defaults":{"mode":"shared"}}`, 400},
 		{"POST", "/v1/agents", `{}`, 400},
+		{"POST", "/v1/agents", fmt.Sprintf(`{"project_id":%q,"workspace":{}}`, p.ID), 400},
+		{"POST", "/v1/agents", fmt.Sprintf(`{"project_id":%q,"workspace":{"mode":"worktree","base_branch":""}}`, p.ID), 400},
 		{"POST", "/v1/agents", fmt.Sprintf(`{"project_id":%q,"prompt":""}`, p.ID), 400},
 		{"POST", base + "/messages", `{}`, 400},
 		{"POST", base + "/messages", `{"text":"x","unknown":true}`, 400},
@@ -216,6 +222,9 @@ func TestHTTPStrictValidationBeforeMutation(t *testing.T) {
 		{"PATCH", base, `{"settled":null}`, 400},
 		{"PATCH", base, `{"settled":"false"}`, 400},
 		{"PATCH", base + "/settings", `{}`, 400},
+		{"PATCH", base + "/workspace", `{}`, 400},
+		{"PATCH", base + "/workspace", `{"mode":"other"}`, 400},
+		{"PATCH", base + "/workspace", `{"mode":"current_checkout","unknown":true}`, 400},
 		{"PATCH", base + "/settings", `{"model":""}`, 400},
 		{"PATCH", base + "/settings", `{"effort":null}`, 400},
 		{"PATCH", base + "/settings", `{"model":"http-test/one","temperature":1}`, 400},
@@ -403,6 +412,84 @@ func TestHTTPRuntimeErrorEnvelopeAndUnavailableService(t *testing.T) {
 	if w.Code != 500 || strings.Contains(w.Body.String(), "secret") {
 		t.Fatal(w.Code, w.Body.String())
 	}
+}
+
+func TestHTTPWorkspaceContract(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	p := f.project()
+	if p.WorkspaceDefaults.Mode != "current_checkout" {
+		t.Fatalf("backend omitted project workspace defaults: %+v", p)
+	}
+
+	p = decodeHTTP[Project](t, f.request("PATCH", "/v1/projects/"+p.ID, `{"workspace_defaults":{"mode":"current_checkout","base_branch":"chosen"}}`, "", 200))
+	if p.WorkspaceDefaults.Mode != "current_checkout" || p.WorkspaceDefaults.BaseBranch != "chosen" {
+		t.Fatalf("workspace defaults not adapted: %+v", p.WorkspaceDefaults)
+	}
+
+	a := decodeHTTP[Agent](t, f.request("POST", "/v1/agents", fmt.Sprintf(`{"project_id":%q,"workspace":{"mode":"current_checkout","base_branch":"agent-base"}}`, p.ID), "", 201))
+	if a.Workspace.Mode != "current_checkout" || a.Workspace.BaseBranch != "agent-base" || a.Workspace.Status != "draft" || a.Workspace.Locked {
+		t.Fatalf("backend omitted agent workspace: %+v", a.Workspace)
+	}
+	base := "/v1/agents/" + a.ID
+	a = decodeHTTP[Agent](t, f.request("PATCH", base+"/workspace", `{"mode":"current_checkout","base_branch":"patched"}`, "", 200))
+	if a.Workspace.BaseBranch != "patched" || a.Workspace.Status != "draft" {
+		t.Fatalf("workspace patch not adapted: %+v", a.Workspace)
+	}
+
+	f.request("POST", base+"/messages", `{"text":"lock it"}`, "", 202)
+	got := decodeHTTP[api.Error](t, f.request("PATCH", base+"/workspace", `{"mode":"current_checkout"}`, "", 409))
+	if got.Error.Code != api.WorkspaceLocked {
+		t.Fatalf("got error code %q, want %q", got.Error.Code, api.WorkspaceLocked)
+	}
+
+	invalid := decodeHTTP[api.Error](t, f.request("POST", "/v1/agents", fmt.Sprintf(`{"project_id":%q,"workspace":{"mode":"worktree","base_branch":"origin/missing"}}`, p.ID), "", 400))
+	if invalid.Error.Code != api.InvalidWorkspace {
+		t.Fatalf("got error code %q, want %q", invalid.Error.Code, api.InvalidWorkspace)
+	}
+}
+
+func TestHTTPProjectBranchesContract(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	root := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(cmd.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-b", "local-only")
+	git("config", "user.name", "HTTP Test")
+	git("config", "user.email", "http@example.invalid")
+	if err := os.WriteFile(filepath.Join(root, "README"), []byte("test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "README")
+	git("commit", "-m", "initial")
+	commit := git("rev-parse", "HEAD")
+	// An unreachable URL demonstrates listing uses only known refs and never fetches.
+	git("remote", "add", "origin", "https://example.invalid/never-fetch.git")
+	git("update-ref", "refs/remotes/origin/main", commit)
+	git("update-ref", "refs/remotes/origin/release", commit)
+	git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+	body, _ := json.Marshal(map[string]any{"name": "git", "root": root, "defaults": Settings{Model: "http-test/one", Effort: "low"}})
+	p := decodeHTTP[Project](t, f.request("POST", "/v1/projects", string(body), "", 201))
+	branches := decodeHTTP[api.ProjectBranches](t, f.request("GET", "/v1/projects/"+p.ID+"/branches", "", "", 200))
+	if !branches.IsGit || branches.DefaultBranch != "origin/main" || len(branches.Branches) != 2 || branches.Branches[0] != "origin/main" || branches.Branches[1] != "origin/release" {
+		t.Fatalf("unexpected remote branch inventory: %+v", branches)
+	}
+
+	nonGit := f.project()
+	empty := decodeHTTP[api.ProjectBranches](t, f.request("GET", "/v1/projects/"+nonGit.ID+"/branches", "", "", 200))
+	if empty.IsGit || empty.DefaultBranch != "" || empty.Branches == nil || len(empty.Branches) != 0 {
+		t.Fatalf("unexpected non-Git branch inventory: %+v", empty)
+	}
+	f.request("GET", "/v1/projects/missing/branches", "", "", 404)
 }
 
 func TestProjectLiveGitBranch(t *testing.T) {

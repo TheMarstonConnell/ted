@@ -21,13 +21,20 @@ func newTUICommand() *cobra.Command {
 	return cmd
 }
 func configureTUICommand(cmd *cobra.Command) {
-	var prompt, modelID, effort, resume, server string
+	var prompt, modelID, effort, resume, server, workspaceMode, baseBranch string
 	var continueSession bool
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		if cmd.Flags().Changed("server") && strings.TrimSpace(server) == "" {
 			return fmt.Errorf("--server requires a URL")
 		}
-		return runRemoteTUISession(cmd.Context(), server, prompt, modelID, effort, resume, continueSession)
+		workspace, err := tuiWorkspaceSelection(cmd, workspaceMode, baseBranch, resume, continueSession)
+		if err != nil {
+			return err
+		}
+		if workspace == nil {
+			return runRemoteTUISession(cmd.Context(), server, prompt, modelID, effort, resume, continueSession)
+		}
+		return runRemoteTUISession(cmd.Context(), server, prompt, modelID, effort, resume, continueSession, *workspace)
 	}
 	cmd.Flags().StringVar(&server, "server", "", "Connect to an existing API server (never starts a local server)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "Send an initial user prompt when the TUI starts")
@@ -35,7 +42,35 @@ func configureTUICommand(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&effort, "effort", "", "Set supported reasoning effort (low, medium, high)")
 	cmd.Flags().StringVar(&resume, "resume", "", "Resume a server agent by ID")
 	cmd.Flags().BoolVar(&continueSession, "continue", false, "Resume the latest server agent for this project")
+	cmd.Flags().StringVar(&workspaceMode, "workspace", "", "Workspace for a new thread: current_checkout or worktree (defaults to project setting)")
+	cmd.Flags().StringVar(&baseBranch, "base-branch", "", "Remote base branch for a new worktree (for example origin/main)")
 	cmd.MarkFlagsMutuallyExclusive("resume", "continue")
+}
+
+func tuiWorkspaceSelection(cmd *cobra.Command, mode, baseBranch, resume string, latest bool) (*remote.WorkspaceSelection, error) {
+	workspaceChanged := cmd.Flags().Changed("workspace")
+	baseChanged := cmd.Flags().Changed("base-branch")
+	if !workspaceChanged && !baseChanged {
+		return nil, nil // omitting workspace from creation inherits project defaults
+	}
+	if resume != "" || latest {
+		return nil, fmt.Errorf("--workspace and --base-branch cannot be used with --resume or --continue; resumed workspaces are locked after the first message")
+	}
+	mode = strings.TrimSpace(mode)
+	baseBranch = strings.TrimSpace(baseBranch)
+	if !workspaceChanged && baseChanged {
+		mode = "worktree"
+	}
+	if mode != "current_checkout" && mode != "worktree" {
+		return nil, fmt.Errorf("--workspace must be current_checkout or worktree")
+	}
+	if mode == "current_checkout" && baseChanged {
+		return nil, fmt.Errorf("--base-branch requires --workspace worktree")
+	}
+	if baseChanged && baseBranch == "" {
+		return nil, fmt.Errorf("--base-branch requires a remote branch such as origin/main")
+	}
+	return &remote.WorkspaceSelection{Mode: mode, BaseBranch: baseBranch}, nil
 }
 func runTUI(prompt, modelID, effort string) error {
 	return runTUISession(prompt, modelID, effort, "", false)
@@ -43,7 +78,7 @@ func runTUI(prompt, modelID, effort string) error {
 func runTUISession(prompt, modelID, effort, resume string, continueSession bool) error {
 	return runRemoteTUISession(context.Background(), "", prompt, modelID, effort, resume, continueSession)
 }
-func runRemoteTUISession(ctx context.Context, server, prompt, modelID, effort, resume string, continueSession bool) error {
+func runRemoteTUISession(ctx context.Context, server, prompt, modelID, effort, resume string, continueSession bool, workspace ...remote.WorkspaceSelection) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	base, owner, err := resolveTUIServer(ctx, server)
@@ -52,7 +87,7 @@ func runRemoteTUISession(ctx context.Context, server, prompt, modelID, effort, r
 	}
 	defer func() { cancel(); owner.Close() }()
 	client := remote.New(base)
-	instance, err := prepareRemoteAgent(ctx, client, modelID, effort, resume, continueSession)
+	instance, err := prepareRemoteAgent(ctx, client, modelID, effort, resume, continueSession, workspace...)
 	if err != nil {
 		return err
 	}
@@ -80,7 +115,18 @@ func runRemoteTUISession(ctx context.Context, server, prompt, modelID, effort, r
 	return nil
 }
 
-func prepareRemoteAgent(ctx context.Context, c *remote.Client, modelID, effort, resume string, latest bool) (*remote.Agent, error) {
+func prepareRemoteAgent(ctx context.Context, c *remote.Client, modelID, effort, resume string, latest bool, workspace ...remote.WorkspaceSelection) (*remote.Agent, error) {
+	if len(workspace) > 1 {
+		return nil, fmt.Errorf("only one workspace selection may be specified")
+	}
+	if len(workspace) == 1 {
+		if resume != "" || latest {
+			return nil, fmt.Errorf("workspace overrides cannot be used with --resume or --continue; resumed workspaces are locked after the first message")
+		}
+		if workspace[0].Mode != "current_checkout" && workspace[0].Mode != "worktree" {
+			return nil, fmt.Errorf("workspace mode must be current_checkout or worktree")
+		}
+	}
 	models, err := c.Models(ctx)
 	if err != nil {
 		return nil, err
@@ -148,7 +194,7 @@ func prepareRemoteAgent(ctx context.Context, c *remote.Client, modelID, effort, 
 				return nil, err
 			}
 		} else {
-			snapshot, err = c.CreateAgent(ctx, project.ID)
+			snapshot, err = c.CreateAgent(ctx, project.ID, workspace...)
 			if err != nil {
 				return nil, err
 			}

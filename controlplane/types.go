@@ -15,23 +15,44 @@ type SettingsPatch struct {
 	Model  *string `json:"model,omitempty"`
 	Effort *string `json:"effort,omitempty"`
 }
+type WorkspaceSelection struct {
+	Mode       string `json:"mode"`
+	BaseBranch string `json:"base_branch,omitempty"`
+}
+type Workspace struct {
+	WorkspaceSelection
+	Locked     bool   `json:"locked"`
+	Status     string `json:"status"`
+	Path       string `json:"path,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	BaseCommit string `json:"base_commit,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+type ProjectBranches struct {
+	IsGit         bool     `json:"is_git"`
+	Branches      []string `json:"branches"`
+	DefaultBranch string   `json:"default_branch"`
+}
 type Project struct {
-	GitBranch string   `json:"git_branch,omitempty"`
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Root      string   `json:"root"`
-	Defaults  Settings `json:"defaults"`
+	WorkspaceDefaults WorkspaceSelection `json:"workspace_defaults"`
+	GitBranch         string             `json:"git_branch,omitempty"`
+	ID                string             `json:"id"`
+	Name              string             `json:"name"`
+	Root              string             `json:"root"`
+	Defaults          Settings           `json:"defaults"`
 }
 type CreateProjectRequest struct {
-	Name     string   `json:"name"`
-	Root     string   `json:"root"`
-	Defaults Settings `json:"defaults"`
+	WorkspaceDefaults *WorkspaceSelection `json:"workspace_defaults,omitempty"`
+	Name              string              `json:"name"`
+	Root              string              `json:"root"`
+	Defaults          Settings            `json:"defaults"`
 }
 type CreateAgentRequest struct {
-	ProjectID string    `json:"project_id"`
-	Title     string    `json:"title"`
-	Prompt    string    `json:"prompt"`
-	Settings  *Settings `json:"settings,omitempty"`
+	Workspace *WorkspaceSelection `json:"workspace,omitempty"`
+	ProjectID string              `json:"project_id"`
+	Title     string              `json:"title"`
+	Prompt    string              `json:"prompt"`
+	Settings  *Settings           `json:"settings,omitempty"`
 }
 type SubmitMessageRequest struct {
 	Text string `json:"text"`
@@ -44,6 +65,7 @@ type QueuedMessage struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 type Agent struct {
+	Workspace      Workspace          `json:"workspace"`
 	ID             string             `json:"id"`
 	ProjectID      string             `json:"project_id"`
 	Title          string             `json:"title"`

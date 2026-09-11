@@ -69,6 +69,11 @@ func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Se
 	// request to repeat tools. Even graceful shutdown follows this recovery rule.
 	for _, a := range s.state.Agents {
 		interrupted := false
+		if a.Agent.Workspace.Status == "fetching" || a.Agent.Workspace.Status == "creating" {
+			a.Agent.Workspace.Status = "failed"
+			a.Agent.Workspace.Error = "Server stopped during workspace setup. Create a new chat to try again."
+			interrupted = true
+		}
 		for i := range a.Agent.Queue {
 			m := &a.Agent.Queue[i]
 			if m.Status == "running" {
@@ -149,7 +154,7 @@ func (s *Service) eventLocked(a *storedAgent, typ string, data any) {
 // Updates intentionally omit transcript and queue bodies; clients fetch them
 // when needed. Replay does not grow quadratically with conversation length.
 func (s *Service) summaryLocked(a *storedAgent) any {
-	return map[string]any{"id": a.Agent.ID, "project_id": a.Agent.ProjectID, "title": a.Agent.Title, "settings": a.Agent.Settings, "active_settings": a.Agent.ActiveSettings, "settled": a.Agent.Settled, "state": a.Agent.State, "held": a.Agent.Held, "context_usage": a.Agent.ContextUsage}
+	return map[string]any{"id": a.Agent.ID, "project_id": a.Agent.ProjectID, "title": a.Agent.Title, "settings": a.Agent.Settings, "active_settings": a.Agent.ActiveSettings, "settled": a.Agent.Settled, "state": a.Agent.State, "held": a.Agent.Held, "context_usage": a.Agent.ContextUsage, "workspace": a.Agent.Workspace}
 }
 func (s *Service) recordLocked(id string) (*storedAgent, error) {
 	a, ok := s.state.Agents[id]
@@ -224,7 +229,15 @@ func (s *Service) CreateProject(req CreateProjectRequest) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
-	p := Project{ID: newID(), Name: req.Name, Root: root, Defaults: defaults}
+	selection := WorkspaceSelection{Mode: "current_checkout"}
+	if req.WorkspaceDefaults != nil {
+		selection = *req.WorkspaceDefaults
+	}
+	selection, err = normalizeWorkspace(root, selection)
+	if err != nil {
+		return Project{}, err
+	}
+	p := Project{ID: newID(), Name: req.Name, Root: root, Defaults: defaults, WorkspaceDefaults: selection}
 	before := copyJSON(s.state)
 	s.state.Projects[p.ID] = p
 	if err = s.commitLocked(before); err != nil {
@@ -232,7 +245,7 @@ func (s *Service) CreateProject(req CreateProjectRequest) (Project, error) {
 	}
 	return p, nil
 }
-func (s *Service) UpdateProject(id string, name *string, defaults *Settings) (Project, error) {
+func (s *Service) UpdateProject(id string, name *string, defaults *Settings, workspace ...*WorkspaceSelection) (Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.writableLocked(); err != nil {
@@ -254,6 +267,13 @@ func (s *Service) UpdateProject(id string, name *string, defaults *Settings) (Pr
 			return Project{}, err
 		}
 		p.Defaults = v
+	}
+	if len(workspace) > 0 && workspace[0] != nil {
+		selection, err := normalizeWorkspace(p.Root, *workspace[0])
+		if err != nil {
+			return Project{}, err
+		}
+		p.WorkspaceDefaults = selection
 	}
 	before := copyJSON(s.state)
 	s.state.Projects[id] = p
@@ -344,13 +364,32 @@ func (s *Service) CreateAgent(req CreateAgentRequest, key string) (Agent, error)
 	if err != nil {
 		return Agent{}, err
 	}
+	// Snapshot already-validated project defaults without revalidating the remote
+	// inventory. A default branch can disappear later: users must still be able
+	// to open a draft and choose Current checkout, or get a locked setup error
+	// on first send instead of being unable to create a chat at all.
+	selection := p.WorkspaceDefaults
+	if selection.Mode == "" {
+		selection.Mode = "current_checkout"
+	}
+	if req.Workspace != nil {
+		selection = *req.Workspace
+		if selection.BaseBranch == "" {
+			selection.BaseBranch = p.WorkspaceDefaults.BaseBranch
+		}
+		selection, err = normalizeWorkspace(p.Root, selection)
+		if err != nil {
+			return Agent{}, err
+		}
+	}
 	now := time.Now().UTC()
 	id := newID()
-	a := &storedAgent{Agent: Agent{ID: id, ProjectID: p.ID, Title: req.Title, Settings: settings, State: "idle", Queue: []QueuedMessage{}, Messages: []agent.Message{}, CreatedAt: now, UpdatedAt: now}, Events: []Event{}}
+	a := &storedAgent{Agent: Agent{Workspace: Workspace{WorkspaceSelection: selection, Status: "draft"}, ID: id, ProjectID: p.ID, Title: req.Title, Settings: settings, State: "idle", Queue: []QueuedMessage{}, Messages: []agent.Message{}, CreatedAt: now, UpdatedAt: now}, Events: []Event{}}
 	before := copyJSON(s.state)
 	s.state.Agents[id] = a
 	s.eventLocked(a, "agent.created", s.summaryLocked(a))
 	if strings.TrimSpace(req.Prompt) != "" {
+		s.lockWorkspaceLocked(a)
 		m := QueuedMessage{ID: newID(), Text: req.Prompt, Status: "pending", CreatedAt: now}
 		a.Agent.Queue = append(a.Agent.Queue, m)
 		s.eventLocked(a, "message.queued", m)
@@ -442,6 +481,9 @@ func (s *Service) Submit(id, text, key string) (QueuedMessage, error) {
 			}
 		}
 	}
+	if a.Agent.Workspace.Status == "failed" {
+		return QueuedMessage{}, workspaceFailure(a.Agent.Workspace)
+	}
 	if a.Agent.Settled {
 		return QueuedMessage{}, problem(409, "settled", "restore agent before submitting messages")
 	}
@@ -449,6 +491,7 @@ func (s *Service) Submit(id, text, key string) (QueuedMessage, error) {
 		return QueuedMessage{}, problem(400, "invalid_message", "text cannot be empty")
 	}
 	before := copyJSON(s.state)
+	s.lockWorkspaceLocked(a)
 	m := QueuedMessage{ID: newID(), Text: text, Status: "pending", CreatedAt: time.Now().UTC()}
 	a.Agent.Queue = append(a.Agent.Queue, m)
 	a.Agent.Held = false
@@ -576,6 +619,9 @@ func (s *Service) Continue(id string) (Agent, error) {
 	if err != nil {
 		return Agent{}, err
 	}
+	if a.Agent.Workspace.Status == "failed" {
+		return Agent{}, workspaceFailure(a.Agent.Workspace)
+	}
 	if a.Agent.Settled {
 		return Agent{}, problem(409, "settled", "restore agent before continuing")
 	}
@@ -598,7 +644,7 @@ func (s *Service) startLocked(id string) {
 		return
 	}
 	a := s.state.Agents[id]
-	if a == nil || a.Agent.Settled || a.Agent.Held {
+	if a == nil || a.Agent.Settled || a.Agent.Held || a.Agent.Workspace.Status == "failed" {
 		return
 	}
 	index := -1
@@ -637,11 +683,11 @@ func (s *Service) run(ctx context.Context, id string, r *runningTurn, project Pr
 	s.mu.Lock()
 	instance := s.instances[id]
 	s.mu.Unlock()
-	var err error
-	if instance == nil {
-		instance, err = agent.NewAgentIn(s.logger, s.providers, project.Root)
+	workspacePath, err := s.prepareWorkspace(ctx, id, project)
+	if instance == nil && err == nil {
+		instance, err = agent.NewAgentIn(s.logger, s.providers, workspacePath)
 		if err == nil {
-			err = instance.SetIdentity(id, project.Root, project.Root, filepath.Join(s.dir, "runtime"))
+			err = instance.SetIdentity(id, project.Root, workspacePath, filepath.Join(s.dir, "runtime"))
 		}
 		if err == nil && len(history) > 0 {
 			err = instance.RestoreConversation(history)

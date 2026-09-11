@@ -46,11 +46,11 @@ async function readOlder(page: Page, viewport: Locator, mobile: boolean) {
     // Playwright has no touch-pan API, and mobile WebKit rejects mouse wheels.
     // Replay the touch intent and resulting scroll position without pretending
     // this is a physical iPhone gesture or native keyboard test.
-    await viewport.dispatchEvent("touchmove", {
-      touches: [],
-      changedTouches: [],
-    });
+    // Keep intent and its scroll movement in one browser task. Separate CDP
+    // calls allow an artificial resize/animation frame at the old bottom
+    // position between them, which can re-enable following before movement.
     await viewport.evaluate((node) => {
+      node.dispatchEvent(new Event("touchmove", { bubbles: true }));
       node.scrollTop = 0;
     });
   } else {

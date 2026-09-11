@@ -200,6 +200,31 @@ paths:
         in: path
         required: true
         schema: *id010
+  /v1/projects/{project_id}/branches:
+    get:
+      operationId: ListProjectBranches
+      description: List remote-qualified Git branches already known in the local checkout. No network fetch is performed.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectBranches'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: *id010
   /v1/agents:
     get:
       operationId: ListAgents
@@ -324,6 +349,37 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/PatchAgentRequest'
+  /v1/agents/{agent_id}/workspace:
+    patch:
+      operationId: PatchAgentWorkspace
+      description: Change the workspace selection before the first nonempty message. The selection locks irrevocably on first send.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceSelection'
   /v1/agents/{agent_id}/settings:
     patch:
       operationId: PatchAgentSettings
@@ -672,6 +728,72 @@ components:
       additionalProperties: false
       properties: *id014
       minProperties: 1
+    WorkspaceSelection:
+      type: object
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum:
+          - current_checkout
+          - worktree
+        base_branch:
+          type: string
+          minLength: 1
+          maxLength: 1024
+      required:
+      - mode
+    Workspace:
+      type: object
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum:
+          - current_checkout
+          - worktree
+        base_branch:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        locked:
+          type: boolean
+        status:
+          type: string
+          enum:
+          - draft
+          - fetching
+          - creating
+          - ready
+          - failed
+        path:
+          type: string
+        branch:
+          type: string
+        base_commit:
+          type: string
+        error:
+          type: string
+      required:
+      - mode
+      - locked
+      - status
+    ProjectBranches:
+      type: object
+      additionalProperties: false
+      properties:
+        is_git:
+          type: boolean
+        branches:
+          type: array
+          items:
+            type: string
+        default_branch:
+          type: string
+      required:
+      - is_git
+      - branches
+      - default_branch
     Project:
       type: object
       additionalProperties: false
@@ -686,6 +808,8 @@ components:
           type: string
         defaults:
           $ref: '#/components/schemas/Settings'
+        workspace_defaults:
+          $ref: '#/components/schemas/WorkspaceSelection'
       required:
       - id
       - name
@@ -705,6 +829,8 @@ components:
           maxLength: 4096
         defaults:
           $ref: '#/components/schemas/Settings'
+        workspace_defaults:
+          $ref: '#/components/schemas/WorkspaceSelection'
       required:
       - name
       - root
@@ -719,6 +845,8 @@ components:
           maxLength: 256
         defaults:
           $ref: '#/components/schemas/Settings'
+        workspace_defaults:
+          $ref: '#/components/schemas/WorkspaceSelection'
       minProperties: 1
     CreateAgentRequest:
       type: object
@@ -734,6 +862,8 @@ components:
           maxLength: 1048576
         settings:
           $ref: '#/components/schemas/SettingsPatch'
+        workspace:
+          $ref: '#/components/schemas/WorkspaceSelection'
       required:
       - project_id
     PatchAgentRequest:
@@ -925,6 +1055,8 @@ components:
           - stopping
         held: &id021
           type: boolean
+        workspace: &id027
+          $ref: '#/components/schemas/Workspace'
         queue:
           type: array
           items:
@@ -998,6 +1130,7 @@ components:
         settled: *id019
         state: *id020
         held: *id021
+        workspace: *id027
         cursor: *id022
         created_at: *id023
         updated_at: *id024
@@ -1041,6 +1174,8 @@ components:
           - stopping
         held:
           type: boolean
+        workspace:
+          $ref: '#/components/schemas/Workspace'
         context_usage:
           $ref: '#/components/schemas/ContextUsage'
       required:
@@ -1153,6 +1288,10 @@ components:
       - invalid
       - invalid_project
       - invalid_settings
+      - invalid_workspace
+      - workspace_locked
+      - workspace_failed
+      - workspace_unavailable
       - invalid_message
       - invalid_limit
       - turn_required

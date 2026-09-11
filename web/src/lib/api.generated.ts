@@ -58,6 +58,23 @@ export interface paths {
         patch: operations["PatchProject"];
         trace?: never;
     };
+    "/v1/projects/{project_id}/branches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description List remote-qualified Git branches already known in the local checkout. No network fetch is performed. */
+        get: operations["ListProjectBranches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/agents": {
         parameters: {
             query?: never;
@@ -92,6 +109,23 @@ export interface paths {
         head?: never;
         /** @description PatchAgent */
         patch: operations["PatchAgent"];
+        trace?: never;
+    };
+    "/v1/agents/{agent_id}/workspace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description Change the workspace selection before the first nonempty message. The selection locks irrevocably on first send. */
+        patch: operations["PatchAgentWorkspace"];
         trace?: never;
     };
     "/v1/agents/{agent_id}/settings": {
@@ -277,6 +311,28 @@ export interface components {
             model?: string;
             effort?: string;
         };
+        WorkspaceSelection: {
+            /** @enum {string} */
+            mode: "current_checkout" | "worktree";
+            base_branch?: string;
+        };
+        Workspace: {
+            /** @enum {string} */
+            mode: "current_checkout" | "worktree";
+            base_branch?: string;
+            locked: boolean;
+            /** @enum {string} */
+            status: "draft" | "fetching" | "creating" | "ready" | "failed";
+            path?: string;
+            branch?: string;
+            base_commit?: string;
+            error?: string;
+        };
+        ProjectBranches: {
+            is_git: boolean;
+            branches: string[];
+            default_branch: string;
+        };
         Project: {
             /** @description Live server-side Git branch (or detached commit), populated on GET project; omitted outside Git repositories. */
             git_branch?: string;
@@ -284,21 +340,25 @@ export interface components {
             name: string;
             root: string;
             defaults: components["schemas"]["Settings"];
+            workspace_defaults?: components["schemas"]["WorkspaceSelection"];
         };
         CreateProjectRequest: {
             name: string;
             root: string;
             defaults: components["schemas"]["Settings"];
+            workspace_defaults?: components["schemas"]["WorkspaceSelection"];
         };
         PatchProjectRequest: {
             name?: string;
             defaults?: components["schemas"]["Settings"];
+            workspace_defaults?: components["schemas"]["WorkspaceSelection"];
         };
         CreateAgentRequest: {
             project_id: string;
             title?: string;
             prompt?: string;
             settings?: components["schemas"]["SettingsPatch"];
+            workspace?: components["schemas"]["WorkspaceSelection"];
         };
         PatchAgentRequest: {
             settled: boolean;
@@ -382,6 +442,7 @@ export interface components {
             /** @enum {string} */
             state: "idle" | "running" | "stopping";
             held: boolean;
+            workspace?: components["schemas"]["Workspace"];
             queue?: components["schemas"]["QueuedMessage"][];
             messages?: components["schemas"]["Message"][];
             /** Format: int64 */
@@ -415,6 +476,7 @@ export interface components {
             /** @enum {string} */
             state: "idle" | "running" | "stopping";
             held: boolean;
+            workspace?: components["schemas"]["Workspace"];
             /** Format: int64 */
             cursor: number;
             /** Format: date-time */
@@ -438,6 +500,7 @@ export interface components {
             /** @enum {string} */
             state: "idle" | "running" | "stopping";
             held: boolean;
+            workspace?: components["schemas"]["Workspace"];
             context_usage: components["schemas"]["ContextUsage"];
         };
         /** @description Retained agent.AgentResponse. PascalCase field names are intentional compatibility with the existing runtime output payload. */
@@ -466,7 +529,7 @@ export interface components {
             created_at: string;
         };
         /** @enum {string} */
-        ErrorCode: "invalid" | "invalid_project" | "invalid_settings" | "invalid_message" | "invalid_limit" | "turn_required" | "not_found" | "conflict" | "project_exists" | "project_not_empty" | "idempotency_conflict" | "not_pending" | "not_running" | "settled" | "cursor_invalid" | "shutting_down" | "storage_failed" | "internal" | "method_not_allowed" | "too_large" | "unsupported_media_type" | "forbidden";
+        ErrorCode: "invalid" | "invalid_project" | "invalid_settings" | "invalid_workspace" | "workspace_locked" | "workspace_failed" | "workspace_unavailable" | "invalid_message" | "invalid_limit" | "turn_required" | "not_found" | "conflict" | "project_exists" | "project_not_empty" | "idempotency_conflict" | "not_pending" | "not_running" | "settled" | "cursor_invalid" | "shutting_down" | "storage_failed" | "internal" | "method_not_allowed" | "too_large" | "unsupported_media_type" | "forbidden";
         Error: {
             error: {
                 code: components["schemas"]["ErrorCode"];
@@ -1180,6 +1243,109 @@ export interface operations {
             };
         };
     };
+    ListProjectBranches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectBranches"];
+                };
+            };
+            /** @description Invalid request: unknown or missing fields, malformed JSON or parameters, bounds violations. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Project, agent, message, or event not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description HTTP method not allowed. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicting state, idempotency key reused with different payload, or message not pending. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Cursor invalid (ahead of retained stream or outside lifetime). */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body exceeds 2 MiB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Expected application/json. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Service shutting down or durable storage unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     ListAgents: {
         parameters: {
             query?: {
@@ -1506,6 +1672,113 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PatchAgentRequest"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Agent"];
+                };
+            };
+            /** @description Invalid request: unknown or missing fields, malformed JSON or parameters, bounds violations. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Project, agent, message, or event not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description HTTP method not allowed. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicting state, idempotency key reused with different payload, or message not pending. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Cursor invalid (ahead of retained stream or outside lifetime). */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body exceeds 2 MiB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Expected application/json. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Service shutting down or durable storage unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    PatchAgentWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceSelection"];
             };
         };
         responses: {

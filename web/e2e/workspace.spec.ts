@@ -778,9 +778,10 @@ for (const width of [1440, 390, 320]) {
       exact: true,
     });
     const directory = location.getByText("/srv/harness", { exact: true });
-    if (width < 768) await expect(directory).toBeHidden();
-    else await expect(directory).toBeVisible();
-    await expect(location.getByText("main", { exact: true })).toBeVisible();
+    await expect(directory).toHaveCount(0);
+    await expect(
+      location.getByRole("combobox", { name: "Workspace", exact: true }),
+    ).toBeVisible();
     expect((await model.boundingBox())!.width).toBeLessThan(200);
     expect((await effort.boundingBox())!.width).toBeLessThan(130);
     const initialSendX = (await actions
@@ -2055,13 +2056,10 @@ test.describe("mobile composer footer", () => {
     });
     const context = page.locator('[data-slot="context-usage"]');
     await expect(context).toHaveText("0%", { useInnerText: true });
-    await expect(location.getByText(root, { exact: true })).toHaveAttribute(
-      "title",
-      root,
-    );
     await expect(
-      location.locator("[title]").filter({ hasText: branch }),
-    ).toHaveAttribute("title", branch);
+      location.getByRole("combobox", { name: "Workspace", exact: true }),
+    ).toBeVisible();
+    await expect(location.getByText(root, { exact: true })).toHaveCount(0);
     const menuBox = (await menu.boundingBox())!;
     const locationBox = (await location.boundingBox())!;
     const contextBox = (await context.boundingBox())!;

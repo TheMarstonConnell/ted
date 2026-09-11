@@ -55,3 +55,52 @@ func TestEmbeddedSpecificationAndProviderSchemas(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkspaceContract(t *testing.T) {
+	spec, err := GetSwagger()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	workspaceRoute := spec.Paths.Value("/v1/agents/{agent_id}/workspace")
+	if workspaceRoute == nil || workspaceRoute.Patch == nil || workspaceRoute.Patch.OperationID != "PatchAgentWorkspace" {
+		t.Fatalf("workspace route is missing or has the wrong operation ID: %#v", workspaceRoute)
+	}
+	branchesRoute := spec.Paths.Value("/v1/projects/{project_id}/branches")
+	if branchesRoute == nil || branchesRoute.Get == nil || branchesRoute.Get.OperationID != "ListProjectBranches" {
+		t.Fatalf("branches route is missing or has the wrong operation ID: %#v", branchesRoute)
+	}
+
+	selection := spec.Components.Schemas["WorkspaceSelection"].Value
+	for _, sample := range []struct {
+		value any
+		valid bool
+	}{
+		{map[string]any{"mode": "current_checkout"}, true},
+		{map[string]any{"mode": "worktree", "base_branch": "origin/main"}, true},
+		{map[string]any{}, false},
+		{map[string]any{"mode": "shared"}, false},
+		{map[string]any{"mode": "worktree", "base_branch": ""}, false},
+		{map[string]any{"mode": "worktree", "extra": true}, false},
+	} {
+		err := selection.VisitJSON(sample.value)
+		if (err == nil) != sample.valid {
+			t.Errorf("WorkspaceSelection validation for %#v: got %v, valid=%v", sample.value, err, sample.valid)
+		}
+	}
+
+	// Workspace metadata remains optional in resource/event schemas so older
+	// persisted frontend fixtures continue to type-check. The backend supplies it.
+	for _, name := range []string{"Agent", "AgentSummary", "AgentUpdate", "Project"} {
+		for _, required := range spec.Components.Schemas[name].Value.Required {
+			if required == "workspace" || required == "workspace_defaults" {
+				t.Errorf("%s unexpectedly requires %s", name, required)
+			}
+		}
+	}
+	for _, code := range []string{"invalid_workspace", "workspace_locked", "workspace_failed", "workspace_unavailable"} {
+		if err := spec.Components.Schemas["ErrorCode"].Value.VisitJSON(code); err != nil {
+			t.Errorf("ErrorCode rejects %q: %v", code, err)
+		}
+	}
+}
