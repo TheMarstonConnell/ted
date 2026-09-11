@@ -95,3 +95,79 @@ ted tui --workspace current_checkout
 cannot be combined with `--resume` or `--continue`; resuming reuses the thread's
 existing workspace. The HTTP workspace endpoint remains available to edit any
 empty, unlocked thread before its first message.
+
+## Child agents and existing directories
+
+`--parent-agent <id>` creates a new child of an existing agent on the same server.
+The relationship is durable and creation-only. Children appear beneath their
+parent in the web sidebar, with an expand/collapse control. A family stays in its
+root parent's project section while any member is active; an entirely settled
+family moves to Settled chats. Settling, stopping, or disconnecting a parent does
+not cascade to children (the existing lifetime rule for a TUI-owned server still
+applies).
+
+```sh
+# Agent tool commands already receive TED_THREAD_ID. For tmux, expand it in the
+# spawning shell rather than relying on the tmux server's environment.
+tmux new-session -d -s tests \
+  "ted tui --parent-agent '$TED_THREAD_ID' --prompt 'Implement the tests'"
+
+# Explicit directory wins over implicit parent-worktree inheritance.
+ted tui --parent-agent "$TED_THREAD_ID" --cwd /path/to/checkout \
+  --workspace current_checkout
+
+# Explicitly request a fresh worktree rather than sharing the parent's.
+ted tui --parent-agent "$TED_THREAD_ID" \
+  --workspace worktree --base-branch origin/main
+```
+
+Directory/workspace precedence for new TUI agents:
+
+1. `--cwd <path>` selects the directory/source project, as if Ted were launched
+   there. Relative paths resolve against the launching process's cwd; absolute
+   paths refer to the server filesystem and need not exist on a remote client.
+   It is **not** a destination path for generated worktrees.
+2. Explicit workspace flags select Local or a fresh Worktree. With `--cwd`
+   pointing at an established managed worktree, `current_checkout` means sharing
+   that directory, not jumping back to the original checkout.
+3. With neither `--cwd` nor workspace flags, a child shares its parent's
+   established worktree. No fetch, branch switch, reset, copy, or new worktree is
+   performed: both agents see the same branch, files, and uncommitted edits.
+4. Otherwise project workspace defaults apply. A parent with an empty worktree
+   draft has no worktree to share yet. A parent whose first-send setup is pending
+   or failed cannot be inherited: wait for successful setup or select a workspace
+   explicitly; there is no silent fallback.
+
+Launching from a server-managed worktree, with or without `--parent-agent`, keeps
+its original project identity and shares that tree unless a fresh Worktree is
+explicitly requested. This also applies to worktrees owned by settled agents.
+Explicit `--cwd` may select another project without changing the child relationship.
+Parentage itself does not copy model/effort settings; project defaults and the
+existing `--model` / `--effort` flags still apply.
+
+A shared child records its own workspace path and locks it on first send. It does
+not follow subsequent parent workspace changes. Resume and server restart reuse
+that path; missing/deleted worktrees fail rather than being recreated. An unlocked
+shared draft can still replace its inherited location using the existing workspace
+endpoint. Concurrent edits in a shared directory are not isolated.
+
+`--parent-agent` cannot be combined with `--resume` or `--continue`. `--cwd` can
+select the project for `--continue`, but cannot override an explicit `--resume`.
+Neither resume mode changes parentage or the recorded workspace.
+
+### API fields
+
+`POST /v1/agents` additionally accepts:
+
+- `parent_agent_id`: an existing agent ID on this server; immutable after creation.
+- `working_directory`: an existing absolute server-local project root or established
+  managed worktree path belonging to `project_id`. Omission allows implicit parent
+  inheritance when parent and child use the same project. An explicit directory
+  suppresses implicit parent inheritance but otherwise uses the selected project's
+  defaults, except that an existing managed worktree is shared by default.
+
+The parent ID appears in agent resources, WebSocket inventory, and agent updates;
+it is omitted for root agents. `Agent.workspace.shared: true` marks an existing
+managed worktree that will never be provisioned by this child. Workspace selection
+requests remain `current_checkout` or `worktree`; `shared` is server-owned metadata,
+not another CLI mode or a writable workspace-selection field.

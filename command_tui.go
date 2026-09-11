@@ -21,7 +21,7 @@ func newTUICommand() *cobra.Command {
 	return cmd
 }
 func configureTUICommand(cmd *cobra.Command) {
-	var prompt, modelID, effort, resume, server, workspaceMode, baseBranch string
+	var prompt, modelID, effort, resume, server, workspaceMode, baseBranch, cwd, parentAgentID string
 	var continueSession bool
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		if cmd.Flags().Changed("server") && strings.TrimSpace(server) == "" {
@@ -31,11 +31,20 @@ func configureTUICommand(cmd *cobra.Command) {
 		if err != nil {
 			return err
 		}
-		if workspace == nil {
-			return runRemoteTUISession(cmd.Context(), server, prompt, modelID, effort, resume, continueSession)
+		options := tuiStartupOptions{CWD: cwd, ParentAgentID: parentAgentID, Workspace: workspace}
+		for _, flag := range []string{"cwd", "parent-agent"} {
+			value, _ := cmd.Flags().GetString(flag)
+			if cmd.Flags().Changed(flag) && strings.TrimSpace(value) == "" {
+				return fmt.Errorf("--%s requires a nonempty value", flag)
+			}
 		}
-		return runRemoteTUISession(cmd.Context(), server, prompt, modelID, effort, resume, continueSession, *workspace)
+		if err := options.validate(resume, continueSession); err != nil {
+			return err
+		}
+		return runRemoteTUISession(cmd.Context(), server, prompt, modelID, effort, resume, continueSession, options)
 	}
+	cmd.Flags().StringVar(&cwd, "cwd", "", "Start in this directory (absolute paths refer to the server filesystem)")
+	cmd.Flags().StringVar(&parentAgentID, "parent-agent", "", "Create a child of this server agent; inherits its established worktree unless overridden")
 	cmd.Flags().StringVar(&server, "server", "", "Connect to an existing API server (never starts a local server)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "Send an initial user prompt when the TUI starts")
 	cmd.Flags().StringVar(&modelID, "model", "", "Select a model (provider/model-id); overrides saved settings")
@@ -78,7 +87,7 @@ func runTUI(prompt, modelID, effort string) error {
 func runTUISession(prompt, modelID, effort, resume string, continueSession bool) error {
 	return runRemoteTUISession(context.Background(), "", prompt, modelID, effort, resume, continueSession)
 }
-func runRemoteTUISession(ctx context.Context, server, prompt, modelID, effort, resume string, continueSession bool, workspace ...remote.WorkspaceSelection) error {
+func runRemoteTUISession(ctx context.Context, server, prompt, modelID, effort, resume string, continueSession bool, options ...tuiStartupOptions) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	base, owner, err := resolveTUIServer(ctx, server)
@@ -87,7 +96,7 @@ func runRemoteTUISession(ctx context.Context, server, prompt, modelID, effort, r
 	}
 	defer func() { cancel(); owner.Close() }()
 	client := remote.New(base)
-	instance, err := prepareRemoteAgent(ctx, client, modelID, effort, resume, continueSession, workspace...)
+	instance, err := prepareRemoteAgent(ctx, client, modelID, effort, resume, continueSession, options...)
 	if err != nil {
 		return err
 	}
@@ -115,17 +124,41 @@ func runRemoteTUISession(ctx context.Context, server, prompt, modelID, effort, r
 	return nil
 }
 
-func prepareRemoteAgent(ctx context.Context, c *remote.Client, modelID, effort, resume string, latest bool, workspace ...remote.WorkspaceSelection) (*remote.Agent, error) {
-	if len(workspace) > 1 {
-		return nil, fmt.Errorf("only one workspace selection may be specified")
+// Startup options select a project/location without changing the process cwd.
+type tuiStartupOptions struct {
+	CWD           string
+	ParentAgentID string
+	Workspace     *remote.WorkspaceSelection
+}
+
+func (o tuiStartupOptions) validate(resume string, latest bool) error {
+	if o.ParentAgentID != "" && (resume != "" || latest) {
+		return fmt.Errorf("--parent-agent is creation-only and cannot be used with --resume or --continue")
 	}
-	if len(workspace) == 1 {
+	if o.CWD != "" && resume != "" {
+		return fmt.Errorf("--cwd cannot be used with --resume; resumed agents reuse their recorded workspace")
+	}
+	if o.Workspace != nil {
 		if resume != "" || latest {
-			return nil, fmt.Errorf("workspace overrides cannot be used with --resume or --continue; resumed workspaces are locked after the first message")
+			return fmt.Errorf("workspace overrides cannot be used with --resume or --continue; resumed workspaces are locked after the first message")
 		}
-		if workspace[0].Mode != "current_checkout" && workspace[0].Mode != "worktree" {
-			return nil, fmt.Errorf("workspace mode must be current_checkout or worktree")
+		if o.Workspace.Mode != "current_checkout" && o.Workspace.Mode != "worktree" {
+			return fmt.Errorf("workspace mode must be current_checkout or worktree")
 		}
+	}
+	return nil
+}
+
+func prepareRemoteAgent(ctx context.Context, c *remote.Client, modelID, effort, resume string, latest bool, options ...tuiStartupOptions) (*remote.Agent, error) {
+	if len(options) > 1 {
+		return nil, fmt.Errorf("only one startup options value may be specified")
+	}
+	var opts tuiStartupOptions
+	if len(options) == 1 {
+		opts = options[0]
+	}
+	if err := opts.validate(resume, latest); err != nil {
+		return nil, err
 	}
 	models, err := c.Models(ctx)
 	if err != nil {
@@ -143,36 +176,23 @@ func prepareRemoteAgent(ctx context.Context, c *remote.Client, modelID, effort, 
 			return nil, err
 		}
 	} else {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, err
-		}
-		if canonical, err := filepath.EvalSymlinks(cwd); err == nil {
-			cwd = canonical
-		}
-		projects, err := c.Projects(ctx)
-		if err != nil {
-			return nil, err
-		}
-		for _, p := range projects {
-			if filepath.Clean(p.Root) == filepath.Clean(cwd) {
-				project = p
-				break
-			}
-		}
-		if project.ID == "" {
-			if latest {
-				return nil, fmt.Errorf("no server sessions for directory %s", cwd)
-			}
-			if len(models) == 0 {
-				return nil, fmt.Errorf("server has no models available")
-			}
-			defaults := remote.Settings{Model: models[0].ID, Effort: string(models[0].DefaultEffort)}
-			project, err = c.CreateProject(ctx, filepath.Base(cwd), cwd, defaults)
+		var parent remote.Snapshot
+		if opts.ParentAgentID != "" {
+			parent, err = c.GetAgent(ctx, opts.ParentAgentID)
 			if err != nil {
-				return nil, fmt.Errorf("create project (root must exist on server filesystem): %w", err)
+				return nil, fmt.Errorf("parent agent %q: %w", opts.ParentAgentID, err)
 			}
 		}
+		var directory string
+		if opts.CWD == "" && opts.ParentAgentID != "" {
+			project, err = c.Project(ctx, parent.ProjectID)
+		} else {
+			project, directory, err = tuiProjectForDirectory(ctx, c, opts.CWD, latest, models)
+		}
+		if err != nil {
+			return nil, err
+		}
+
 		if latest {
 			agents, err := c.Agents(ctx, project.ID)
 			if err != nil {
@@ -194,7 +214,7 @@ func prepareRemoteAgent(ctx context.Context, c *remote.Client, modelID, effort, 
 				return nil, err
 			}
 		} else {
-			snapshot, err = c.CreateAgent(ctx, project.ID, workspace...)
+			snapshot, err = c.CreateAgentWithOptions(ctx, project.ID, remote.CreateAgentOptions{ParentAgentID: opts.ParentAgentID, WorkingDirectory: directory, Workspace: opts.Workspace})
 			if err != nil {
 				return nil, err
 			}
@@ -205,6 +225,74 @@ func prepareRemoteAgent(ctx context.Context, c *remote.Client, modelID, effort, 
 		return nil, err
 	}
 	return instance, nil
+}
+
+// Managed worktrees take precedence over old duplicate projects rooted at the
+// worktree path, and keep their original project identity. Do not use Git's
+// common-dir alone: only server-recorded worktrees have a durable Ted owner.
+func tuiProjectForDirectory(ctx context.Context, c *remote.Client, explicit string, latest bool, models []agent.ModelInfo) (remote.Project, string, error) {
+	cwd := explicit
+	var err error
+	if cwd == "" {
+		cwd, err = os.Getwd()
+	}
+	if err != nil {
+		return remote.Project{}, "", err
+	}
+	cwd, err = filepath.Abs(cwd)
+	if err != nil {
+		return remote.Project{}, "", err
+	}
+	// A remote server's absolute directory need not exist on the client.
+	cwd = canonicalTUIPath(cwd)
+	projects, err := c.Projects(ctx)
+	if err != nil {
+		return remote.Project{}, "", err
+	}
+	agents, err := c.Agents(ctx, "")
+	if err != nil {
+		return remote.Project{}, "", err
+	}
+	for _, a := range agents {
+		if a.Workspace.Mode != "worktree" || a.Workspace.Path == "" || canonicalTUIPath(a.Workspace.Path) != filepath.Clean(cwd) {
+			continue
+		}
+		for _, p := range projects {
+			if p.ID == a.ProjectID {
+				return p, cwd, nil
+			}
+		}
+	}
+	for _, p := range projects {
+		if filepath.Clean(p.Root) == filepath.Clean(cwd) {
+			directory := ""
+			if explicit != "" {
+				directory = cwd
+			}
+			return p, directory, nil
+		}
+	}
+	if latest {
+		return remote.Project{}, "", fmt.Errorf("no server sessions for directory %s", cwd)
+	}
+	if len(models) == 0 {
+		return remote.Project{}, "", fmt.Errorf("server has no models available")
+	}
+	defaults := remote.Settings{Model: models[0].ID, Effort: string(models[0].DefaultEffort)}
+	project, err := c.CreateProject(ctx, filepath.Base(cwd), cwd, defaults)
+	if err != nil {
+		return remote.Project{}, "", fmt.Errorf("create project (root must exist on server filesystem): %w", err)
+	}
+	return project, cwd, nil
+}
+
+// Best-effort local canonicalization keeps local symlink aliases identical,
+// while leaving server-only paths intact when the client cannot inspect them.
+func canonicalTUIPath(path string) string {
+	if canonical, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(canonical)
+	}
+	return filepath.Clean(path)
 }
 
 // Select the model first so effort is validated against the startup model.

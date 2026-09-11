@@ -83,18 +83,30 @@ permissions.
 The server stores projects with existing server-local root directories and model/
 effort defaults. A new TUI agent uses the project matching its current directory.
 Defaults are copied into new agents; changing project defaults affects only future
-agents. Multiple agents in a project share that directory—there is no automatic
-worktree isolation.
+agents. Chats use the current checkout or an isolated worktree according to the
+project defaults and startup flags; see [chat workspaces](docs/workspaces.md).
 
 ```sh
 ted sessions                 # agents on the running local server
 ted tui --continue           # latest unsettled agent in this directory's project
-ted tui --resume <agent-id>  # specific server agent
+ted tui --resume <agent-id>   # specific server agent
+ted tui --cwd /path/to/repo   # select a directory without changing your shell cwd
+ted tui --parent-agent "$TED_THREAD_ID" --prompt "Implement the tests"
 ```
 
 `--continue` and `--resume` are mutually exclusive. `--prompt`, `--model`, and
 `--effort` also work with resumed agents. Remote project directories must exist on
-the server; an explicit agent ID restores that agent's project directory.
+the server; an explicit agent ID restores that agent's recorded workspace.
+
+`--parent-agent <id>` creates a child of an existing agent on the same server.
+Without directory/workspace overrides, it shares the parent's established
+worktree (including its current branch and uncommitted edits), or uses project
+defaults if the parent has no established worktree. Explicit `--cwd` takes
+precedence over parent inheritance. Managed worktrees retain their original
+project identity. Children are collapsible beneath their parent in the web
+sidebar; their execution and settling remain independent. Parentage is
+creation-only: do not combine `--parent-agent` with `--resume` or `--continue`.
+`--cwd` can select the project for `--continue`, but cannot override `--resume`.
 
 Messages are durably queued, including while the agent is busy. Turns run FIFO,
 one at a time per agent. Failures hold the remaining queue. `/continue` releases

@@ -154,7 +154,11 @@ func (s *Service) eventLocked(a *storedAgent, typ string, data any) {
 // Updates intentionally omit transcript and queue bodies; clients fetch them
 // when needed. Replay does not grow quadratically with conversation length.
 func (s *Service) summaryLocked(a *storedAgent) any {
-	return map[string]any{"id": a.Agent.ID, "project_id": a.Agent.ProjectID, "title": a.Agent.Title, "settings": a.Agent.Settings, "active_settings": a.Agent.ActiveSettings, "settled": a.Agent.Settled, "state": a.Agent.State, "held": a.Agent.Held, "context_usage": a.Agent.ContextUsage, "workspace": a.Agent.Workspace}
+	summary := map[string]any{"id": a.Agent.ID, "project_id": a.Agent.ProjectID, "title": a.Agent.Title, "settings": a.Agent.Settings, "active_settings": a.Agent.ActiveSettings, "settled": a.Agent.Settled, "state": a.Agent.State, "held": a.Agent.Held, "context_usage": a.Agent.ContextUsage, "workspace": a.Agent.Workspace}
+	if a.Agent.ParentAgentID != "" {
+		summary["parent_agent_id"] = a.Agent.ParentAgentID
+	}
+	return summary
 }
 func (s *Service) recordLocked(id string) (*storedAgent, error) {
 	a, ok := s.state.Agents[id]
@@ -364,27 +368,13 @@ func (s *Service) CreateAgent(req CreateAgentRequest, key string) (Agent, error)
 	if err != nil {
 		return Agent{}, err
 	}
-	// Snapshot already-validated project defaults without revalidating the remote
-	// inventory. A default branch can disappear later: users must still be able
-	// to open a draft and choose Current checkout, or get a locked setup error
-	// on first send instead of being unable to create a chat at all.
-	selection := p.WorkspaceDefaults
-	if selection.Mode == "" {
-		selection.Mode = "current_checkout"
-	}
-	if req.Workspace != nil {
-		selection = *req.Workspace
-		if selection.BaseBranch == "" {
-			selection.BaseBranch = p.WorkspaceDefaults.BaseBranch
-		}
-		selection, err = normalizeWorkspace(p.Root, selection)
-		if err != nil {
-			return Agent{}, err
-		}
+	workspace, err := s.creationWorkspaceLocked(p, req)
+	if err != nil {
+		return Agent{}, err
 	}
 	now := time.Now().UTC()
 	id := newID()
-	a := &storedAgent{Agent: Agent{Workspace: Workspace{WorkspaceSelection: selection, Status: "draft"}, ID: id, ProjectID: p.ID, Title: req.Title, Settings: settings, State: "idle", Queue: []QueuedMessage{}, Messages: []agent.Message{}, CreatedAt: now, UpdatedAt: now}, Events: []Event{}}
+	a := &storedAgent{Agent: Agent{ParentAgentID: req.ParentAgentID, Workspace: workspace, ID: id, ProjectID: p.ID, Title: req.Title, Settings: settings, State: "idle", Queue: []QueuedMessage{}, Messages: []agent.Message{}, CreatedAt: now, UpdatedAt: now}, Events: []Event{}}
 	before := copyJSON(s.state)
 	s.state.Agents[id] = a
 	s.eventLocked(a, "agent.created", s.summaryLocked(a))

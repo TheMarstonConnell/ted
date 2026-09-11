@@ -45,6 +45,13 @@ Multiple agents can edit the same files concurrently. Project defaults are copie
 into new agents; changes to defaults do not alter existing agents. Agent creation
 accepts overrides and an optional initial prompt. Without a prompt it is idle.
 
+Creation also accepts an immutable `parent_agent_id`. Children can share an
+established parent worktree while retaining the original project, independent
+runtime identities, queues, and lifecycle controls. `working_directory` explicitly
+selects a project root or established managed worktree and takes precedence over
+implicit parent inheritance. See [child agents](workspaces.md#child-agents-and-existing-directories)
+for CLI precedence and sidebar grouping.
+
 ## Execution and queue
 
 Each agent has one FIFO queue and at most one active turn. HTTP and WebSocket

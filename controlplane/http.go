@@ -298,7 +298,7 @@ func (h *httpAPI) CreateAgent(w http.ResponseWriter, r *http.Request, p api.Crea
 	if b.Settings != nil {
 		settings = &Settings{Model: value(b.Settings.Model), Effort: value(b.Settings.Effort)}
 	}
-	a, err := h.service.CreateAgent(CreateAgentRequest{ProjectID: b.ProjectId, Title: value(b.Title), Prompt: value(b.Prompt), Settings: settings, Workspace: optionalWorkspaceSelection(b.Workspace)}, value(p.IdempotencyKey))
+	a, err := h.service.CreateAgent(CreateAgentRequest{ParentAgentID: value(b.ParentAgentId), WorkingDirectory: value(b.WorkingDirectory), ProjectID: b.ProjectId, Title: value(b.Title), Prompt: value(b.Prompt), Settings: settings, Workspace: optionalWorkspaceSelection(b.Workspace)}, value(p.IdempotencyKey))
 	agentResult(w, 201, a, err)
 }
 func (h *httpAPI) GetAgent(w http.ResponseWriter, r *http.Request, id string) {

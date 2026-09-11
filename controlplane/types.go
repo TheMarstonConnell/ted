@@ -20,6 +20,7 @@ type WorkspaceSelection struct {
 	BaseBranch string `json:"base_branch,omitempty"`
 }
 type Workspace struct {
+	Shared bool `json:"shared,omitempty"` // Reuses an existing managed worktree; never provisions one.
 	WorkspaceSelection
 	Locked     bool   `json:"locked"`
 	Status     string `json:"status"`
@@ -48,11 +49,13 @@ type CreateProjectRequest struct {
 	Defaults          Settings            `json:"defaults"`
 }
 type CreateAgentRequest struct {
-	Workspace *WorkspaceSelection `json:"workspace,omitempty"`
-	ProjectID string              `json:"project_id"`
-	Title     string              `json:"title"`
-	Prompt    string              `json:"prompt"`
-	Settings  *Settings           `json:"settings,omitempty"`
+	ParentAgentID    string              `json:"parent_agent_id,omitempty"`
+	WorkingDirectory string              `json:"working_directory,omitempty"`
+	Workspace        *WorkspaceSelection `json:"workspace,omitempty"`
+	ProjectID        string              `json:"project_id"`
+	Title            string              `json:"title"`
+	Prompt           string              `json:"prompt"`
+	Settings         *Settings           `json:"settings,omitempty"`
 }
 type SubmitMessageRequest struct {
 	Text string `json:"text"`
@@ -65,6 +68,7 @@ type QueuedMessage struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 type Agent struct {
+	ParentAgentID  string             `json:"parent_agent_id,omitempty"`
 	Workspace      Workspace          `json:"workspace"`
 	ID             string             `json:"id"`
 	ProjectID      string             `json:"project_id"`

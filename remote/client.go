@@ -32,6 +32,7 @@ type WorkspaceSelection struct {
 
 // Workspace is the server-owned, durable workspace state for an agent.
 type Workspace struct {
+	Shared bool `json:"shared,omitempty"`
 	WorkspaceSelection
 	Locked bool   `json:"locked"`
 	Status string `json:"status"`
@@ -58,19 +59,20 @@ type QueuedMessage struct {
 	Error  string `json:"error,omitempty"`
 }
 type Snapshot struct {
-	Workspace    Workspace          `json:"workspace"`
-	Title        string             `json:"title"`
-	ContextUsage agent.ContextUsage `json:"context_usage"`
-	ID           string             `json:"id"`
-	ProjectID    string             `json:"project_id"`
-	Settings     Settings           `json:"settings"`
-	State        string             `json:"state"`
-	Settled      bool               `json:"settled"`
-	Held         bool               `json:"held"`
-	Queue        []QueuedMessage    `json:"queue"`
-	Messages     []agent.Message    `json:"messages"`
-	Cursor       uint64             `json:"cursor"`
-	UpdatedAt    time.Time          `json:"updated_at"`
+	ParentAgentID string             `json:"parent_agent_id,omitempty"`
+	Workspace     Workspace          `json:"workspace"`
+	Title         string             `json:"title"`
+	ContextUsage  agent.ContextUsage `json:"context_usage"`
+	ID            string             `json:"id"`
+	ProjectID     string             `json:"project_id"`
+	Settings      Settings           `json:"settings"`
+	State         string             `json:"state"`
+	Settled       bool               `json:"settled"`
+	Held          bool               `json:"held"`
+	Queue         []QueuedMessage    `json:"queue"`
+	Messages      []agent.Message    `json:"messages"`
+	Cursor        uint64             `json:"cursor"`
+	UpdatedAt     time.Time          `json:"updated_at"`
 }
 type Event struct {
 	AgentID string          `json:"agent_id"`
@@ -183,10 +185,25 @@ func (c *Client) CreateAgent(ctx context.Context, project string, workspace ...W
 	if len(workspace) > 1 {
 		return Snapshot{}, fmt.Errorf("only one workspace selection may be specified")
 	}
-	body := map[string]any{"project_id": project}
+	options := CreateAgentOptions{}
 	if len(workspace) > 0 {
-		body["workspace"] = workspace[0]
+		options.Workspace = &workspace[0]
 	}
+	return c.CreateAgentWithOptions(ctx, project, options)
+}
+
+// CreateAgentOptions applies only to creation; parentage cannot be patched.
+type CreateAgentOptions struct {
+	ParentAgentID    string              `json:"parent_agent_id,omitempty"`
+	WorkingDirectory string              `json:"working_directory,omitempty"`
+	Workspace        *WorkspaceSelection `json:"workspace,omitempty"`
+}
+
+func (c *Client) CreateAgentWithOptions(ctx context.Context, project string, options CreateAgentOptions) (Snapshot, error) {
+	body := struct {
+		ProjectID string `json:"project_id"`
+		CreateAgentOptions
+	}{project, options}
 	var result Snapshot
 	err := c.request(ctx, "POST", "/v1/agents", body, &result, newKey())
 	return result, err
