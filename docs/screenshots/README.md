@@ -65,6 +65,25 @@ intent and scroll position because Playwright has no touch-pan API. Separate
 cases cover composer shrink, queued turns, failed/slow sends, reading during a
 pending request, and late acknowledgements after changing chats.
 
+# Running agent emphasis (issue #6)
+
+These captures use deterministic mocked API/WebSocket inventory, not live projects
+or paid model turns. Reproduce from `web/` with:
+
+```sh
+TED_WEB_RECORD=1 npx playwright test e2e/agent-running.spec.ts
+```
+
+- [Light theme: selected and unselected running chats](web-agent-running-light.png)
+- [Dark theme: selected and unselected running chats](web-agent-running-dark.png)
+- [Reduced motion: static border and readable label](web-agent-running-reduced-motion.png)
+- [Light-theme animation recording (WebM)](web-agent-running-demo.webm)
+
+The recording includes a full eight-second border-beam cycle, followed by reduced
+motion and inventory state changes. Idle, stopping, held and settled chats do not
+receive the running treatment. Captured with Playwright Chromium at 1440 × 960;
+Playwright scales the recording to its default video size.
+
 # Chat worktrees
 
 These captures use the real control-plane HTTP/WebSocket server and Git, with a

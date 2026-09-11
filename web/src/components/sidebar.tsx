@@ -57,6 +57,7 @@ export function AgentLink({ agent }: { agent: Agent }) {
         : "No project";
   const title = agentTitle(agent);
   const selected = agentId === agent.id;
+  const running = !agent.settled && !agent.held && agent.state === "running";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef(false);
@@ -82,7 +83,7 @@ export function AgentLink({ agent }: { agent: Agent }) {
       <div className={sidebarRowClass}>
         <Button
           variant={selected ? "default" : "ghost"}
-          className="h-auto min-w-0 flex-1 justify-start py-2 font-normal"
+          className={`h-auto min-w-0 flex-1 justify-start py-2 font-normal ${running ? "agent-running" : ""}`}
           render={
             <Link
               to={`/agents/${encodeURIComponent(agent.id)}`}
@@ -100,7 +101,7 @@ export function AgentLink({ agent }: { agent: Agent }) {
               </span>
               {!agent.settled && (agent.held || agent.state !== "idle") && (
                 <span
-                  className={`shrink-0 text-xs font-medium ${selected ? "text-primary-foreground" : "text-foreground"}`}
+                  className={`shrink-0 text-xs font-medium ${running ? "agent-running-label" : ""} ${selected ? "text-primary-foreground" : "text-foreground"}`}
                 >
                   {agent.held
                     ? "Held"

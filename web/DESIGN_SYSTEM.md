@@ -166,3 +166,11 @@ tap targets, short viewport layout, and modal focus restoration. Chromium runs
 the same scenarios in the regular suite. Native iOS keyboard and browser-toolbar
 behavior still require a real-device check; shrinking a test viewport is not a
 substitute for opening the software keyboard.
+
+## Running agents
+
+Only unsettled, unheld agents whose state is `running` get the sidebar's bold
+shimmering Running label and eight-second border beam. Both use the row's text
+color, preserving selected-row contrast in light and dark themes without changing
+row geometry or covering the separate settle action. Reduced motion uses a static
+border and solid text; forced-color mode uses a system-colored solid border.
