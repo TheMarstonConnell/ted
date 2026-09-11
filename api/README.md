@@ -59,6 +59,15 @@ accepted. Omitting settings inherits project defaults. A supplied model resets
 the default effort for that model unless an effort is also supplied. Settings
 changes do not alter a running turn's captured `active_settings`.
 
+Creation optionally accepts immutable `parent_agent_id` and an absolute
+server-local `working_directory` (the project root or an established managed
+worktree of that project). Omitting directory and workspace overrides lets a
+child share an established parent worktree within the same project; otherwise
+project workspace defaults apply. `workspace.shared` is server-owned response
+metadata, never a provisioning request. Parentage is included in agent resources,
+WS inventory, and update events and cannot be patched. See
+[workspace precedence](../docs/workspaces.md#child-agents-and-existing-directories).
+
 Agent lists default to unsettled only; set `include_settled=true` to inspect all,
 and optionally filter by `project_id`. Settling a running agent initiates
 cancellation; the final output and conversation still remain replayable.

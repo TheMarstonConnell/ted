@@ -166,9 +166,14 @@ func (s *Service) lockWorkspaceLocked(a *storedAgent) {
 	if w.Mode == "" {
 		w.Mode = "current_checkout"
 	}
-	if w.Mode == "current_checkout" {
+	if w.Shared {
+		// A child shares the recorded directory, not the provisioning lifecycle.
 		w.Status = "ready"
-		w.Path = s.state.Projects[a.Agent.ProjectID].Root
+	} else if w.Mode == "current_checkout" {
+		w.Status = "ready"
+		if w.Path == "" {
+			w.Path = s.state.Projects[a.Agent.ProjectID].Root
+		}
 	} else {
 		w.Status = "fetching"
 		w.Path = filepath.Join(s.dir, "worktrees", a.Agent.ProjectID, a.Agent.ID)

@@ -317,6 +317,8 @@ export interface components {
             base_branch?: string;
         };
         Workspace: {
+            /** @description Reuses an existing managed worktree rather than provisioning a new one. */
+            shared?: boolean;
             /** @enum {string} */
             mode: "current_checkout" | "worktree";
             base_branch?: string;
@@ -353,7 +355,11 @@ export interface components {
             defaults?: components["schemas"]["Settings"];
             workspace_defaults?: components["schemas"]["WorkspaceSelection"];
         };
+        /** @description Creates an idle agent unless prompt is supplied. Optional parent_agent_id must identify an existing agent on this server and is immutable after creation. Omitted directory and workspace overrides share an established parent worktree in the same project; otherwise project defaults apply. */
         CreateAgentRequest: {
+            parent_agent_id?: string;
+            /** @description Absolute server-local project root or established managed worktree path. Overrides implicit parent workspace inheritance; worktree mode still creates a fresh worktree. */
+            working_directory?: string;
             project_id: string;
             title?: string;
             prompt?: string;
@@ -433,6 +439,7 @@ export interface components {
             [key: string]: unknown;
         };
         Agent: {
+            parent_agent_id?: string;
             id: string;
             project_id: string;
             title: string;
@@ -467,6 +474,7 @@ export interface components {
             estimated: boolean;
         };
         AgentSummary: {
+            parent_agent_id?: string;
             id: string;
             project_id: string;
             title: string;
@@ -491,6 +499,7 @@ export interface components {
         } | null;
         /** @description State payload for agent.created and agent.updated. The enclosing Event supplies agent_id, cursor and created_at. This is not a complete Agent resource; it deliberately excludes history and queue. */
         AgentUpdate: {
+            parent_agent_id?: string;
             id: string;
             project_id: string;
             title: string;

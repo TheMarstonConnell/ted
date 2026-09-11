@@ -63,7 +63,7 @@ func TestTUIWorkspaceFlags(t *testing.T) {
 }
 
 func TestPrepareRemoteAgentRejectsWorkspaceOnResumeBeforeAPICall(t *testing.T) {
-	_, err := prepareRemoteAgent(t.Context(), nil, "", "", "agent-id", false, remote.WorkspaceSelection{Mode: "worktree", BaseBranch: "origin/main"})
+	_, err := prepareRemoteAgent(t.Context(), nil, "", "", "agent-id", false, tuiStartupOptions{Workspace: &remote.WorkspaceSelection{Mode: "worktree", BaseBranch: "origin/main"}})
 	if err == nil || !strings.Contains(err.Error(), "locked") {
 		t.Fatalf("error = %v", err)
 	}
@@ -86,6 +86,10 @@ func TestPrepareRemoteAgentCreatesWithWorkspaceSelection(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode([]remote.Project{{ID: "p", Name: "project", Root: cwd}})
 		case "/v1/agents":
+			if r.Method == http.MethodGet {
+				_ = json.NewEncoder(w).Encode([]remote.Snapshot{})
+				return
+			}
 			var body struct {
 				ProjectID string                     `json:"project_id"`
 				Workspace *remote.WorkspaceSelection `json:"workspace"`
@@ -109,7 +113,7 @@ func TestPrepareRemoteAgentCreatesWithWorkspaceSelection(t *testing.T) {
 	defer server.Close()
 
 	selection := remote.WorkspaceSelection{Mode: "worktree", BaseBranch: "origin/main"}
-	if _, err := prepareRemoteAgent(t.Context(), remote.New(server.URL), "", "", "", false, selection); err != nil {
+	if _, err := prepareRemoteAgent(t.Context(), remote.New(server.URL), "", "", "", false, tuiStartupOptions{Workspace: &selection}); err != nil {
 		t.Fatal(err)
 	}
 	if sent == nil || *sent != selection {

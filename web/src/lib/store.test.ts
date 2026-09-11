@@ -215,6 +215,105 @@ describe("workspace", () => {
     expect(groups.projects[0].agents.map((a) => a.id)).toEqual(["new", "old"]);
     expect(groups.settled.map((a) => a.id)).toEqual(["settled"]);
   });
+  it("nests sorted descendants under the family root across projects", () => {
+    const projects: Project[] = [
+      {
+        id: "p",
+        name: "root project",
+        root: "/root",
+        defaults: { model: "m", effort: "" },
+      },
+      {
+        id: "q",
+        name: "child project",
+        root: "/child",
+        defaults: { model: "m", effort: "" },
+      },
+    ];
+    const parented = (value: Agent, parent_agent_id: string): Agent => ({
+      ...value,
+      parent_agent_id,
+    });
+    const root = agent("root", { created_at: "2026-01-01T00:00:00Z" });
+    const oldChild = parented(
+      agent("old-child", {
+        project_id: "q",
+        created_at: "2026-01-02T00:00:00Z",
+      }),
+      root.id,
+    );
+    const newChild = parented(
+      agent("new-child", { created_at: "2026-01-03T00:00:00Z" }),
+      root.id,
+    );
+    const grandchild = parented(
+      agent("grandchild", { created_at: "2026-01-04T00:00:00Z" }),
+      oldChild.id,
+    );
+    const orphan = parented(
+      agent("orphan", {
+        project_id: "q",
+        created_at: "2026-01-05T00:00:00Z",
+      }),
+      "missing",
+    );
+
+    const groups = groupAgents(
+      [oldChild, orphan, grandchild, root, newChild],
+      projects,
+    );
+
+    expect(groups.projects[0].agents.map((a) => a.id)).toEqual(["root"]);
+    expect(groups.projects[1].agents.map((a) => a.id)).toEqual(["orphan"]);
+    expect(groups.children.get("root")?.map((a) => a.id)).toEqual([
+      "new-child",
+      "old-child",
+    ]);
+    expect(groups.children.get("old-child")?.map((a) => a.id)).toEqual([
+      "grandchild",
+    ]);
+  });
+
+  it("keeps every agent visible when inventory contains invalid parent cycles", () => {
+    const groups = groupAgents(
+      [
+        agent("a", { parent_agent_id: "b" }),
+        agent("b", { parent_agent_id: "a" }),
+        agent("child", { parent_agent_id: "a" }),
+        agent("self", { parent_agent_id: "self" }),
+      ],
+      [],
+    );
+    expect(groups.misc.map((a) => a.id)).toEqual(["a", "b", "self"]);
+    expect(groups.children.get("a")?.map((a) => a.id)).toEqual(["child"]);
+  });
+
+  it("keeps mixed active families together and settles only the whole family", () => {
+    const projects: Project[] = [
+      {
+        id: "p",
+        name: "harness",
+        root: "/repo",
+        defaults: { model: "m", effort: "" },
+      },
+    ];
+    const parented = (value: Agent, parent_agent_id: string): Agent => ({
+      ...value,
+      parent_agent_id,
+    });
+    const root = agent("root", { settled: true });
+    const child = parented(agent("child"), root.id);
+
+    let groups = groupAgents([root, child], projects);
+    expect(groups.projects[0].agents.map((a) => a.id)).toEqual(["root"]);
+    expect(groups.children.get("root")?.map((a) => a.id)).toEqual(["child"]);
+    expect(groups.settled).toEqual([]);
+
+    groups = groupAgents([{ ...root }, { ...child, settled: true }], projects);
+    expect(groups.projects[0].agents).toEqual([]);
+    expect(groups.settled.map((a) => a.id)).toEqual(["root"]);
+    expect(groups.children.get("root")?.map((a) => a.id)).toEqual(["child"]);
+  });
 });
 
 afterEach(() => vi.unstubAllGlobals());

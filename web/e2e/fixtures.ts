@@ -194,6 +194,10 @@ export async function workspace(page: Page) {
     agents,
     events,
     emit,
+    updateAgent(id: string, patch: Record<string, unknown>) {
+      Object.assign(agents[id], patch);
+      inventory(id);
+    },
     setWorkspace(id: string, workspace: Record<string, unknown>) {
       agents[id].workspace = workspace;
       inventory(id);

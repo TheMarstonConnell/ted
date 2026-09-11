@@ -35,7 +35,13 @@ const sidebarRowClass =
 const sidebarActionClass =
   "overflow-hidden border-x-0 [@media(hover:hover)_and_(pointer:fine)]:w-0 group-hover/sidebar-row:w-8 group-focus-within/sidebar-row:w-8 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:disabled:opacity-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:disabled:opacity-50 group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:disabled:opacity-50";
 
-export function AgentLink({ agent }: { agent: Agent }) {
+export function AgentLink({
+  agent,
+  childrenByParent = new Map(),
+}: {
+  agent: Agent;
+  childrenByParent?: ReadonlyMap<string, Agent[]>;
+}) {
   const { agentId } = useParams();
   const { projects, status } = useControl();
   const project = projects.find((p) => p.id === agent.project_id);
@@ -57,6 +63,9 @@ export function AgentLink({ agent }: { agent: Agent }) {
         : "No project";
   const title = agentTitle(agent);
   const selected = agentId === agent.id;
+  const children = childrenByParent.get(agent.id) || [];
+  const hasChildren = children.length > 0;
+  const [childrenOpen, setChildrenOpen] = useState(true);
   const running = !agent.settled && !agent.held && agent.state === "running";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,70 +85,110 @@ export function AgentLink({ agent }: { agent: Agent }) {
     }
   };
   return (
-    <div
-      data-agent-id={agent.id}
-      className={`space-y-2 ${agent.settled && !selected ? "opacity-60 hover:opacity-100 focus-within:opacity-100" : ""}`}
+    <Collapsible
+      open={hasChildren ? childrenOpen : false}
+      onOpenChange={setChildrenOpen}
+      className="space-y-2"
     >
-      <div className={sidebarRowClass}>
-        <Button
-          variant={selected ? "default" : "ghost"}
-          className={`h-auto min-w-0 flex-1 justify-start py-2 font-normal ${running ? "agent-running" : ""}`}
-          render={
-            <Link
-              to={`/agents/${encodeURIComponent(agent.id)}`}
-              title={title}
-              aria-current={selected ? "page" : undefined}
-            />
-          }
-        >
-          <span className="min-w-0 flex-1 text-left">
-            <span className="flex items-center gap-2">
-              <span
-                className={`min-w-0 flex-1 truncate ${selected ? "font-semibold" : "font-medium"}`}
-              >
-                {title}
-              </span>
-              {!agent.settled && (agent.held || agent.state !== "idle") && (
-                <span
-                  className={`shrink-0 text-xs font-medium ${running ? "agent-running-label" : ""} ${selected ? "text-primary-foreground" : "text-foreground"}`}
-                >
-                  {agent.held
-                    ? "Held"
-                    : agent.state === "stopping"
-                      ? "Stopping"
-                      : "Running"}
-                </span>
-              )}
-            </span>
-            <span
-              className={`flex min-w-0 items-center gap-2 text-xs ${selected ? "text-primary-foreground/80" : "text-muted-foreground"}`}
-              title={branchLabel}
+      <div
+        data-agent-id={agent.id}
+        className={`space-y-2 ${agent.settled && !selected ? "opacity-60 hover:opacity-100 focus-within:opacity-100" : ""}`}
+      >
+        <div className={sidebarRowClass}>
+          {hasChildren && (
+            <CollapsibleTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="shrink-0"
+                  aria-label={`${childrenOpen ? "Collapse" : "Expand"} child chats for ${title}`}
+                  title={`${childrenOpen ? "Collapse" : "Expand"} child chats`}
+                />
+              }
             >
-              {branch && (
-                <GitBranch className="size-3 shrink-0" aria-hidden="true" />
-              )}
-              <span className="truncate font-mono">{branchLabel}</span>
+              <ChevronRight
+                className={`size-4 transition-transform ${childrenOpen ? "rotate-90" : ""}`}
+                aria-hidden="true"
+              />
+            </CollapsibleTrigger>
+          )}
+          <Button
+            variant={selected ? "default" : "ghost"}
+            className={`h-auto min-w-0 flex-1 justify-start py-2 font-normal ${running ? "agent-running" : ""}`}
+            render={
+              <Link
+                to={`/agents/${encodeURIComponent(agent.id)}`}
+                title={title}
+                aria-current={selected ? "page" : undefined}
+              />
+            }
+          >
+            <span className="min-w-0 flex-1 text-left">
+              <span className="flex items-center gap-2">
+                <span
+                  className={`min-w-0 flex-1 truncate ${selected ? "font-semibold" : "font-medium"}`}
+                >
+                  {title}
+                </span>
+                {!agent.settled && (agent.held || agent.state !== "idle") && (
+                  <span
+                    className={`shrink-0 text-xs font-medium ${running ? "agent-running-label" : ""} ${selected ? "text-primary-foreground" : "text-foreground"}`}
+                  >
+                    {agent.held
+                      ? "Held"
+                      : agent.state === "stopping"
+                        ? "Stopping"
+                        : "Running"}
+                  </span>
+                )}
+              </span>
+              <span
+                className={`flex min-w-0 items-center gap-2 text-xs ${selected ? "text-primary-foreground/80" : "text-muted-foreground"}`}
+                title={branchLabel}
+              >
+                {branch && (
+                  <GitBranch className="size-3 shrink-0" aria-hidden="true" />
+                )}
+                <span className="truncate font-mono">{branchLabel}</span>
+              </span>
+              <span className="sr-only">
+                {agent.settled ? "Settled" : agent.state}
+              </span>
             </span>
-            <span className="sr-only">
-              {agent.settled ? "Settled" : agent.state}
-            </span>
-          </span>
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className={sidebarActionClass}
-          aria-label={`${agent.settled ? "Restore" : "Settle"} chat: ${title}`}
-          title={agent.settled ? "Restore chat" : "Settle chat"}
-          disabled={busy || status !== "live"}
-          onClick={() => void toggleSettled()}
-        >
-          {agent.settled ? <ArchiveRestore /> : <Archive />}
-        </Button>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={sidebarActionClass}
+            aria-label={`${agent.settled ? "Restore" : "Settle"} chat: ${title}`}
+            title={agent.settled ? "Restore chat" : "Settle chat"}
+            disabled={busy || status !== "live"}
+            onClick={() => void toggleSettled()}
+          >
+            {agent.settled ? <ArchiveRestore /> : <Archive />}
+          </Button>
+        </div>
+        <ErrorNotice error={error} />
       </div>
-      <ErrorNotice error={error} />
-    </div>
+      {hasChildren && (
+        <CollapsibleContent
+          role="group"
+          aria-label={`Child chats for ${title}`}
+          className="ml-2 space-y-2 border-l border-sidebar-border pl-2"
+        >
+          {children.map((child) => (
+            <AgentLink
+              key={child.id}
+              agent={child}
+              childrenByParent={childrenByParent}
+            />
+          ))}
+        </CollapsibleContent>
+      )}
+    </Collapsible>
   );
 }
 function SidebarContent() {
@@ -196,7 +245,11 @@ function SidebarContent() {
               Misc
             </p>
             {groups.misc.map((a) => (
-              <AgentLink key={a.id} agent={a} />
+              <AgentLink
+                key={a.id}
+                agent={a}
+                childrenByParent={groups.children}
+              />
             ))}
           </div>
         )}
@@ -236,7 +289,13 @@ function SidebarContent() {
             </div>
             <CollapsibleContent className="space-y-2 pt-2">
               {projectAgents.length ? (
-                projectAgents.map((a) => <AgentLink key={a.id} agent={a} />)
+                projectAgents.map((a) => (
+                  <AgentLink
+                    key={a.id}
+                    agent={a}
+                    childrenByParent={groups.children}
+                  />
+                ))
               ) : (
                 <p className="px-2 py-2 text-xs text-muted-foreground">
                   No active chats
@@ -264,7 +323,11 @@ function SidebarContent() {
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-2 pt-2">
             {groups.settled.map((a) => (
-              <AgentLink key={a.id} agent={a} />
+              <AgentLink
+                key={a.id}
+                agent={a}
+                childrenByParent={groups.children}
+              />
             ))}
             {!groups.settled.length && (
               <p className="px-2 py-2 text-xs text-muted-foreground">

@@ -72,21 +72,80 @@ export function projectName(root: string) {
       .pop() || ""
   );
 }
+/**
+ * Group agent families without flattening their parent/child relationships.
+ *
+ * The three arrays contain family roots. Immediate descendants are available in
+ * `children`, and can be followed recursively for grandchildren. A family stays
+ * in its root's project while any member is active; only a completely settled
+ * family moves to Settled. This keeps an active child reachable when its parent
+ * has already been settled and also keeps children with explicit workspaces
+ * nested even when their project metadata differs from the root's.
+ */
 export function groupAgents(agents: Agent[], projects: Project[]) {
   const sorted = [...agents].sort(
     (a, b) =>
       b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id),
   );
-  const active = sorted.filter((a) => !a.settled);
+  const byId = new Map(sorted.map((agent) => [agent.id, agent]));
+  const parentById = new Map<string, string>();
+
+  for (const agent of sorted) {
+    const parent = agent.parent_agent_id;
+    if (parent && parent !== agent.id && byId.has(parent))
+      parentById.set(agent.id, parent);
+  }
+
+  // Malformed inventories must not make agents disappear. Break only links
+  // originating inside a cycle; descendants can still nest under those roots.
+  const cycleMembers = new Set<string>();
+  const visited = new Set<string>();
+  for (const agent of sorted) {
+    if (visited.has(agent.id)) continue;
+    const path: string[] = [];
+    const positions = new Map<string, number>();
+    let id: string | undefined = agent.id;
+    while (id && !visited.has(id)) {
+      const repeatedAt = positions.get(id);
+      if (repeatedAt !== undefined) {
+        path.slice(repeatedAt).forEach((member) => cycleMembers.add(member));
+        break;
+      }
+      positions.set(id, path.length);
+      path.push(id);
+      id = parentById.get(id);
+    }
+    path.forEach((member) => visited.add(member));
+  }
+  cycleMembers.forEach((id) => parentById.delete(id));
+
+  // Insertion follows the existing newest-first ordering, preserving sibling
+  // order as well as the previous order of top-level chats.
+  const children = new Map<string, Agent[]>();
+  for (const agent of sorted) {
+    const parent = parentById.get(agent.id);
+    if (!parent) continue;
+    const siblings = children.get(parent) || [];
+    siblings.push(agent);
+    children.set(parent, siblings);
+  }
+  const roots = sorted.filter((agent) => !parentById.has(agent.id));
+  const familyIsSettled = (root: Agent): boolean =>
+    root.settled &&
+    (children.get(root.id) || []).every((child) => familyIsSettled(child));
+  const activeRoots = roots.filter((root) => !familyIsSettled(root));
+  const projectIds = new Set(projects.map((project) => project.id));
+
   return {
-    misc: active.filter(
-      (a) => !a.project_id || !projects.some((p) => p.id === a.project_id),
+    misc: activeRoots.filter(
+      (root) => !root.project_id || !projectIds.has(root.project_id),
     ),
     projects: projects.map((project) => ({
       project,
-      agents: active.filter((a) => a.project_id === project.id),
+      agents: activeRoots.filter((root) => root.project_id === project.id),
     })),
-    settled: sorted.filter((a) => a.settled),
+    settled: roots.filter(familyIsSettled),
+    children,
   };
 }
 

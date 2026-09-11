@@ -747,6 +747,9 @@ components:
       type: object
       additionalProperties: false
       properties:
+        shared:
+          type: boolean
+          description: Reuses an existing managed worktree rather than provisioning a new one.
         mode:
           type: string
           enum:
@@ -849,9 +852,16 @@ components:
           $ref: '#/components/schemas/WorkspaceSelection'
       minProperties: 1
     CreateAgentRequest:
+      description: Creates an idle agent unless prompt is supplied. Optional parent_agent_id must identify an existing agent on this server and is immutable after creation. Omitted directory and workspace overrides share an established parent worktree in the same project; otherwise project defaults apply.
       type: object
       additionalProperties: false
       properties:
+        parent_agent_id: *id010
+        working_directory:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Absolute server-local project root or established managed worktree path. Overrides implicit parent workspace inheritance; worktree mode still creates a fresh worktree.
         project_id: *id010
         title:
           type: string
@@ -1037,6 +1047,7 @@ components:
       type: object
       additionalProperties: false
       properties:
+        parent_agent_id: *id010
         id: *id010
         project_id: *id010
         title: &id016
@@ -1122,6 +1133,7 @@ components:
       type: object
       additionalProperties: false
       properties:
+        parent_agent_id: *id010
         id: *id010
         project_id: *id010
         title: *id016
@@ -1156,6 +1168,7 @@ components:
       type: object
       additionalProperties: false
       properties:
+        parent_agent_id: *id010
         id: *id010
         project_id: *id010
         title:
