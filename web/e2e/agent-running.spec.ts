@@ -92,16 +92,28 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.screenshot({
         path: testInfo.outputPath(`running-${colorScheme}-reduced-motion.png`),
       });
-      for (const patch of [
-        { state: "stopping" },
-        { state: "idle" },
-        { state: "running", held: true },
-        { held: false, settled: true },
-      ]) {
+      for (const [patch, label] of [
+        [{ state: "stopping" }, "Stopping"],
+        [{ state: "idle" }, "idle"],
+        [{ state: "running", held: true }, "Held"],
+      ] as const) {
         Object.assign(agents.a1, patch);
         emit("a1", "agent.updated", {});
+        // Wait for this inventory update, not an already-absent class from
+        // the previous state, before publishing the next transition.
+        await expect(active.getByText(label, { exact: true })).toBeAttached();
         await expect(active).not.toHaveClass(/agent-running/);
       }
+      Object.assign(agents.a1, { held: false, settled: true });
+      emit("a1", "agent.updated", {});
+      // Settling moves the row into an unmounted, collapsed section.
+      await expect(active).toHaveCount(0);
+      await page
+        .getByRole("button", { name: "Settled chats", exact: true })
+        .click();
+      await expect(active).toBeVisible();
+      await expect(active.getByText("Settled", { exact: true })).toBeAttached();
+      await expect(active).not.toHaveClass(/agent-running/);
       Object.assign(agents.a1, {
         state: "running",
         held: false,
