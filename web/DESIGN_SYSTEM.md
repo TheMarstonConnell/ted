@@ -158,7 +158,8 @@ just to demonstrate the grid.
   project-default screenshots. Existing tests cover queues, tools, images, drawer
   hand-offs, long content/catalogs, keyboard use, and reduced motion.
 - For visual evidence, run `TED_WEB_RECORD=1 npx playwright test grid.spec.ts`.
-- Run `npm run build` and include regenerated `web/dist` with source changes.
+- Run `npm run build` before Go tests. `web/dist` is ignored by Git and built
+  in CI.
 
 The focused `npm run test:iphone` suite uses WebKit with iPhone emulation and
 checks selected-row/branch contrast (at least 4.5:1), spinner/result transitions,
