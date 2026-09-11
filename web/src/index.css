@@ -161,3 +161,90 @@
 @utility workspace-scroll-gutter {
   scrollbar-gutter: stable both-edges;
 }
+
+/* A masked overlay leaves row contents, hit targets and focus rings untouched. */
+@property --agent-beam-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.agent-running {
+  position: relative;
+}
+
+.agent-running::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--agent-beam-angle),
+    color-mix(in srgb, currentColor 18%, transparent) 0deg 260deg,
+    currentColor 320deg,
+    color-mix(in srgb, currentColor 18%, transparent) 360deg
+  );
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  animation: agent-border-beam 8s linear infinite;
+}
+
+.agent-running-label {
+  font-weight: 600;
+  /* The dimmest part retains 75% of the normal text color. */
+  background: linear-gradient(
+    110deg,
+    color-mix(in srgb, currentColor 75%, transparent) 35%,
+    currentColor 50%,
+    color-mix(in srgb, currentColor 75%, transparent) 65%
+  );
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: agent-label-shimmer 3s ease-in-out infinite;
+}
+
+@keyframes agent-border-beam {
+  to {
+    --agent-beam-angle: 360deg;
+  }
+}
+
+@keyframes agent-label-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-running::before {
+    animation: none;
+    background: color-mix(in srgb, currentColor 40%, transparent);
+  }
+  .agent-running-label {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+@media (forced-colors: active) {
+  .agent-running::before {
+    animation: none;
+    background: none;
+    border: 1px solid currentColor;
+    mask: none;
+  }
+  .agent-running-label {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
