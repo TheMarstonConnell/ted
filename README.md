@@ -332,6 +332,7 @@ Unix-socket service. Install Chrome/Chromium and put a built `ted` binary on
 `PATH` before using browser commands from the agent:
 
 ```sh
+(cd web && npm ci && npm run build)
 go install .
 ted browser --help
 ```

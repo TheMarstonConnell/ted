@@ -111,11 +111,10 @@ go run . serve --addr 127.0.0.1:8281
 # Open http://localhost:8281
 ```
 
-`ted serve` embeds `web/dist`, so `go build`, `go install`, and Go tests do not
-require Node or a working directory containing web assets. The release bundle is
-checked in intentionally. **After frontend changes, rebuild and commit the updated
-`web/dist` alongside the source.** An already running Go binary must be rebuilt and
-restarted to pick up a new embedded bundle.
+`ted serve` embeds `web/dist` at compile time. The bundle is not checked in, so
+run `npm ci && npm run build` in `web/` before `go build`, `go install`, or
+`go test`. An already running Go binary must be rebuilt and restarted to pick up
+a new bundle.
 
 For development (Node 22.12+):
 

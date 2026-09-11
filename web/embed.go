@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-// The release bundle is checked in so go build/test/install require no Node toolchain.
-// Regenerate with: cd web && npm ci && npm run build
+// The bundle is not checked in. Build it before go build, go test, or go install:
+// cd web && npm ci && npm run build
 //
 //go:embed dist
 var assets embed.FS
