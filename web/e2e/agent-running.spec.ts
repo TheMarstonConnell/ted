@@ -88,6 +88,13 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(active).toHaveCSS("background-color", selectedBackground);
       const heading = page.locator('[data-project-id="p"] button').first();
       await expect(heading).toHaveCSS("background-color", headingBackground);
+      for (const raised of [active, heading]) {
+        expect(
+          await raised.evaluate((el) => getComputedStyle(el).boxShadow),
+        ).not.toBe("none");
+        await expect(raised).toHaveClass(/shadow-sm/);
+      }
+      await expect(other).not.toHaveClass(/shadow-sm/);
       await heading.hover();
       await expect(heading).toHaveCSS("background-color", headingBackground);
       await page.mouse.move(500, 500);

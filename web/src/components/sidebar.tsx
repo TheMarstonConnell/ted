@@ -83,7 +83,7 @@ export function AgentLink({ agent }: { agent: Agent }) {
       <div className={sidebarRowClass}>
         <Button
           variant="ghost"
-          className={`h-auto min-w-0 flex-1 justify-start py-2 font-normal text-foreground ${selected ? "bg-sidebar-selected hover:bg-sidebar-selected dark:hover:bg-sidebar-selected" : ""} ${running ? "agent-running" : ""}`}
+          className={`h-auto min-w-0 flex-1 justify-start py-2 font-normal text-foreground ${selected ? "shadow-sm bg-sidebar-selected hover:bg-sidebar-selected dark:hover:bg-sidebar-selected" : ""} ${running ? "agent-running" : ""}`}
           render={
             <Link
               to={`/agents/${encodeURIComponent(agent.id)}`}
@@ -210,7 +210,7 @@ function SidebarContent() {
                 render={
                   <Button
                     variant="ghost"
-                    className="group min-w-0 flex-1 justify-start bg-sidebar-heading aria-expanded:bg-sidebar-heading font-semibold hover:bg-sidebar-heading dark:hover:bg-sidebar-heading"
+                    className="group min-w-0 flex-1 justify-start shadow-sm bg-sidebar-heading aria-expanded:bg-sidebar-heading font-semibold hover:bg-sidebar-heading dark:hover:bg-sidebar-heading"
                   />
                 }
               >
