@@ -50,26 +50,67 @@ for (const colorScheme of ["light", "dark"] as const) {
         );
         expect(
           await link.evaluate(
-            (el) => getComputedStyle(el, "::before").animationName,
+            (el) =>
+              getComputedStyle(
+                el.querySelector(".agent-running-border")!,
+                "::before",
+              ).animationName,
           ),
         ).toBe("agent-border-beam");
+        expect(
+          await link.evaluate(
+            (el) =>
+              getComputedStyle(
+                el.querySelector(".agent-running-border")!,
+                "::before",
+              ).animationDuration,
+          ),
+        ).toBe("3s");
         await expect(link.locator(".agent-running-label")).toHaveCSS(
           "animation-name",
           "agent-label-shimmer",
         );
       }
-      const initialAngle = await active.evaluate((el) =>
-        getComputedStyle(el, "::before").getPropertyValue("--agent-beam-angle"),
+      expect(await active.evaluate((el) => getComputedStyle(el).color)).toBe(
+        await other.evaluate((el) => getComputedStyle(el).color),
+      );
+      const sidebarBackground = await page
+        .locator("aside > div")
+        .evaluate((el) => getComputedStyle(el).backgroundColor);
+      const selectedBackground =
+        colorScheme === "dark" ? "oklch(0.38 0 0)" : sidebarBackground;
+      const headingBackground = selectedBackground;
+      await expect(active).toHaveCSS("background-color", selectedBackground);
+      await active.hover();
+      await expect(active).toHaveCSS("background-color", selectedBackground);
+      const heading = page.locator('[data-project-id="p"] button').first();
+      await expect(heading).toHaveCSS("background-color", headingBackground);
+      for (const raised of [active, heading]) {
+        expect(
+          await raised.evaluate((el) => getComputedStyle(el).boxShadow),
+        ).not.toBe("none");
+        await expect(raised).toHaveClass(/shadow-sm/);
+      }
+      await expect(other).not.toHaveClass(/shadow-sm/);
+      await heading.hover();
+      await expect(heading).toHaveCSS("background-color", headingBackground);
+      await page.mouse.move(500, 500);
+      const initialDistance = await active.evaluate((el) =>
+        getComputedStyle(
+          el.querySelector(".agent-running-border")!,
+          "::before",
+        ).getPropertyValue("offset-distance"),
       );
       await expect
         .poll(() =>
           active.evaluate((el) =>
-            getComputedStyle(el, "::before").getPropertyValue(
-              "--agent-beam-angle",
-            ),
+            getComputedStyle(
+              el.querySelector(".agent-running-border")!,
+              "::before",
+            ).getPropertyValue("offset-distance"),
           ),
         )
-        .not.toBe(initialAngle);
+        .not.toBe(initialDistance);
       await page.evaluate(() => document.fonts.ready);
       await page.screenshot({
         path: testInfo.outputPath(`running-${colorScheme}.png`),
@@ -78,7 +119,11 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.emulateMedia({ reducedMotion: "reduce" });
       expect(
         await active.evaluate(
-          (el) => getComputedStyle(el, "::before").animationName,
+          (el) =>
+            getComputedStyle(
+              el.querySelector(".agent-running-border")!,
+              "::before",
+            ).animationName,
         ),
       ).toBe("none");
       await expect(active.locator(".agent-running-label")).toHaveCSS(
@@ -124,7 +169,9 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.emulateMedia({ forcedColors: "active" });
       expect(
         await active.evaluate(
-          (el) => getComputedStyle(el, "::before").borderTopStyle,
+          (el) =>
+            getComputedStyle(el.querySelector(".agent-running-border")!)
+              .borderTopStyle,
         ),
       ).toBe("solid");
       await expect(active.locator(".agent-running-label")).toHaveCSS(
@@ -135,7 +182,11 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.emulateMedia({ reducedMotion: "no-preference" });
       expect(
         await active.evaluate(
-          (el) => getComputedStyle(el, "::before").animationName,
+          (el) =>
+            getComputedStyle(
+              el.querySelector(".agent-running-border")!,
+              "::before",
+            ).animationName,
         ),
       ).toBe("agent-border-beam");
     });

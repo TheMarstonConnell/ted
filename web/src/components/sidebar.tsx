@@ -82,8 +82,8 @@ export function AgentLink({ agent }: { agent: Agent }) {
     >
       <div className={sidebarRowClass}>
         <Button
-          variant={selected ? "default" : "ghost"}
-          className={`h-auto min-w-0 flex-1 justify-start py-2 font-normal ${running ? "agent-running" : ""}`}
+          variant="ghost"
+          className={`h-auto min-w-0 flex-1 justify-start py-2 font-normal text-foreground ${selected ? "shadow-sm bg-sidebar-selected hover:bg-sidebar-selected dark:hover:bg-sidebar-selected" : ""} ${running ? "agent-running" : ""}`}
           render={
             <Link
               to={`/agents/${encodeURIComponent(agent.id)}`}
@@ -92,6 +92,9 @@ export function AgentLink({ agent }: { agent: Agent }) {
             />
           }
         >
+          {running && (
+            <span className="agent-running-border" aria-hidden="true" />
+          )}
           <span className="min-w-0 flex-1 text-left">
             <span className="flex items-center gap-2">
               <span
@@ -101,7 +104,7 @@ export function AgentLink({ agent }: { agent: Agent }) {
               </span>
               {!agent.settled && (agent.held || agent.state !== "idle") && (
                 <span
-                  className={`shrink-0 text-xs font-medium ${running ? "agent-running-label" : ""} ${selected ? "text-primary-foreground" : "text-foreground"}`}
+                  className={`shrink-0 text-xs font-medium ${running ? "agent-running-label" : ""} text-foreground`}
                 >
                   {agent.held
                     ? "Held"
@@ -112,7 +115,7 @@ export function AgentLink({ agent }: { agent: Agent }) {
               )}
             </span>
             <span
-              className={`flex min-w-0 items-center gap-2 text-xs ${selected ? "text-primary-foreground/80" : "text-muted-foreground"}`}
+              className={`flex min-w-0 items-center gap-2 text-xs ${selected ? "text-foreground" : "text-muted-foreground"}`}
               title={branchLabel}
             >
               {branch && (
@@ -207,7 +210,7 @@ function SidebarContent() {
                 render={
                   <Button
                     variant="ghost"
-                    className="group min-w-0 flex-1 justify-start font-semibold"
+                    className="group min-w-0 flex-1 justify-start shadow-sm bg-sidebar-heading aria-expanded:bg-sidebar-heading font-semibold hover:bg-sidebar-heading dark:hover:bg-sidebar-heading"
                   />
                 }
               >
