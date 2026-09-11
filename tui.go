@@ -480,6 +480,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case gitBranchMsg:
 		m.gitBranch = string(msg)
 		return m, scheduleGitBranchRefresh()
+	case remoteGitStatusMsg:
+		m.gitBranch = msg.branch
+		if msg.directory != "" {
+			m.directory = msg.directory
+		}
+		return m, scheduleGitBranchRefresh()
 	case gitBranchRefreshMsg:
 		return m, m.readBranch()
 	case spinner.TickMsg:
@@ -532,6 +538,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case remoteStateMsg:
 		wasBusy := m.busy
 		m.busy = bool(msg)
+		if directory := m.agent.WorkingDir(); directory != "" {
+			m.directory = directory
+		}
 		m.refreshTranscript()
 		if m.busy && !wasBusy {
 			m.workingSpinner = spinner.New(spinner.WithSpinner(spinner.Line))

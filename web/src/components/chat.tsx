@@ -15,7 +15,6 @@ import {
   Archive,
   ArrowUp,
   ChevronRight,
-  GitBranch,
   LoaderCircle,
   Menu,
   Play,
@@ -53,13 +52,23 @@ import {
 import { cn, toolCommand } from "@/lib/utils";
 import {
   agentTitle,
+  agentWorkspace,
+  projectWorkspaceDefaults,
   requestKey,
   type Agent,
   type QueueMessage,
+  type WorkspaceSelection,
 } from "@/lib/api";
 import { control, useControl, type TranscriptItem } from "@/lib/store";
 import { ErrorNotice, Loading, ModelFields } from "./common";
 import { ChatImage } from "./chat-image";
+import {
+  WorkspaceFields,
+  WorkspaceIndicator,
+  WorkspaceSetupBlock,
+  WorkspaceBranch,
+  FooterSeparator,
+} from "./workspace";
 
 // Intentionally ephemeral: agent switches retain drafts, a reload does not.
 const drafts = new Map<string, string>();
@@ -377,6 +386,30 @@ function ChatWorkspace() {
   const queue = agent?.queue || [];
   const pending = queue.filter((m) => m.status === "pending");
   const running = queue.find((m) => m.status === "running");
+  const workspace = agent ? agentWorkspace(agent) : undefined;
+  const workspaceSelection: WorkspaceSelection = workspace
+    ? {
+        mode: workspace.mode,
+        ...(workspace.base_branch
+          ? { base_branch: workspace.base_branch }
+          : {}),
+      }
+    : (project && projectWorkspaceDefaults(project)) || {
+        mode: "current_checkout",
+      };
+  // workspace is always returned by current servers. Queue inference keeps older
+  // optional fixtures safely locked after their first message.
+  const workspaceLocked = workspace?.locked ?? queue.length > 0;
+  const workspaceBlocked =
+    workspace?.status === "fetching" ||
+    workspace?.status === "creating" ||
+    workspace?.status === "failed";
+  // Local uses live project metadata; a worktree must never borrow the
+  // original checkout's branch (including while setup has not completed).
+  const gitBranch =
+    workspaceSelection.mode === "worktree"
+      ? workspace?.branch
+      : project?.git_branch;
   const context = agent?.context_usage;
   const contextPercent =
     context && context.context_window > 0
@@ -436,7 +469,7 @@ function ChatWorkspace() {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const original = drafts.get(agentId) || "";
-    if (!original.trim() || busy) return;
+    if (!original.trim() || busy || workspaceBlocked) return;
     void action(async () => {
       const trimmed = original.trim();
       if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
@@ -581,6 +614,9 @@ function ChatWorkspace() {
         <div className="workspace-scroll-gutter scrollbar-thin shrink-0 overflow-y-auto">
           <div className="mx-auto w-full max-w-chat space-y-4 px-4 pb-4 pt-2 md:px-8">
             <ErrorNotice error={error} />
+            {workspace && workspace.status !== "draft" && (
+              <WorkspaceSetupBlock workspace={workspace} />
+            )}
             {notice && (
               <Alert>
                 <AlertDescription>{notice}</AlertDescription>
@@ -677,7 +713,9 @@ function ChatWorkspace() {
                   >
                     <ModelFields
                       compact
-                      disabled={busy || !ready || status !== "live"}
+                      disabled={
+                        busy || !ready || status !== "live" || workspaceBlocked
+                      }
                       model={agent.settings.model}
                       effort={agent.settings.effort}
                       onChange={(model, effort) =>
@@ -699,7 +737,12 @@ function ChatWorkspace() {
                         variant="ghost"
                         aria-label="Continue"
                         title="Continue queued work"
-                        disabled={busy || !ready || status !== "live"}
+                        disabled={
+                          busy ||
+                          !ready ||
+                          status !== "live" ||
+                          workspaceBlocked
+                        }
                         onClick={() =>
                           void action(() => control.continue(agentId))
                         }
@@ -726,7 +769,9 @@ function ChatWorkspace() {
                     )}
                     <SendMessageButton
                       agentId={agentId}
-                      disabled={busy || !ready || status !== "live"}
+                      disabled={
+                        busy || !ready || status !== "live" || workspaceBlocked
+                      }
                     />
                   </div>
                 </InputGroupAddon>
@@ -735,37 +780,46 @@ function ChatWorkspace() {
             <div
               role="group"
               aria-label="Composer footer"
-              className="flex min-w-0 items-center gap-4 border-x border-transparent px-4 md:px-inset"
+              className="flex min-w-0 items-center gap-2 border-x border-transparent px-4 md:gap-4 md:px-inset"
             >
               {project && (
                 <div
                   role="group"
                   aria-label="Project location"
-                  className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground"
+                  className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 font-mono text-xs text-muted-foreground md:gap-x-4"
                 >
-                  <span
-                    className="hidden min-w-0 max-w-full truncate font-mono md:inline"
-                    title={project.root}
-                  >
-                    {project.root}
-                  </span>
-                  {project.git_branch && (
-                    <span
-                      className="flex min-w-0 max-w-full items-center gap-2"
-                      title={project.git_branch}
-                    >
-                      <GitBranch
-                        className="size-3 shrink-0"
-                        aria-hidden="true"
+                  {workspaceLocked ? (
+                    <>
+                      <WorkspaceIndicator
+                        workspace={
+                          workspace || {
+                            mode: "current_checkout",
+                            locked: true,
+                            status: "ready",
+                          }
+                        }
+                        fallbackPath={project.root}
                       />
-                      <span className="truncate font-mono">
-                        {project.git_branch}
-                      </span>
-                    </span>
+                      {gitBranch && <WorkspaceBranch branch={gitBranch} />}
+                    </>
+                  ) : (
+                    <WorkspaceFields
+                      compact
+                      gitBranch={project.git_branch}
+                      projectId={project.id}
+                      value={workspaceSelection}
+                      disabled={busy || !ready || status !== "live"}
+                      onChange={(selection) =>
+                        void action(() =>
+                          control.updateWorkspace(agentId, selection),
+                        )
+                      }
+                    />
                   )}
                 </div>
               )}
-              <div className="ml-auto flex shrink-0 items-center gap-2">
+              {project && <FooterSeparator />}
+              <div className="ml-auto flex shrink-0 items-center gap-2 md:gap-4">
                 <span
                   data-slot="context-usage"
                   className="font-mono text-xs text-muted-foreground"
@@ -776,6 +830,7 @@ function ChatWorkspace() {
                   </span>
                   <span className="md:hidden">{contextPercent}%</span>
                 </span>
+                <FooterSeparator className="md:hidden" />
                 <Button
                   type="button"
                   variant="ghost"

@@ -23,7 +23,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { groupAgents, agentTitle, type Agent } from "@/lib/api";
+import { groupAgents, agentTitle, agentWorkspace, type Agent } from "@/lib/api";
 import { control, useControl } from "@/lib/store";
 import { usePanel } from "@/lib/navigation";
 import { ErrorNotice } from "@/components/common";
@@ -39,7 +39,22 @@ export function AgentLink({ agent }: { agent: Agent }) {
   const { agentId } = useParams();
   const { projects, status } = useControl();
   const project = projects.find((p) => p.id === agent.project_id);
-  const branch = project?.git_branch;
+  const workspace = agentWorkspace(agent);
+  const isWorktree = workspace?.mode === "worktree";
+  const branch = isWorktree ? workspace.branch : project?.git_branch;
+  const branchLabel = branch
+    ? branch
+    : isWorktree
+      ? workspace.locked
+        ? workspace.status === "failed"
+          ? "Workspace failed"
+          : "Workspace setting up"
+        : workspace.base_branch
+          ? `Start from ${workspace.base_branch}`
+          : "Worktree not started"
+      : project
+        ? "Branch unavailable"
+        : "No project";
   const title = agentTitle(agent);
   const selected = agentId === agent.id;
   const running = !agent.settled && !agent.held && agent.state === "running";
@@ -98,14 +113,12 @@ export function AgentLink({ agent }: { agent: Agent }) {
             </span>
             <span
               className={`flex min-w-0 items-center gap-2 text-xs ${selected ? "text-primary-foreground/80" : "text-muted-foreground"}`}
-              title={branch || undefined}
+              title={branchLabel}
             >
               {branch && (
                 <GitBranch className="size-3 shrink-0" aria-hidden="true" />
               )}
-              <span className="truncate font-mono">
-                {branch || (project ? "Branch unavailable" : "No project")}
-              </span>
+              <span className="truncate font-mono">{branchLabel}</span>
             </span>
             <span className="sr-only">
               {agent.settled ? "Settled" : agent.state}

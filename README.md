@@ -32,7 +32,7 @@ its port can run agents with the server user's filesystem and shell permissions.
 Use a trusted network/firewall or an authenticated TLS reverse proxy. Project
 paths and provider credentials belong to the server machine.
 
-See [control-plane behavior](docs/control-plane.md), the
+See [control-plane behavior](docs/control-plane.md), [chat workspaces](docs/workspaces.md), the
 [OpenAPI contract](api/openapi.yaml), and the [WebSocket protocol](api/websocket.md).
 
 To automatically send an initial user message when the TUI starts:

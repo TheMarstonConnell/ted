@@ -22,12 +22,34 @@ type Settings struct {
 	Model  string `json:"model"`
 	Effort string `json:"effort"`
 }
+
+// WorkspaceSelection is a draft agent's requested execution location. An
+// omitted selection on create means the project's workspace defaults apply.
+type WorkspaceSelection struct {
+	Mode       string `json:"mode"`
+	BaseBranch string `json:"base_branch,omitempty"`
+}
+
+// Workspace is the server-owned, durable workspace state for an agent.
+type Workspace struct {
+	WorkspaceSelection
+	Locked bool   `json:"locked"`
+	Status string `json:"status"`
+	Path   string `json:"path,omitempty"`
+	// Branch is the generated worktree creation branch, not live Git status
+	// after arbitrary branch changes inside the workspace.
+	Branch     string `json:"branch,omitempty"`
+	BaseCommit string `json:"base_commit,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
 type Project struct {
-	GitBranch string   `json:"git_branch,omitempty"`
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Root      string   `json:"root"`
-	Defaults  Settings `json:"defaults"`
+	WorkspaceDefaults WorkspaceSelection `json:"workspace_defaults"`
+	GitBranch         string             `json:"git_branch,omitempty"`
+	ID                string             `json:"id"`
+	Name              string             `json:"name"`
+	Root              string             `json:"root"`
+	Defaults          Settings           `json:"defaults"`
 }
 type QueuedMessage struct {
 	ID     string `json:"id"`
@@ -36,6 +58,7 @@ type QueuedMessage struct {
 	Error  string `json:"error,omitempty"`
 }
 type Snapshot struct {
+	Workspace    Workspace          `json:"workspace"`
 	Title        string             `json:"title"`
 	ContextUsage agent.ContextUsage `json:"context_usage"`
 	ID           string             `json:"id"`
@@ -125,9 +148,16 @@ func (c *Client) Projects(ctx context.Context) ([]Project, error) {
 	err := c.request(ctx, "GET", "/v1/projects", nil, &result, "")
 	return result, err
 }
-func (c *Client) CreateProject(ctx context.Context, name, root string, defaults Settings) (Project, error) {
+func (c *Client) CreateProject(ctx context.Context, name, root string, defaults Settings, workspace ...WorkspaceSelection) (Project, error) {
+	if len(workspace) > 1 {
+		return Project{}, fmt.Errorf("only one workspace default may be specified")
+	}
+	body := map[string]any{"name": name, "root": root, "defaults": defaults}
+	if len(workspace) > 0 {
+		body["workspace_defaults"] = workspace[0]
+	}
 	var result Project
-	err := c.request(ctx, "POST", "/v1/projects", map[string]any{"name": name, "root": root, "defaults": defaults}, &result, "")
+	err := c.request(ctx, "POST", "/v1/projects", body, &result, "")
 	return result, err
 }
 func (c *Client) Project(ctx context.Context, id string) (Project, error) {
@@ -149,9 +179,25 @@ func (c *Client) GetAgent(ctx context.Context, id string) (Snapshot, error) {
 	err := c.request(ctx, "GET", agentPath(id), nil, &result, "")
 	return result, err
 }
-func (c *Client) CreateAgent(ctx context.Context, project string) (Snapshot, error) {
+func (c *Client) CreateAgent(ctx context.Context, project string, workspace ...WorkspaceSelection) (Snapshot, error) {
+	if len(workspace) > 1 {
+		return Snapshot{}, fmt.Errorf("only one workspace selection may be specified")
+	}
+	body := map[string]any{"project_id": project}
+	if len(workspace) > 0 {
+		body["workspace"] = workspace[0]
+	}
 	var result Snapshot
-	err := c.request(ctx, "POST", "/v1/agents", map[string]string{"project_id": project}, &result, newKey())
+	err := c.request(ctx, "POST", "/v1/agents", body, &result, newKey())
+	return result, err
+}
+
+// PatchAgentWorkspace changes an unlocked draft agent's workspace selection.
+// Creation callers should normally pass the selection to CreateAgent so there
+// is no intermediate agent with a different selection.
+func (c *Client) PatchAgentWorkspace(ctx context.Context, id string, workspace WorkspaceSelection) (Snapshot, error) {
+	var result Snapshot
+	err := c.request(ctx, "PATCH", agentPath(id)+"/workspace", workspace, &result, "")
 	return result, err
 }
 func (c *Client) Models(ctx context.Context) ([]agent.ModelInfo, error) {
