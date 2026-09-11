@@ -79,6 +79,18 @@ for (const colorScheme of ["light", "dark"] as const) {
       ).not.toBe(
         await other.evaluate((el) => getComputedStyle(el).backgroundColor),
       );
+      const selectedBackground =
+        colorScheme === "light" ? "oklch(0.85 0 0)" : "oklch(0.38 0 0)";
+      const headingBackground =
+        colorScheme === "light" ? "oklch(0.92 0 0)" : "oklch(0.29 0 0)";
+      await expect(active).toHaveCSS("background-color", selectedBackground);
+      await active.hover();
+      await expect(active).toHaveCSS("background-color", selectedBackground);
+      const heading = page.locator('[data-project-id="p"] button').first();
+      await expect(heading).toHaveCSS("background-color", headingBackground);
+      await heading.hover();
+      await expect(heading).toHaveCSS("background-color", headingBackground);
+      await page.mouse.move(500, 500);
       const initialDistance = await active.evaluate((el) =>
         getComputedStyle(
           el.querySelector(".agent-running-border")!,
