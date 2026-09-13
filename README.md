@@ -478,3 +478,9 @@ needed. Both model providers reject serialized requests larger than **8 MiB**
 locally, with guidance to reduce content or start a fresh conversation. This is
 a harness safety budget, not a guarantee of a provider's limit; history is not
 automatically compacted.
+
+## Contributing
+
+See [coding standards](CODING_STANDARDS.md) for style and validation commands.
+The [Codex reviewer setup](.github/codex/README.md) documents hosted-runner
+authentication, enablement, and the automated review trust boundary.

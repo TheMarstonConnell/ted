@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "findings"],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A concise Markdown overview beginning with a ## Minimalism section."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Unnecessary structure worth flagging inline.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["finding_id", "path", "line", "axis", "severity", "body"],
+        "properties": {
+          "finding_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Stable defect identity in the form minimalism:stable-subject:short-structure-slug, independent of the current path. Reuse an earlier matching ID for the same issue across prose, path, symbol, or line changes."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Repository-relative path exactly as it appears in the diff."
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Line in the new file version that appears in a PR diff hunk."
+          },
+          "axis": { "type": "string", "enum": ["minimalism"] },
+          "severity": { "type": "string", "enum": ["suggestion"] },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A self-contained comment naming what to remove, the smaller implementation, and why behavior remains equivalent."
+          }
+        }
+      }
+    }
+  }
+}
