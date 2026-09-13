@@ -152,7 +152,7 @@ export default function App() {
         <Route
           path="*"
           element={
-            <div className="p-12">
+            <div className="h-dvh overflow-y-auto p-12">
               <h1 className="text-xl">Page not found</h1>
               <Link className="text-primary" to="/">
                 Back to workspace
