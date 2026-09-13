@@ -1,0 +1,467 @@
+name: Codex review
+
+on:
+  # Run the workflow definition from the trusted base branch. The PR head is
+  # data to inspect, never workflow code to execute with write permissions.
+  pull_request_target:
+    branches: [main]
+    # `edited` is here because the PR body is the Spec axis's source: a
+    # description rewritten without a push changes the requirements under
+    # review. The concurrency group cancels superseded runs, so a burst of
+    # edits costs one review.
+    # Draft conversion and closure start a run only to cancel an in-flight
+    # review in this PR's concurrency group; the job condition skips them.
+    types: [opened, synchronize, reopened, ready_for_review, edited, converted_to_draft, closed]
+  # A base-branch advance changes every open PR's diff without creating a PR
+  # activity. Fan those PRs into trusted, per-PR workflow-dispatch runs.
+  push:
+    branches: [main]
+  # Linked issue text is review input for the Spec axis. Re-run only PRs that
+  # reference an issue when its requirements change or disappear without a
+  # PR event.
+  issues:
+    types: [opened, edited, transferred, deleted]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Open main PR to review
+        required: true
+        type: string
+
+concurrency:
+  group: codex-review-${{ github.event.pull_request.number || inputs.pr_number || (github.event_name == 'issues' && format('issue-{0}', github.event.issue.number)) || 'base-fanout' }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  schedule-context-updated-reviews:
+    if: ${{ (github.event_name == 'push' || github.event_name == 'issues') && vars.CODEX_REVIEW_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out trusted scheduler
+        uses: actions/checkout@v5
+        with:
+          # Keep issue-triggered scheduling pinned to the allowed PR base.
+          ref: ${{ github.event_name == 'issues' && 'main' || github.sha }}
+          persist-credentials: false
+          path: trusted
+
+      - name: Schedule each open main PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              ...context.repo,
+              state: 'open',
+              base: 'main',
+              per_page: 100,
+            });
+            const eligible = pulls.filter((pr) =>
+              !pr.draft && pr.head.repo?.full_name ===
+                `${context.repo.owner}/${context.repo.repo}`
+            );
+            let selected = eligible;
+            if (context.eventName === 'issues') {
+              const { selectIssuePullRequests } = require(
+                `${process.env.GITHUB_WORKSPACE}/trusted/.github/codex/specification.cjs`);
+              selected = await selectIssuePullRequests({
+                github, repo: context.repo, pulls: eligible,
+                issueNumber: context.payload.issue.number, core,
+              });
+            }
+            for (const pr of selected) {
+              await github.rest.actions.createWorkflowDispatch({
+                ...context.repo,
+                workflow_id: 'codex-review.yml',
+                ref: 'main',
+                inputs: { pr_number: String(pr.number) },
+              });
+            }
+            core.info(`Scheduled ${selected.length} PR review(s)`);
+
+  review:
+    if: ${{ vars.CODEX_REVIEW_ENABLED == 'true' && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main' && !github.event.pull_request.draft && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      # GitHub files pull requests under the code-bearing surface, so resolving
+      # a review thread requires contents write too.
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      TRUSTED_CODEX_DIR: ${{ github.workspace }}/trusted/.github/codex
+      PR_CHECKOUT_DIR: ${{ github.workspace }}/pull-request
+    steps:
+      - name: Resolve and validate review target
+        id: target
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          TARGET_PR_FILE: ${{ runner.temp }}/codex-review-target-${{ github.run_id }}-${{ github.run_attempt }}.json
+        with:
+          script: |
+            const fs = require('fs');
+            if (!/^[1-9][0-9]*$/.test(process.env.PR_NUMBER || '')) {
+              throw new Error('pr_number must be a positive integer');
+            }
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            const slug = `${context.repo.owner}/${context.repo.repo}`;
+            if (pr.state !== 'open' || pr.draft || pr.base.ref !== 'main' ||
+                pr.head.repo?.full_name !== slug) {
+              throw new Error(
+                `PR #${pr.number} is not an open, same-repo main PR`
+              );
+            }
+            fs.writeFileSync(process.env.TARGET_PR_FILE,
+              `${JSON.stringify(pr)}\n`, { mode: 0o600 });
+            core.exportVariable('TARGET_PR_FILE', process.env.TARGET_PR_FILE);
+            core.setOutput('number', String(pr.number));
+            core.setOutput('head-repo', pr.head.repo.full_name);
+            core.setOutput('head-sha', pr.head.sha);
+            core.setOutput('base-sha', pr.base.sha);
+
+      # github.sha is the base-branch commit this workflow definition came
+      # from, so the helpers, prompts, and schemas match it. The PR's recorded
+      # base SHA can be months old and predate .github/codex entirely.
+      - name: Check out trusted reviewer
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: trusted
+
+      - name: Check out pull request for inspection
+        uses: actions/checkout@v5
+        with:
+          # Keep untrusted PR files separate from the workflow-controlled
+          # helpers, prompts, and schemas in the base-SHA checkout above.
+          repository: ${{ steps.target.outputs.head-repo }}
+          ref: ${{ steps.target.outputs.head-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: pull-request
+
+      - name: Initialize run-scoped review context
+        env:
+          REVIEW_CONTEXT_DIR: ${{ runner.temp }}/codex-review-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          install -d -m 700 "${REVIEW_CONTEXT_DIR}"
+          install -m 600 "${TARGET_PR_FILE}" \
+            "${REVIEW_CONTEXT_DIR}/pull-request.json"
+          find "${TARGET_PR_FILE}" -delete
+          printf '[]\n' > "${REVIEW_CONTEXT_DIR}/threads.json"
+          echo "CTX_DIR=${REVIEW_CONTEXT_DIR}" >> "${GITHUB_ENV}"
+
+      - name: Gather spec context (PR body + linked issues)
+        id: gather_spec
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { captureSpecification } = require(
+              `${process.env.TRUSTED_CODEX_DIR}/specification.cjs`);
+            const dir = process.env.CTX_DIR;
+            const pr = JSON.parse(
+              fs.readFileSync(`${dir}/pull-request.json`, 'utf8'));
+            await captureSpecification({ github, repo: context.repo, pr, dir });
+
+      - name: Build review prompts
+        env:
+          PR_NUMBER: ${{ steps.target.outputs.number }}
+          BASE_SHA: ${{ steps.target.outputs.base-sha }}
+        run: |
+          write_header() {
+            echo "Review pull request #${PR_NUMBER} of this repository."
+            echo
+            echo "The fixed point is ${BASE_SHA}."
+            echo "Context files:"
+            echo "- ${CTX_DIR}/pr.md (PR title and description)"
+            echo "- ${CTX_DIR}/issues.md (linked issues; may be empty)"
+            echo "- ${CTX_DIR}/threads.json (prior open findings; may be empty)"
+            echo
+          }
+          {
+            write_header
+            cat "${TRUSTED_CODEX_DIR}/review-prompt.md"
+            echo
+            echo "## Trusted review process"
+            cat "${TRUSTED_CODEX_DIR}/code-review-skill.md"
+            echo
+            echo "## Trusted Ted review guide"
+            cat "${TRUSTED_CODEX_DIR}/ted-review-guide.md"
+          } > "${CTX_DIR}/prompt.md"
+          {
+            write_header
+            cat "${TRUSTED_CODEX_DIR}/minimalism-review-prompt.md"
+            echo
+            echo "## Trusted Ted review guide"
+            cat "${TRUSTED_CODEX_DIR}/ted-review-guide.md"
+          } > "${CTX_DIR}/minimalism-prompt.md"
+
+      # Codex auth comes from the CODEX_AUTH_JSON repo secret (a `codex login`
+      # subscription auth.json), restored into a run-scoped CODEX_HOME below.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      # Ubuntu 24.04 (ubuntu-latest) sets
+      # kernel.apparmor_restrict_unprivileged_userns=1 and ships no AppArmor
+      # profile for bubblewrap, so a user namespace created by bwrap gets no
+      # capabilities and the Codex sandbox dies while configuring loopback:
+      #   bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted
+      # The runner is ephemeral and single-tenant, so lift the restriction for
+      # this VM. Codex still runs read-only with networking disabled inside
+      # bwrap. The smoke test fails the job here rather than letting Codex
+      # post an empty review from a sandbox that never started.
+      - name: Allow unprivileged user namespaces for the Codex sandbox
+        run: |
+          if [[ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          bwrap --version
+          bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev /bin/true
+
+      - name: Install reviewed Codex artifact
+        env:
+          CODEX_VERSION: 0.152.1
+          CODEX_PACKAGE_INTEGRITY: sha512-dSwQzl6JgsFe8L9i8xUnwRz9Vy8gn4UvXFU9xq2IJ1eC7zsSttqQ2SGq49ZZIjEyZQ0LZjCs6Bvtxort2Iyebg==
+          CODEX_BINARY_INTEGRITY: sha512-ar59rr3CX5j4MLMnRcHqcE0eHZPsZlmXlz37ZS2yP3BsV5pNhO+wFXTOzXFdaYmg2cALX7a3Eqv+vB2jQlXnjQ==
+          CODEX_INSTALL_ROOT: ${{ runner.temp }}/codex-cli-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          install -d -m 700 "${CODEX_INSTALL_ROOT}/artifacts"
+          export npm_config_cache="${CODEX_INSTALL_ROOT}/npm-cache"
+          cd "${CODEX_INSTALL_ROOT}/artifacts"
+
+          verify_pack() {
+            local package_spec="$1"
+            local expected_integrity="$2"
+            local expected_filename="$3"
+            local result actual_integrity actual_filename
+            result="$(npm pack "${package_spec}" --ignore-scripts --json)"
+            actual_integrity="$(node -e '
+              const result = JSON.parse(process.argv[1]);
+              process.stdout.write(result[0].integrity);
+            ' "${result}")"
+            actual_filename="$(node -e '
+              const result = JSON.parse(process.argv[1]);
+              process.stdout.write(result[0].filename);
+            ' "${result}")"
+            if [[ "${actual_integrity}" != "${expected_integrity}" ||
+                  "${actual_filename}" != "${expected_filename}" ]]; then
+              echo "Integrity mismatch for ${package_spec}" >&2
+              return 1
+            fi
+          }
+
+          verify_pack "@openai/codex@${CODEX_VERSION}" \
+            "${CODEX_PACKAGE_INTEGRITY}" \
+            "openai-codex-${CODEX_VERSION}.tgz"
+          verify_pack "@openai/codex@${CODEX_VERSION}-linux-x64" \
+            "${CODEX_BINARY_INTEGRITY}" \
+            "openai-codex-${CODEX_VERSION}-linux-x64.tgz"
+          npm install \
+            --prefix "${CODEX_INSTALL_ROOT}" \
+            --ignore-scripts \
+            --offline \
+            --omit=optional \
+            "./openai-codex-${CODEX_VERSION}.tgz"
+          install -d -m 755 \
+            "${CODEX_INSTALL_ROOT}/node_modules/@openai/codex-linux-x64"
+          tar -xzf "openai-codex-${CODEX_VERSION}-linux-x64.tgz" \
+            -C "${CODEX_INSTALL_ROOT}/node_modules/@openai/codex-linux-x64" \
+            --strip-components=1
+          node -e '
+            const root = require(process.argv[1]);
+            const binary = require(process.argv[2]);
+            if (root.version !== process.argv[3] ||
+                binary.version !== `${process.argv[3]}-linux-x64`) process.exit(1);
+          ' "${CODEX_INSTALL_ROOT}/node_modules/@openai/codex/package.json" \
+            "${CODEX_INSTALL_ROOT}/node_modules/@openai/codex-linux-x64/package.json" \
+            "${CODEX_VERSION}"
+          find "${CODEX_INSTALL_ROOT}/artifacts" -mindepth 1 -delete
+          rmdir "${CODEX_INSTALL_ROOT}/artifacts"
+          find "${CODEX_INSTALL_ROOT}/npm-cache" -mindepth 1 -delete
+          rmdir "${CODEX_INSTALL_ROOT}/npm-cache"
+
+      - name: Isolate Codex credentials and permissions
+        env:
+          REVIEW_CODEX_HOME: ${{ runner.temp }}/codex-review-home-${{ github.run_id }}-${{ github.run_attempt }}
+          CODEX_PACKAGE_ROOT: ${{ runner.temp }}/codex-cli-${{ github.run_id }}-${{ github.run_attempt }}/node_modules
+          PR_DIR: ${{ github.workspace }}/pull-request
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          CODEX_PACKAGE="${CODEX_PACKAGE_ROOT}"
+          export CODEX_PACKAGE
+          echo "CODEX_HOME=${REVIEW_CODEX_HOME}" >> "${GITHUB_ENV}"
+          echo "HOME=${REVIEW_CODEX_HOME}" >> "${GITHUB_ENV}"
+          install -d -m 700 "${REVIEW_CODEX_HOME}"
+          if [[ -n "${CODEX_AUTH_JSON:-}" ]]; then
+            # GitHub-hosted runners have no persistent Codex login, so restore
+            # the subscription auth from the CODEX_AUTH_JSON repo secret.
+            # printenv avoids shell expansion of the JSON payload.
+            printenv CODEX_AUTH_JSON > "${REVIEW_CODEX_HOME}/auth.json"
+            chmod 600 "${REVIEW_CODEX_HOME}/auth.json"
+          else
+            echo "::error::Set the CODEX_AUTH_JSON repository secret from a Codex subscription login before enabling reviews."
+            exit 1
+          fi
+          install -m 600 "${TRUSTED_CODEX_DIR}/ci-config.toml" \
+            "${REVIEW_CODEX_HOME}/config.toml"
+          node -e '
+            const fs = require("fs");
+            const quotedPath = JSON.stringify(process.env.PR_DIR);
+            const roots = [
+              process.env.CTX_DIR,
+              process.env.REVIEW_CODEX_HOME,
+              process.env.CODEX_PACKAGE,
+            ];
+            fs.appendFileSync(
+              `${process.env.REVIEW_CODEX_HOME}/config.toml`,
+              `\n[permissions.ci-review.workspace_roots]\n` +
+                roots.map((path) => `${JSON.stringify(path)} = true`).join("\n") +
+                `\n` +
+                `\n[projects.${quotedPath}]\ntrust_level = "untrusted"\n`,
+            );
+          '
+
+      # Failure to clean up old comments must never prevent a fresh review.
+      - name: Gather open review threads
+        id: gather_threads
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const gather = require(`${process.env.TRUSTED_CODEX_DIR}/gather-threads.cjs`);
+            await gather({ github, context, core });
+
+      - name: Judge open threads against the current tree
+        id: judge_threads
+        if: ${{ steps.gather_threads.outcome == 'success' && steps.gather_threads.outputs.count != '0' }}
+        continue-on-error: true
+        working-directory: ${{ env.PR_CHECKOUT_DIR }}
+        env:
+          CODEX_BIN: ${{ runner.temp }}/codex-cli-${{ github.run_id }}-${{ github.run_attempt }}/node_modules/.bin/codex
+        run: |
+          {
+            echo "Open review threads are listed in ${CTX_DIR}/threads.json."
+            echo "The current PR specification is in ${CTX_DIR}/pr.md."
+            echo "Current linked-issue specifications are in ${CTX_DIR}/issues.md."
+            echo
+            cat "${TRUSTED_CODEX_DIR}/resolve-prompt.md"
+          } > "${CTX_DIR}/resolve-prompt-full.md"
+          "${CODEX_BIN}" exec \
+            --ephemeral \
+            --strict-config \
+            --model gpt-5.6-sol \
+            -c model_reasoning_effort=medium \
+            --output-schema "${TRUSTED_CODEX_DIR}/resolve-schema.json" \
+            --output-last-message "${CTX_DIR}/resolutions.json" \
+            - < "${CTX_DIR}/resolve-prompt-full.md"
+
+      - name: Resolve addressed threads
+        if: ${{ steps.judge_threads.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const resolve = require(`${process.env.TRUSTED_CODEX_DIR}/resolve-threads.cjs`);
+            await resolve({ github, context, core });
+
+      # Codex receives no GitHub token and runs in a read-only, network-isolated
+      # sandbox. Only the github-script steps may mutate pull-request state.
+      - name: Run Codex review
+        id: codex_review
+        continue-on-error: true
+        timeout-minutes: 20
+        working-directory: ${{ env.PR_CHECKOUT_DIR }}
+        env:
+          CODEX_BIN: ${{ runner.temp }}/codex-cli-${{ github.run_id }}-${{ github.run_attempt }}/node_modules/.bin/codex
+        run: |
+          "${CODEX_BIN}" exec \
+            --ephemeral \
+            --strict-config \
+            --model gpt-5.6-sol \
+            -c model_reasoning_effort=xhigh \
+            --output-schema "${TRUSTED_CODEX_DIR}/review-schema.json" \
+            --output-last-message "${CTX_DIR}/review.json" \
+            - < "${CTX_DIR}/prompt.md"
+
+      - name: Post Codex review
+        if: ${{ always() && steps.target.outcome == 'success' }}
+        uses: actions/github-script@v7
+        env:
+          REVIEW_COMMAND_OUTCOME: ${{ steps.codex_review.outcome }}
+        with:
+          script: |
+            process.env.REVIEW_FILE = `${process.env.CTX_DIR}/review.json`;
+            const post = require(`${process.env.TRUSTED_CODEX_DIR}/post-review.cjs`);
+            await post({ github, context, core });
+
+      - name: Run minimalism review
+        id: minimalism_review
+        continue-on-error: true
+        timeout-minutes: 20
+        working-directory: ${{ env.PR_CHECKOUT_DIR }}
+        env:
+          CODEX_BIN: ${{ runner.temp }}/codex-cli-${{ github.run_id }}-${{ github.run_attempt }}/node_modules/.bin/codex
+        run: |
+          "${CODEX_BIN}" exec \
+            --ephemeral \
+            --strict-config \
+            --model gpt-5.6-sol \
+            -c model_reasoning_effort=xhigh \
+            --output-schema "${TRUSTED_CODEX_DIR}/minimalism-review-schema.json" \
+            --output-last-message "${CTX_DIR}/minimalism-review.json" \
+            - < "${CTX_DIR}/minimalism-prompt.md"
+
+      - name: Post minimalism review
+        if: ${{ always() && steps.target.outcome == 'success' }}
+        uses: actions/github-script@v7
+        env:
+          REVIEW_KIND: minimalism
+          REVIEW_COMMAND_OUTCOME: ${{ steps.minimalism_review.outcome }}
+        with:
+          script: |
+            process.env.REVIEW_FILE = `${process.env.CTX_DIR}/minimalism-review.json`;
+            const post = require(`${process.env.TRUSTED_CODEX_DIR}/post-review.cjs`);
+            await post({ github, context, core });
+
+      - name: Fail unsuccessful review commands
+        if: ${{ steps.codex_review.outcome == 'failure' || steps.minimalism_review.outcome == 'failure' }}
+        run: exit 1
+
+      - name: Clean up run-scoped review context
+        if: ${{ always() }}
+        env:
+          EXPECTED_CODEX_HOME: ${{ runner.temp }}/codex-review-home-${{ github.run_id }}-${{ github.run_attempt }}
+          EXPECTED_CONTEXT_DIR: ${{ runner.temp }}/codex-review-${{ github.run_id }}-${{ github.run_attempt }}
+          EXPECTED_TARGET_PR_FILE: ${{ runner.temp }}/codex-review-target-${{ github.run_id }}-${{ github.run_attempt }}.json
+          EXPECTED_CODEX_INSTALL_ROOT: ${{ runner.temp }}/codex-cli-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          if [[ -f "${EXPECTED_TARGET_PR_FILE}" ]]; then
+            find "${EXPECTED_TARGET_PR_FILE}" -delete
+          fi
+          if [[ -d "${EXPECTED_CODEX_HOME}" ]]; then
+            find "${EXPECTED_CODEX_HOME}" -mindepth 1 -delete
+            rmdir "${EXPECTED_CODEX_HOME}"
+          fi
+          if [[ -d "${EXPECTED_CONTEXT_DIR}" ]]; then
+            find "${EXPECTED_CONTEXT_DIR}" -mindepth 1 -delete
+            rmdir "${EXPECTED_CONTEXT_DIR}"
+          fi
+          if [[ -d "${EXPECTED_CODEX_INSTALL_ROOT}" ]]; then
+            find "${EXPECTED_CODEX_INSTALL_ROOT}" -mindepth 1 -delete
+            rmdir "${EXPECTED_CODEX_INSTALL_ROOT}"
+          fi

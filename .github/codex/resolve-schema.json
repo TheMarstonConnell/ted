@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["threads"],
+  "properties": {
+    "threads": {
+      "type": "array",
+      "description": "One entry per input thread, in any order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "solved", "reason"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Thread ID copied exactly from threads.json."
+          },
+          "solved": {
+            "type": "boolean",
+            "description": "True only when the complaint no longer holds in the current tree."
+          },
+          "reason": {
+            "type": "string",
+            "description": "One short sentence of justification for the workflow log."
+          }
+        }
+      }
+    }
+  }
+}

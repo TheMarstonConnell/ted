@@ -1,0 +1,25 @@
+default_permissions = "ci-review"
+approval_policy = "never"
+project_doc_max_bytes = 0
+web_search = "disabled"
+
+[permissions.ci-review]
+description = "Read only the pull request and workflow-provided review context."
+
+[permissions.ci-review.filesystem]
+":root" = "deny"
+":minimal" = "read"
+":tmpdir" = "deny"
+":slash_tmp" = "deny"
+"~/.codex" = "deny"
+
+[permissions.ci-review.filesystem.":workspace_roots"]
+"." = "read"
+"auth.json" = "deny"
+
+[permissions.ci-review.network]
+enabled = false
+
+[shell_environment_policy]
+inherit = "core"
+ignore_default_excludes = false
