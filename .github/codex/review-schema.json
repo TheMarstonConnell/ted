@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "findings"],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The two-axis report in GitHub Markdown: Standards, Spec, and a one-line total for each axis."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Findings worth inline comments, anchored to the new side of the PR diff.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["finding_id", "path", "line", "axis", "severity", "body"],
+        "properties": {
+          "finding_id": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Stable defect identity in the form axis:stable-subject:short-rule-slug, independent of the current path. Reuse an earlier matching ID for the same defect across prose, path, symbol, or line changes."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Repository-relative path exactly as it appears in the diff."
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Line in the new file version that appears in a PR diff hunk."
+          },
+          "axis": { "type": "string", "enum": ["standards", "spec"] },
+          "severity": { "type": "string", "enum": ["blocking", "suggestion", "nit"] },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Self-contained GitHub Markdown citing the standard, spec, or contract supporting the finding."
+          }
+        }
+      }
+    }
+  }
+}
