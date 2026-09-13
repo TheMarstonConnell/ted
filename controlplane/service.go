@@ -296,13 +296,41 @@ func (s *Service) DeleteProject(id string) error {
 		return problem(404, "not_found", "project not found")
 	}
 	for _, a := range s.state.Agents {
-		if a.Agent.ProjectID == id {
-			return problem(409, "project_not_empty", "project still has agents, including settled agents")
+		if a.Agent.ProjectID == id && !a.Agent.Settled {
+			return problem(409, "project_not_empty", "project still has unsettled agents; settle all agents before deleting it")
+		}
+	}
+	// Settling cancels a turn asynchronously. Let its worker finish before
+	// removing the records it still needs to persist its final output.
+	for agentID, a := range s.state.Agents {
+		if a.Agent.ProjectID == id && s.running[agentID] != nil {
+			return problem(409, "project_not_empty", "settled agents are still stopping; try deleting the project again shortly")
 		}
 	}
 	before := copyJSON(s.state)
+	for agentID, a := range s.state.Agents {
+		if a.Agent.ProjectID == id {
+			delete(s.state.Agents, agentID)
+		}
+	}
+	for key, receipt := range s.state.Receipts {
+		if _, ok := s.state.Agents[receipt.AgentID]; !ok {
+			delete(s.state.Receipts, key)
+		}
+	}
 	delete(s.state.Projects, id)
-	return s.commitLocked(before)
+	if err := s.commitLocked(before); err != nil {
+		return err
+	}
+	for agentID, a := range before.Agents {
+		if a.Agent.ProjectID == id {
+			if instance := s.instances[agentID]; instance != nil {
+				_ = instance.Close()
+				delete(s.instances, agentID)
+			}
+		}
+	}
+	return nil
 }
 func (s *Service) Agents(includeSettled bool, projectID string) []Agent {
 	s.mu.Lock()

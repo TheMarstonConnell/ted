@@ -456,3 +456,100 @@ func TestServiceWorkspacesAndToolOutputSurviveRestart(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteProjectWithSettledAgents(t *testing.T) {
+	s, _, project, a := serviceFixture(t)
+	other, err := s.CreateProject(CreateProjectRequest{Name: "other", Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherAgent, err := s.CreateAgent(CreateAgentRequest{ProjectID: other.ID}, "other-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.CreateAgent(CreateAgentRequest{ProjectID: project.ID}, "delete-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SetSettled(a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus(t, s.DeleteProject(project.ID), 409)
+	if _, err = s.GetAgent(a.ID); err != nil {
+		t.Fatal("blocked deletion removed settled agent", err)
+	}
+	if _, err = s.SetSettled(second.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DeleteProject(project.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{a.ID, second.ID} {
+		_, err = s.GetAgent(id)
+		assertStatus(t, err, 404)
+	}
+	if _, err = s.GetAgent(otherAgent.ID); err != nil {
+		t.Fatal(err)
+	}
+	state, err := loadState(s.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Projects) != 1 || len(state.Agents) != 1 || len(state.Receipts) != 1 {
+		t.Fatalf("unexpected persisted state: %+v", state)
+	}
+	if _, err = os.Stat(project.Root); err != nil {
+		t.Fatal("project directory removed", err)
+	}
+	assertStatus(t, s.DeleteProject(project.ID), 404)
+}
+
+func TestDeleteSettledProjectRollsBackOnStorageFailure(t *testing.T) {
+	s, _, project, a := serviceFixture(t)
+	if _, err := s.SetSettled(a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.save = func(string, diskState) error { return errors.New("disk full") }
+	s.mu.Unlock()
+	assertStatus(t, s.DeleteProject(project.ID), 503)
+	if _, err := s.GetAgent(a.ID); err != nil {
+		t.Fatal("failed deletion removed agent", err)
+	}
+	if _, ok := s.state.Projects[project.ID]; !ok {
+		t.Fatal("failed deletion removed project")
+	}
+}
+
+func TestDeleteEmptyProject(t *testing.T) {
+	s, _, _, _ := serviceFixture(t)
+	p, err := s.CreateProject(CreateProjectRequest{Name: "empty", Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DeleteProject(p.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteProjectWaitsForSettledWorker(t *testing.T) {
+	s, _, project, a := serviceFixture(t)
+	if _, err := s.SetSettled(a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	// Model the interval after cancellation but before the worker finalizes.
+	s.mu.Lock()
+	s.running[a.ID] = &runningTurn{}
+	s.mu.Unlock()
+	err := s.DeleteProject(project.ID)
+	s.mu.Lock()
+	delete(s.running, a.ID)
+	s.mu.Unlock()
+	assertStatus(t, err, 409)
+	if _, err := s.GetAgent(a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteProject(project.ID); err != nil {
+		t.Fatal(err)
+	}
+}

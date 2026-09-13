@@ -329,6 +329,14 @@ export class ControlPlane {
     const projects = await api<Project[]>("/v1/projects");
     if (!this.stopped && this.generation === generation)
       this.set({
+        agents: Object.fromEntries(
+          Object.entries(this.state.agents).filter(
+            ([, agent]) =>
+              !this.state.projects.some(
+                (project) => project.id === agent.project_id,
+              ) || projects.some((project) => project.id === agent.project_id),
+          ),
+        ),
         projects: projects.map((project) => ({
           ...this.state.projects.find((p) => p.id === project.id),
           ...project,

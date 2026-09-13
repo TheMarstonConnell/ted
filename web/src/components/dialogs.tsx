@@ -252,9 +252,10 @@ function ProjectForm() {
           {confirmDelete ? (
             <div className="space-y-4">
               <p className="text-xs text-muted-foreground">
-                Delete this project? Only empty projects can be deleted,
-                including settled chats. The directory itself will not be
-                removed.
+                Are you sure you want to delete this project? This will
+                permanently delete all your settled agents in this project,
+                including their chat history. Projects with unsettled agents
+                cannot be deleted. The directory itself will not be removed.
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button

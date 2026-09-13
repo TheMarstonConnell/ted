@@ -150,7 +150,7 @@ action with an accessible label and hover title. Project creation is no longer r
   misc agents. Until a server title exists, the first queued message labels a chat.
 - **New project:** type an existing server-local directory, derive its name from
   the last path segment, and set model/effort defaults. Settings allow updating
-  defaults and deleting empty projects; deletion never removes the directory.
+  defaults and deleting projects after confirmation when all agents are settled; deletion removes their chat history but never the directory.
 - Active agents are ordered newest-created first within project groups. Misc
   agents come first. Each sidebar entry shows its project’s current Git branch on
   a second line, with a settle button on the right. Settled chats are in one
