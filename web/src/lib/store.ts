@@ -454,7 +454,7 @@ export class ControlPlane {
     const existing = requests.get(cursor);
     if (existing) return existing;
     const generation = this.generation;
-    const request = api<Agent>(`${agentPath(id)}/read`, "POST", { cursor })
+    const request = api<Agent>(agentPath(id), "PATCH", { read_cursor: cursor })
       .then((agent) => {
         if (generation === this.generation && this.state.agents[id])
           this.mergeAgent(agent);

@@ -540,23 +540,24 @@ func TestHTTPReadStatusContract(t *testing.T) {
 		t.Fatalf("agent omitted zero read_cursor: %s", data)
 	}
 	a := decodeHTTP[Agent](t, data)
-	base := "/v1/agents/" + a.ID + "/read"
+	base := "/v1/agents/" + a.ID
 	for _, body := range []string{
 		`{}`,
-		`{"cursor":-1}`,
-		`{"cursor":null}`,
-		`{"cursor":1.5}`,
-		`{"cursor":0,"unknown":true}`,
-		`{"cursor":9223372036854775808}`,
+		`{"read_cursor":-1}`,
+		`{"read_cursor":null}`,
+		`{"read_cursor":1.5}`,
+		`{"read_cursor":0,"unknown":true}`,
+		`{"read_cursor":0,"settled":false}`,
+		`{"read_cursor":9223372036854775808}`,
 	} {
-		f.request("POST", base, body, "", 400)
+		f.request("PATCH", base, body, "", 400)
 	}
-	f.request("POST", base, fmt.Sprintf(`{"cursor":%d}`, a.Cursor+1), "", 410)
-	marked := decodeHTTP[Agent](t, f.request("POST", base, fmt.Sprintf(`{"cursor":%d}`, a.Cursor), "", 200))
+	f.request("PATCH", base, fmt.Sprintf(`{"read_cursor":%d}`, a.Cursor+1), "", 410)
+	marked := decodeHTTP[Agent](t, f.request("PATCH", base, fmt.Sprintf(`{"read_cursor":%d}`, a.Cursor), "", 200))
 	if marked.ReadCursor != a.Cursor || marked.Cursor != a.Cursor+1 {
 		t.Fatalf("read response: %+v", marked)
 	}
-	duplicate := decodeHTTP[Agent](t, f.request("POST", base, `{"cursor":0}`, "", 200))
+	duplicate := decodeHTTP[Agent](t, f.request("PATCH", base, `{"read_cursor":0}`, "", 200))
 	if duplicate.ReadCursor != marked.ReadCursor || duplicate.Cursor != marked.Cursor {
 		t.Fatalf("lower read cursor was not a no-op: %+v", duplicate)
 	}

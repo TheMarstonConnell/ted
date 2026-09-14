@@ -107,25 +107,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** @description PatchAgent */
+        /** @description Update settled state or advance the durable shared read cursor to exactly the supplied event cursor. Exactly one property is required. Lower or duplicate read cursors are no-ops; cursors beyond the current agent event stream are rejected. */
         patch: operations["PatchAgent"];
-        trace?: never;
-    };
-    "/v1/agents/{agent_id}/read": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** @description Advance the durable shared read cursor to exactly the supplied event cursor. Lower or duplicate cursors are no-ops; cursors beyond the current agent event stream are rejected. */
-        post: operations["MarkAgentRead"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/v1/agents/{agent_id}/workspace": {
@@ -384,14 +367,12 @@ export interface components {
             workspace?: components["schemas"]["WorkspaceSelection"];
         };
         PatchAgentRequest: {
-            settled: boolean;
+            settled?: boolean;
+            /** Format: int64 */
+            read_cursor?: number;
         };
         SubmitMessageRequest: {
             text: string;
-        };
-        MarkAgentReadRequest: {
-            /** Format: int64 */
-            cursor: number;
         };
         StopRequest: {
             turn_id: string;
@@ -1714,113 +1695,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PatchAgentRequest"];
-            };
-        };
-        responses: {
-            /** @description Success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Agent"];
-                };
-            };
-            /** @description Invalid request: unknown or missing fields, malformed JSON or parameters, bounds violations. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Project, agent, message, or event not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description HTTP method not allowed. */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Conflicting state, idempotency key reused with different payload, or message not pending. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Cursor invalid (ahead of retained stream or outside lifetime). */
-            410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Request body exceeds 2 MiB. */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Expected application/json. */
-            415: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal server error. */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Service shutting down or durable storage unavailable. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    MarkAgentRead: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MarkAgentReadRequest"];
             };
         };
         responses: {

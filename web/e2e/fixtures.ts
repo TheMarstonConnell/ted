@@ -113,14 +113,15 @@ export async function workspace(page: Page) {
     } else {
       const [, , , id, operation] = url.pathname.split("/");
       if (method === "PATCH" && !operation) {
-        agents[id].settled = body.settled;
-        inventory(id);
-      }
-      if (operation === "read" && method === "POST") {
-        expect(body.cursor).toBeLessThanOrEqual(agents[id].cursor);
-        if (body.cursor > (agents[id].read_cursor || 0)) {
-          agents[id].read_cursor = body.cursor;
-          emit(id, "agent.updated", { ...agents[id] });
+        if ("read_cursor" in body) {
+          expect(body.read_cursor).toBeLessThanOrEqual(agents[id].cursor);
+          if (body.read_cursor > (agents[id].read_cursor || 0)) {
+            agents[id].read_cursor = body.read_cursor;
+            emit(id, "agent.updated", { ...agents[id] });
+          }
+        } else {
+          agents[id].settled = body.settled;
+          inventory(id);
         }
       }
       if (operation === "workspace" && method === "PATCH") {

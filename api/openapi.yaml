@@ -321,7 +321,7 @@ paths:
         schema: *id010
     patch:
       operationId: PatchAgent
-      description: PatchAgent
+      description: Update settled state or advance the durable shared read cursor to exactly the supplied event cursor. Exactly one property is required. Lower or duplicate read cursors are no-ops; cursors beyond the current agent event stream are rejected.
       responses:
         '200':
           description: Success
@@ -349,37 +349,6 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/PatchAgentRequest'
-  /v1/agents/{agent_id}/read:
-    post:
-      operationId: MarkAgentRead
-      description: Advance the durable shared read cursor to exactly the supplied event cursor. Lower or duplicate cursors are no-ops; cursors beyond the current agent event stream are rejected.
-      responses:
-        '200':
-          description: Success
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Agent'
-        '400': *id001
-        '404': *id002
-        '405': *id003
-        '409': *id004
-        '410': *id005
-        '413': *id006
-        '415': *id007
-        '500': *id008
-        '503': *id009
-      parameters:
-      - name: agent_id
-        in: path
-        required: true
-        schema: *id010
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MarkAgentReadRequest'
   /v1/agents/{agent_id}/workspace:
     patch:
       operationId: PatchAgentWorkspace
@@ -913,8 +882,12 @@ components:
       properties:
         settled:
           type: boolean
-      required:
-      - settled
+        read_cursor:
+          type: integer
+          format: int64
+          minimum: 0
+      minProperties: 1
+      maxProperties: 1
     SubmitMessageRequest:
       type: object
       additionalProperties: false
@@ -922,16 +895,6 @@ components:
         text: *id015
       required:
       - text
-    MarkAgentReadRequest:
-      type: object
-      additionalProperties: false
-      properties:
-        cursor:
-          type: integer
-          format: int64
-          minimum: 0
-      required:
-      - cursor
     StopRequest:
       type: object
       additionalProperties: false

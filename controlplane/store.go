@@ -7,14 +7,16 @@ import (
 	"path/filepath"
 )
 
-const storeVersion = 1
+const (
+	legacyStoreVersion = 1
+	storeVersion       = 2
+)
 
 type storedAgent struct {
 	Agent  Agent   `json:"agent"`
 	Events []Event `json:"events"`
 	// Browser artifact consumption is private runtime state.
-	ManifestOffset         int64 `json:"manifest_offset"`
-	ReadCursorsInitialized bool  `json:"read_cursors_initialized,omitempty"`
+	ManifestOffset int64 `json:"manifest_offset"`
 }
 type receipt struct {
 	Fingerprint string `json:"fingerprint"`
@@ -54,7 +56,8 @@ func loadState(dir string) (diskState, error) {
 	if err = json.Unmarshal(b, &state); err != nil {
 		return state, fmt.Errorf("read control plane state: %w", err)
 	}
-	if state.Version != storeVersion || state.Projects == nil || state.Agents == nil || state.Receipts == nil {
+	legacy := state.Version == legacyStoreVersion
+	if (!legacy && state.Version != storeVersion) || state.Projects == nil || state.Agents == nil || state.Receipts == nil {
 		return state, fmt.Errorf("unsupported or incomplete control plane state")
 	}
 	for id, a := range state.Agents {
@@ -72,7 +75,7 @@ func loadState(dir string) (diskState, error) {
 				return state, fmt.Errorf("invalid event sequence for agent %q", id)
 			}
 		}
-		if !a.ReadCursorsInitialized {
+		if legacy {
 			for _, e := range a.Events {
 				if e.Type != "output" {
 					continue
@@ -85,12 +88,12 @@ func loadState(dir string) (diskState, error) {
 				}
 			}
 			a.Agent.ReadCursor = a.Agent.LastResponseCursor
-			a.ReadCursorsInitialized = true
 		}
 		if a.Agent.LastResponseCursor > a.Agent.Cursor || a.Agent.ReadCursor > a.Agent.Cursor {
 			return state, fmt.Errorf("invalid read cursor for agent %q", id)
 		}
 	}
+	state.Version = storeVersion
 	return state, nil
 }
 

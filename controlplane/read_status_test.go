@@ -11,41 +11,31 @@ import (
 	"time"
 
 	"github.com/TheMarstonConnell/ted/agent"
-	"go.uber.org/zap"
 )
 
-type readStatusProvider struct {
-	mu         sync.Mutex
-	calls      int
-	toolResult chan struct{}
-	finish     chan struct{}
-}
-
-func (*readStatusProvider) Name() string { return "read-status" }
-func (*readStatusProvider) ListModels() []agent.ModelInfo {
-	return []agent.ModelInfo{{ID: "one"}}
-}
-func (p *readStatusProvider) Complete(_ *zap.Logger, r agent.CompletionRequest) (*agent.Response, error) {
-	p.mu.Lock()
-	p.calls++
-	call := p.calls
-	p.mu.Unlock()
-	if call == 1 {
-		return &agent.Response{Choices: []agent.Choice{{FinishReason: "tool_calls", Message: agent.Message{Role: "assistant", ToolCalls: []agent.ToolCall{{ToolCallType: "function", Id: "tool-1", Function: agent.FunctionCall{Name: "bash", Arguments: `{"command":"printf tool"}`}}}}}}}, nil
-	}
-	if call == 2 {
-		close(p.toolResult)
-		select {
-		case <-r.Context.Done():
-			return nil, r.Context.Err()
-		case <-p.finish:
-		}
-	}
-	return &agent.Response{Choices: []agent.Choice{{FinishReason: "stop", Message: agent.Message{Role: "assistant", Content: agent.TextContent("done")}}}}, nil
-}
-
 func TestReadStatusTracksOnlyAgentOutputAndAcknowledgesExactCursor(t *testing.T) {
-	p := &readStatusProvider{toolResult: make(chan struct{}), finish: make(chan struct{})}
+	var mu sync.Mutex
+	calls := 0
+	toolResult := make(chan struct{})
+	finish := make(chan struct{})
+	p := &httpTestProvider{complete: func(r agent.CompletionRequest) (*agent.Response, error) {
+		mu.Lock()
+		calls++
+		call := calls
+		mu.Unlock()
+		if call == 1 {
+			return &agent.Response{Choices: []agent.Choice{{FinishReason: "tool_calls", Message: agent.Message{Role: "assistant", ToolCalls: []agent.ToolCall{{ToolCallType: "function", Id: "tool-1", Function: agent.FunctionCall{Name: "bash", Arguments: `{"command":"printf tool"}`}}}}}}}, nil
+		}
+		if call == 2 {
+			close(toolResult)
+			select {
+			case <-r.Context.Done():
+				return nil, r.Context.Err()
+			case <-finish:
+			}
+		}
+		return &agent.Response{Choices: []agent.Choice{{FinishReason: "stop", Message: agent.Message{Role: "assistant", Content: agent.TextContent("done")}}}}, nil
+	}}
 	s, err := NewService(t.TempDir(), nil, []agent.Provider{p})
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +50,7 @@ func TestReadStatusTracksOnlyAgentOutputAndAcknowledgesExactCursor(t *testing.T)
 		t.Fatal(err)
 	}
 	select {
-	case <-p.toolResult:
+	case <-toolResult:
 	case <-time.After(3 * time.Second):
 		t.Fatal("tool result was not emitted")
 	}
@@ -71,7 +61,7 @@ func TestReadStatusTracksOnlyAgentOutputAndAcknowledgesExactCursor(t *testing.T)
 	if toolOnly.LastResponseCursor != 0 || toolOnly.ReadCursor != 0 {
 		t.Fatalf("tool output changed read status: %+v", toolOnly)
 	}
-	close(p.finish)
+	close(finish)
 	completed := awaitAgent(t, s, a.ID, func(a Agent) bool { return a.State == "idle" && a.LastResponseCursor > 0 })
 	responseCursor := completed.LastResponseCursor
 	events, err := s.Events(a.ID, 0, 100)
@@ -158,6 +148,7 @@ func TestPreReadStatusStateMigratesOnce(t *testing.T) {
 		{AgentID: "agent", Cursor: 4, Type: "output", Data: json.RawMessage(`{"ResponseType":"tool_result"}`), CreatedAt: now},
 	}
 	state := emptyState()
+	state.Version = legacyStoreVersion
 	state.Projects[project.ID] = project
 	state.Agents["agent"] = &storedAgent{Agent: Agent{ID: "agent", ProjectID: project.ID, State: "idle", Queue: []QueuedMessage{}, Messages: []agent.Message{}, Cursor: uint64(len(events)), CreatedAt: now, UpdatedAt: now}, Events: events}
 	data, err := json.Marshal(state)
@@ -172,7 +163,6 @@ func TestPreReadStatusStateMigratesOnce(t *testing.T) {
 	stored := record["agent"].(map[string]any)
 	delete(stored, "last_response_cursor")
 	delete(stored, "read_cursor")
-	delete(record, "read_cursors_initialized")
 	data, err = json.Marshal(legacy)
 	if err != nil {
 		t.Fatal(err)
@@ -196,9 +186,16 @@ func TestPreReadStatusStateMigratesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	persisted, err := loadState(dir)
+	data, err = os.ReadFile(filepath.Join(dir, "state.json"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	var persisted diskState
+	if err = json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Version != storeVersion {
+		t.Fatalf("migration version was not persisted: %d", persisted.Version)
 	}
 	persisted.Agents["agent"].Agent.LastResponseCursor = 5
 	persisted.Agents["agent"].Agent.ReadCursor = 3

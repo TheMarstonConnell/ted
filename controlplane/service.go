@@ -426,7 +426,7 @@ func (s *Service) CreateAgent(req CreateAgentRequest, key string) (Agent, error)
 	}
 	now := time.Now().UTC()
 	id := newID()
-	a := &storedAgent{ReadCursorsInitialized: true, Agent: Agent{ParentAgentID: req.ParentAgentID, Workspace: workspace, ID: id, ProjectID: p.ID, Title: req.Title, Settings: settings, State: "idle", Queue: []QueuedMessage{}, Messages: []agent.Message{}, CreatedAt: now, UpdatedAt: now}, Events: []Event{}}
+	a := &storedAgent{Agent: Agent{ParentAgentID: req.ParentAgentID, Workspace: workspace, ID: id, ProjectID: p.ID, Title: req.Title, Settings: settings, State: "idle", Queue: []QueuedMessage{}, Messages: []agent.Message{}, CreatedAt: now, UpdatedAt: now}, Events: []Event{}}
 	before := copyJSON(s.state)
 	s.state.Agents[id] = a
 	s.eventLocked(a, "agent.created", s.summaryLocked(a))

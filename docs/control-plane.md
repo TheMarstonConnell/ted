@@ -119,7 +119,7 @@ Only visible assistant output (`output` with `ResponseType: "agent"`) advances
 status messages, and usage events never mark a chat unread.
 
 A client marks displayed work read with
-`POST /v1/agents/{agent_id}/read` and `{ "cursor": n }`, where `n` is an event
+`PATCH /v1/agents/{agent_id}` and `{ "read_cursor": n }`, where `n` is an event
 cursor it actually observed. The cursor advances monotonically; duplicate or
 older acknowledgements are no-ops. Future cursors are rejected. The server
 records exactly `n`, rather than clamping to its current cursor, so assistant
@@ -129,8 +129,8 @@ converge on the shared state.
 
 Agents stored by versions without read status are migrated once at startup.
 Both cursors initialize to the last historical assistant-output event, so old
-chats begin read. The migration marker is durable and does not overwrite newer
-unread state on later restarts.
+chats begin read. The upgraded store version is durable and does not overwrite
+newer unread state on later restarts.
 
 ## Events and history
 

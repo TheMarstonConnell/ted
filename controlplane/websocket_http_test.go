@@ -564,7 +564,7 @@ func TestHTTPWebSocketReadStatusSync(t *testing.T) {
 	if inventory.Type != "inventory" || inventory.Agent.LastResponseCursor == nil || *inventory.Agent.LastResponseCursor != 0 || inventory.Agent.ReadCursor == nil || *inventory.Agent.ReadCursor != 0 {
 		t.Fatalf("initial read status inventory: %+v", inventory)
 	}
-	marked := decodeHTTP[Agent](t, f.request("POST", "/v1/agents/"+a.ID+"/read", fmt.Sprintf(`{"cursor":%d}`, a.Cursor), "", 200))
+	marked := decodeHTTP[Agent](t, f.request("PATCH", "/v1/agents/"+a.ID, fmt.Sprintf(`{"read_cursor":%d}`, a.Cursor), "", 200))
 	frames := drainHTTPWS(t, c, map[string]uint64{a.ID: a.Cursor}, map[string]uint64{a.ID: marked.Cursor})
 	seenInventory := false
 	seenUpdate := false

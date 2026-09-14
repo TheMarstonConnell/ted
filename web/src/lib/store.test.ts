@@ -901,7 +901,7 @@ describe("read receipts", () => {
     expect(client.markRead("a", 5)).toBe(first);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(JSON.parse(fetcher.mock.calls[0][1].body as string)).toEqual({
-      cursor: 5,
+      read_cursor: 5,
     });
     expect(isUnread(client.state.agents.a, client.state.readPending.a)).toBe(
       false,

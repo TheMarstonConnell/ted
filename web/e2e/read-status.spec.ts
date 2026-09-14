@@ -141,7 +141,7 @@ test("failed receipts retry only while the chat is in the foreground", async ({
 }) => {
   const { emit, agents } = await seed(page);
   let attempts = 0;
-  await page.route("**/v1/agents/a/read", async (route) => {
+  await page.route("**/v1/agents/a", async (route) => {
     attempts++;
     if (attempts === 1) {
       await route.fulfill({
@@ -192,7 +192,7 @@ test("opening a chat waits for its response to load before acknowledging it", as
     created_at: "2026-01-01T00:00:00Z",
   };
   Object.assign(fixture.agents.a, { cursor: 1, last_response_cursor: 1 });
-  await page.route("**/v1/agents/a/read", async (route) => {
+  await page.route("**/v1/agents/a", async (route) => {
     reads++;
     await route.fallback();
   });

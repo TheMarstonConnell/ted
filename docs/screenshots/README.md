@@ -145,18 +145,3 @@ browser suite, not live Git/provider calls.
 
 The Local light/dark captures above were refreshed to include the branch and
 dividers too. Other earlier worktree screenshots document the prior footer.
-
-## Synced chat read status
-
-- `web-read-status-light.png` and `web-read-status-dark.png`: an unread chat's
-  red dot at the top-left of its sidebar entry in both themes.
-- `web-read-status-demo.webm`: a response marks another chat unread; opening it
-  clears the indicator, and subsequent responses in the focused chat stay read.
-
-Captured with the deterministic `web/e2e/read-status.spec.ts` fixture (no provider
-calls or real project writes):
-
-```sh
-cd web
-TED_WEB_RECORD=1 npm run test:e2e -- read-status.spec.ts
-```
