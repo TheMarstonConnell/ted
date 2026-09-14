@@ -54,7 +54,11 @@ ordering across agents**; each agent's events are in ascending cursor order.
 ```
 
 Inventory is a **current** summary, not an event-time snapshot; it omits queue and
-conversation history. `inventory.agent.cursor` is a snapshot high-water mark,
+conversation history. It includes the shared `last_response_cursor` and
+`read_cursor`; `last_response_cursor > read_cursor` means the agent is unread.
+An advancing HTTP read acknowledgement produces refreshed inventory and an
+`agent.updated` event for every subscribed client. `inventory.agent.cursor` is a
+snapshot high-water mark,
 **not a processed-event acknowledgement**: never advance your resume cursor from
 inventory. Inventory updates are sent only when its summary changes. Cursors
 are tracked per connection so unchanged events/history are not retransmitted on
@@ -150,7 +154,7 @@ The Event schema's `x-event-data-schemas` extension records this mapping, and
 
 | Event type | `data` schema | Meaning |
 | --- | --- | --- |
-| `agent.created`, `agent.updated` | `AgentUpdate` | Settings/state/settled/usage metadata. Cursor and event timestamp are in the outer Event; these partial updates contain neither history nor queue. |
+| `agent.created`, `agent.updated` | `AgentUpdate` | Settings/state/settled/usage and shared read-cursor metadata. Cursor and event timestamp are in the outer Event; these partial updates contain neither history nor queue. |
 | `message.queued`, `message.cancelled` | `QueuedMessage` | Durable queue acceptance or pending deletion. |
 | `turn.started`, `turn.completed`, `turn.failed`, `turn.interrupted`, `turn.cancelled` | `QueuedMessage` | Turn queue entry and its status; its `id` is the HTTP stop `turn_id`. |
 | `output` | `AgentOutput` | Existing runtime fields `Content`, `ResponseType`, `ToolCallID`, `ToolName`, `FullToolOutput` (intentionally PascalCase). Response types are `agent`, `tool`, `tool_result`, `status`, `usage`. |

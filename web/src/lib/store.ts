@@ -31,6 +31,7 @@ export type State = {
   transcripts: Record<string, TranscriptItem[]>;
   cursors: Record<string, number>;
   ready: Record<string, boolean>;
+  readPending: Record<string, number>;
   status: "connecting" | "live" | "offline";
   error: string | null;
   loaded: boolean;
@@ -42,10 +43,36 @@ const initial = (): State => ({
   transcripts: {},
   cursors: {},
   ready: {},
+  readPending: {},
   status: "connecting",
   error: null,
   loaded: false,
 });
+
+// Receipts can arrive via HTTP and replay in a different order.
+function readStatus(
+  previous: Pick<Agent, "read_cursor" | "last_response_cursor"> | undefined,
+  next: Pick<Agent, "read_cursor" | "last_response_cursor">,
+) {
+  return {
+    last_response_cursor: Math.max(
+      previous?.last_response_cursor || 0,
+      next.last_response_cursor || 0,
+    ),
+    read_cursor: Math.max(previous?.read_cursor || 0, next.read_cursor || 0),
+  };
+}
+
+export function isUnread(agent: Agent, pending = 0) {
+  return (
+    (agent.last_response_cursor || 0) >
+    Math.max(agent.read_cursor || 0, pending)
+  );
+}
+
+export function renderedResponseCursor(items: TranscriptItem[] | undefined) {
+  return Number(items?.findLast((item) => item.kind === "agent")?.id || 0);
+}
 
 // Output events are completed display messages (not token deltas). Conversation
 // events are model checkpoints and must not be rendered again as duplicate output.
@@ -65,6 +92,7 @@ export function reduceEvent(state: State, event: Event): State {
       agent = {
         ...agent,
         ...(data as Schema["AgentUpdate"]),
+        ...readStatus(agent, data as Schema["AgentUpdate"]),
         cursor,
         updated_at: event.created_at,
       } as Agent;
@@ -94,6 +122,11 @@ export function reduceEvent(state: State, event: Event): State {
   }
   if (type === "output") {
     const output = data as Output;
+    if (output.ResponseType === "agent")
+      agent = {
+        ...agent,
+        last_response_cursor: Math.max(agent.last_response_cursor || 0, cursor),
+      };
     if (output.ResponseType !== "usage")
       item = {
         id: String(cursor),
@@ -152,6 +185,7 @@ export class ControlPlane {
   state = initial();
   listeners = new Set<() => void>();
   private socket?: WebSocket;
+  private readRequests = new Map<string, Map<number, Promise<void>>>();
   private stopped = true;
   private selected?: string;
   private retry?: ReturnType<typeof setTimeout>;
@@ -219,6 +253,7 @@ export class ControlPlane {
   stop = () => {
     this.stopped = true;
     this.generation++;
+    this.readRequests.clear();
     clearTimeout(this.retry);
     clearInterval(this.poll);
     clearInterval(this.branchPoll);
@@ -279,7 +314,11 @@ export class ControlPlane {
             this.set({
               agents: {
                 ...this.state.agents,
-                [frame.agent.id]: { ...previous, ...frame.agent },
+                [frame.agent.id]: {
+                  ...previous,
+                  ...frame.agent,
+                  ...readStatus(previous, frame.agent),
+                },
               },
               ready: {
                 ...this.state.ready,
@@ -339,7 +378,8 @@ export class ControlPlane {
       ) ||
       (this.state.status === "offline" &&
         Object.values(this.state.agents).some(
-          (agent) => !projects.some((project) => project.id === agent.project_id),
+          (agent) =>
+            !projects.some((project) => project.id === agent.project_id),
         ))
     ) {
       await this.start();
@@ -394,15 +434,57 @@ export class ControlPlane {
       current &&
       (agent.cursor < current.cursor ||
         (current.workspace?.locked && !agent.workspace?.locked))
-    )
+    ) {
+      this.set({
+        agents: {
+          ...this.state.agents,
+          [agent.id]: { ...current, ...readStatus(current, agent) },
+        },
+      });
       return;
+    }
     this.set({
       agents: {
         ...this.state.agents,
-        [agent.id]: { ...this.state.agents[agent.id], ...agent },
+        [agent.id]: { ...current, ...agent, ...readStatus(current, agent) },
       },
     });
   }
+  markRead = (id: string, cursor: number): Promise<void> => {
+    if (cursor <= (this.state.agents[id]?.read_cursor || 0))
+      return Promise.resolve();
+    const requests =
+      this.readRequests.get(id) || new Map<number, Promise<void>>();
+    const existing = requests.get(cursor);
+    if (existing) return existing;
+    const generation = this.generation;
+    const request = api<Agent>(agentPath(id), "PATCH", { read_cursor: cursor })
+      .then((agent) => {
+        if (generation === this.generation && this.state.agents[id])
+          this.mergeAgent(agent);
+      })
+      .finally(() => {
+        requests.delete(cursor);
+        if (!requests.size && this.readRequests.get(id) === requests)
+          this.readRequests.delete(id);
+        if (generation === this.generation)
+          this.set({
+            readPending: {
+              ...this.state.readPending,
+              [id]: Math.max(0, ...requests.keys()),
+            },
+          });
+      });
+    requests.set(cursor, request);
+    this.readRequests.set(id, requests);
+    this.set({
+      readPending: {
+        ...this.state.readPending,
+        [id]: Math.max(...requests.keys()),
+      },
+    });
+    return request;
+  };
   createAgent = async (
     project: string,
     key: string,

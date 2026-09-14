@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 )
 
-const storeVersion = 1
+const (
+	legacyStoreVersion = 1
+	storeVersion       = 2
+)
 
 type storedAgent struct {
 	Agent  Agent   `json:"agent"`
@@ -53,7 +56,8 @@ func loadState(dir string) (diskState, error) {
 	if err = json.Unmarshal(b, &state); err != nil {
 		return state, fmt.Errorf("read control plane state: %w", err)
 	}
-	if state.Version != storeVersion || state.Projects == nil || state.Agents == nil || state.Receipts == nil {
+	legacy := state.Version == legacyStoreVersion
+	if (!legacy && state.Version != storeVersion) || state.Projects == nil || state.Agents == nil || state.Receipts == nil {
 		return state, fmt.Errorf("unsupported or incomplete control plane state")
 	}
 	for id, a := range state.Agents {
@@ -71,7 +75,25 @@ func loadState(dir string) (diskState, error) {
 				return state, fmt.Errorf("invalid event sequence for agent %q", id)
 			}
 		}
+		if legacy {
+			for _, e := range a.Events {
+				if e.Type != "output" {
+					continue
+				}
+				var output struct {
+					ResponseType string `json:"ResponseType"`
+				}
+				if json.Unmarshal(e.Data, &output) == nil && output.ResponseType == "agent" {
+					a.Agent.LastResponseCursor = e.Cursor
+				}
+			}
+			a.Agent.ReadCursor = a.Agent.LastResponseCursor
+		}
+		if a.Agent.LastResponseCursor > a.Agent.Cursor || a.Agent.ReadCursor > a.Agent.Cursor {
+			return state, fmt.Errorf("invalid read cursor for agent %q", id)
+		}
 	}
+	state.Version = storeVersion
 	return state, nil
 }
 

@@ -1,3 +1,4 @@
+import { useChatRead } from "@/lib/use-chat-read";
 import { usePanel } from "@/lib/navigation";
 import {
   memo,
@@ -59,7 +60,12 @@ import {
   type QueueMessage,
   type WorkspaceSelection,
 } from "@/lib/api";
-import { control, useControl, type TranscriptItem } from "@/lib/store";
+import {
+  control,
+  renderedResponseCursor,
+  useControl,
+  type TranscriptItem,
+} from "@/lib/store";
 import { ErrorNotice, Loading, ModelFields } from "./common";
 import { ChatImage } from "./chat-image";
 import {
@@ -383,6 +389,13 @@ function ChatWorkspace() {
   };
   const [notice, setNotice] = useState<string | null>(null);
   const ready = !!agent && replayed[agentId];
+  const responseCursor = renderedResponseCursor(items);
+  useChatRead(
+    agentId,
+    responseCursor,
+    agent?.read_cursor || 0,
+    !!ready && status === "live",
+  );
   const queue = agent?.queue || [];
   const pending = queue.filter((m) => m.status === "pending");
   const running = queue.find((m) => m.status === "running");

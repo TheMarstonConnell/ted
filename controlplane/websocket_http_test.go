@@ -554,3 +554,35 @@ func TestHTTPWebSocketProjectDeletionCanResumeRemainingAgents(t *testing.T) {
 	}
 	drainHTTPWS(t, fresh, cursors, map[string]uint64{other.ID: updated.Cursor})
 }
+
+func TestHTTPWebSocketReadStatusSync(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	a := f.agent(f.project())
+	c := dialHTTPWS(t, f.server)
+	subscribeHTTPWS(t, c, false, []string{a.ID}, map[string]uint64{a.ID: a.Cursor})
+	inventory := readHTTPWS(t, c)
+	if inventory.Type != "inventory" || inventory.Agent.LastResponseCursor == nil || *inventory.Agent.LastResponseCursor != 0 || inventory.Agent.ReadCursor == nil || *inventory.Agent.ReadCursor != 0 {
+		t.Fatalf("initial read status inventory: %+v", inventory)
+	}
+	marked := decodeHTTP[Agent](t, f.request("PATCH", "/v1/agents/"+a.ID, fmt.Sprintf(`{"read_cursor":%d}`, a.Cursor), "", 200))
+	frames := drainHTTPWS(t, c, map[string]uint64{a.ID: a.Cursor}, map[string]uint64{a.ID: marked.Cursor})
+	seenInventory := false
+	seenUpdate := false
+	for _, frame := range frames {
+		if frame.Type == "inventory" && frame.Agent.ReadCursor != nil && uint64(*frame.Agent.ReadCursor) == a.Cursor {
+			seenInventory = true
+		}
+		if frame.Type == "event" && frame.Event.Type == "agent.updated" {
+			var update struct {
+				ReadCursor uint64 `json:"read_cursor"`
+			}
+			if err := json.Unmarshal(frame.Event.Data, &update); err != nil {
+				t.Fatal(err)
+			}
+			seenUpdate = update.ReadCursor == a.Cursor
+		}
+	}
+	if !seenInventory || !seenUpdate {
+		t.Fatalf("read status did not sync over websocket: %+v", frames)
+	}
+}

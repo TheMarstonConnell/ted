@@ -321,7 +321,7 @@ paths:
         schema: *id010
     patch:
       operationId: PatchAgent
-      description: PatchAgent
+      description: Update settled state or advance the durable shared read cursor to exactly the supplied event cursor. Exactly one property is required. Lower or duplicate read cursors are no-ops; cursors beyond the current agent event stream are rejected.
       responses:
         '200':
           description: Success
@@ -882,8 +882,12 @@ components:
       properties:
         settled:
           type: boolean
-      required:
-      - settled
+        read_cursor:
+          type: integer
+          format: int64
+          minimum: 0
+      minProperties: 1
+      maxProperties: 1
     SubmitMessageRequest:
       type: object
       additionalProperties: false
@@ -1080,6 +1084,8 @@ components:
           type: integer
           format: int64
           minimum: 0
+        last_response_cursor: *id022
+        read_cursor: *id022
         created_at: &id023
           type: string
           format: date-time
@@ -1144,6 +1150,8 @@ components:
         held: *id021
         workspace: *id027
         cursor: *id022
+        last_response_cursor: *id022
+        read_cursor: *id022
         created_at: *id023
         updated_at: *id024
         context_usage: *id025
@@ -1191,6 +1199,8 @@ components:
           $ref: '#/components/schemas/Workspace'
         context_usage:
           $ref: '#/components/schemas/ContextUsage'
+        last_response_cursor: *id022
+        read_cursor: *id022
       required:
       - id
       - project_id

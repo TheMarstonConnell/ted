@@ -310,7 +310,12 @@ func (h *httpAPI) PatchAgent(w http.ResponseWriter, r *http.Request, id string) 
 	if !ok {
 		return
 	}
-	a, err := h.service.SetSettled(id, b.Settled)
+	if b.ReadCursor != nil {
+		a, err := h.service.ReadAgent(id, uint64(*b.ReadCursor))
+		agentResult(w, 200, a, err)
+		return
+	}
+	a, err := h.service.SetSettled(id, *b.Settled)
 	agentResult(w, 200, a, err)
 }
 func (h *httpAPI) PatchAgentSettings(w http.ResponseWriter, r *http.Request, id string) {

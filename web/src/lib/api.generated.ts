@@ -107,7 +107,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** @description PatchAgent */
+        /** @description Update settled state or advance the durable shared read cursor to exactly the supplied event cursor. Exactly one property is required. Lower or duplicate read cursors are no-ops; cursors beyond the current agent event stream are rejected. */
         patch: operations["PatchAgent"];
         trace?: never;
     };
@@ -367,7 +367,9 @@ export interface components {
             workspace?: components["schemas"]["WorkspaceSelection"];
         };
         PatchAgentRequest: {
-            settled: boolean;
+            settled?: boolean;
+            /** Format: int64 */
+            read_cursor?: number;
         };
         SubmitMessageRequest: {
             text: string;
@@ -454,6 +456,10 @@ export interface components {
             messages?: components["schemas"]["Message"][];
             /** Format: int64 */
             cursor: number;
+            /** Format: int64 */
+            last_response_cursor?: number;
+            /** Format: int64 */
+            read_cursor?: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -487,6 +493,10 @@ export interface components {
             workspace?: components["schemas"]["Workspace"];
             /** Format: int64 */
             cursor: number;
+            /** Format: int64 */
+            last_response_cursor?: number;
+            /** Format: int64 */
+            read_cursor?: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -511,6 +521,10 @@ export interface components {
             held: boolean;
             workspace?: components["schemas"]["Workspace"];
             context_usage: components["schemas"]["ContextUsage"];
+            /** Format: int64 */
+            last_response_cursor?: number;
+            /** Format: int64 */
+            read_cursor?: number;
         };
         /** @description Retained agent.AgentResponse. PascalCase field names are intentional compatibility with the existing runtime output payload. */
         AgentOutput: {

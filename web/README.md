@@ -65,6 +65,16 @@ chat settle/restore actions: no reserved width on desktop until revealed, and
 always visible with a 48px target on touch devices. Running/Held/Stopping remain plain status text, not additional badges.
 Selected settled chats retain their selection contrast instead of fading out.
 
+Unread chats show a small red dot at the top-left of their sidebar entry, also
+announced as “Unread” to screen readers. Only agent responses create unread
+state, not tools, usage, or lifecycle updates. Opening a loaded chat or receiving
+responses in the visible, focused chat marks those responses read; background
+tabs and unfocused windows do not. Read status is persisted on the server and
+shared across devices connected to that server. Existing messages start read
+when upgrading. Receipts cover only rendered responses and retry after transient
+failures, without acknowledging newer unseen output.
+
+
 ## Chat workspace footer
 
 The composer footer's left-hand directory slot now holds the workspace choice.

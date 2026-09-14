@@ -68,23 +68,25 @@ type QueuedMessage struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 type Agent struct {
-	ParentAgentID  string             `json:"parent_agent_id,omitempty"`
-	Workspace      Workspace          `json:"workspace"`
-	ID             string             `json:"id"`
-	ProjectID      string             `json:"project_id"`
-	Title          string             `json:"title"`
-	Settings       Settings           `json:"settings"`
-	ActiveSettings *Settings          `json:"active_settings,omitempty"`
-	Settled        bool               `json:"settled"`
-	State          string             `json:"state"`
-	Held           bool               `json:"held"`
-	Queue          []QueuedMessage    `json:"queue"`
-	Messages       []agent.Message    `json:"messages"`
-	ContextUsage   agent.ContextUsage `json:"context_usage"`
-	Events         []Event            `json:"-"`
-	Cursor         uint64             `json:"cursor"`
-	CreatedAt      time.Time          `json:"created_at"`
-	UpdatedAt      time.Time          `json:"updated_at"`
+	ParentAgentID      string             `json:"parent_agent_id,omitempty"`
+	Workspace          Workspace          `json:"workspace"`
+	ID                 string             `json:"id"`
+	ProjectID          string             `json:"project_id"`
+	Title              string             `json:"title"`
+	Settings           Settings           `json:"settings"`
+	ActiveSettings     *Settings          `json:"active_settings,omitempty"`
+	Settled            bool               `json:"settled"`
+	State              string             `json:"state"`
+	Held               bool               `json:"held"`
+	Queue              []QueuedMessage    `json:"queue"`
+	Messages           []agent.Message    `json:"messages"`
+	ContextUsage       agent.ContextUsage `json:"context_usage"`
+	Events             []Event            `json:"-"`
+	Cursor             uint64             `json:"cursor"`
+	LastResponseCursor uint64             `json:"last_response_cursor"`
+	ReadCursor         uint64             `json:"read_cursor"`
+	CreatedAt          time.Time          `json:"created_at"`
+	UpdatedAt          time.Time          `json:"updated_at"`
 }
 type Event struct {
 	AgentID   string          `json:"agent_id"`
