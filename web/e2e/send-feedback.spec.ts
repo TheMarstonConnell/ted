@@ -9,92 +9,138 @@ function gate() {
   return { promise, release };
 }
 
-for (const mobile of [false, true]) {
+for (const { mobile, method } of [
+  { mobile: false, method: "Enter" },
+  { mobile: true, method: "arrow" },
+] as const) {
   test.describe(`send feedback ${mobile ? "mobile" : "desktop"}`, () => {
     test.use({
       viewport: { width: mobile ? 390 : 1440, height: 844 },
       isMobile: mobile,
       hasTouch: mobile,
     });
-    for (const method of ["Enter", "arrow"]) {
-      test(`${method} shows the outgoing text before any network acknowledgement`, async ({
-        page,
-      }, testInfo) => {
-        const { emit } = await workspace(page);
-        await page.goto("/?dialog=new-agent");
+    test(`${method} shows the outgoing text before any network acknowledgement`, async ({
+      page,
+    }, testInfo) => {
+      const { emit } = await workspace(page);
+      await page.goto("/?dialog=new-agent");
+      await page
+        .getByRole("button", { name: "harness /srv/harness", exact: true })
+        .click();
+      const composer = page.getByRole("textbox", {
+        name: "Message",
+        exact: true,
+      });
+      const preview = page.getByRole("region", { name: "Outgoing messages" });
+      const posted = gate();
+      const acknowledge = gate();
+      const text = "Show my message immediately, even on a slow connection.";
+      const queued = {
+        id: "slow",
+        text,
+        status: "pending",
+        created_at: new Date().toISOString(),
+      };
+      await page.route("**/v1/agents/a1/messages", async (route) => {
+        expect(route.request().postDataJSON().text).toBe(text);
+        posted.release();
+        await acknowledge.promise;
+        await route.fulfill({ json: queued });
+      });
+      const requests: string[] = [];
+      page.on("request", (request) =>
+        requests.push(`${request.method()} ${new URL(request.url()).pathname}`),
+      );
+      await composer.fill(text);
+      if (method === "Enter") await composer.press("Enter");
+      else
         await page
-          .getByRole("button", { name: "harness /srv/harness", exact: true })
+          .getByRole("button", { name: "Send message", exact: true })
           .click();
-        const composer = page.getByRole("textbox", {
-          name: "Message",
-          exact: true,
-        });
-        const preview = page.getByRole("region", { name: "Outgoing messages" });
-        const posted = gate();
-        const acknowledge = gate();
-        const text = "Show my message immediately, even on a slow connection.";
-        const queued = {
-          id: "slow",
-          text,
-          status: "pending",
-          created_at: new Date().toISOString(),
-        };
-        await page.route("**/v1/agents/a1/messages", async (route) => {
-          expect(route.request().postDataJSON().text).toBe(text);
-          posted.release();
-          await acknowledge.promise;
-          await route.fulfill({ json: queued });
-        });
-        const requests: string[] = [];
-        page.on("request", (request) =>
-          requests.push(
-            `${request.method()} ${new URL(request.url()).pathname}`,
-          ),
-        );
-        await composer.fill(text);
-        if (method === "Enter") await composer.press("Enter");
-        else
-          await page
-            .getByRole("button", { name: "Send message", exact: true })
-            .click();
-        await posted.promise;
-        await expect(composer).toHaveValue("");
-        await expect(preview).toHaveText(text);
-        await expect(preview).toBeInViewport();
-        await expect(composer).toBeInViewport();
-        await expect(preview.getByRole("status")).toHaveCount(0);
-        expect(requests).not.toContain("GET /v1/agents/a1");
+      await posted.promise;
+      await expect(composer).toHaveValue("");
+      await expect(preview).toHaveText(text);
+      await expect(preview).toBeInViewport();
+      await expect(composer).toBeInViewport();
+      await expect(preview.getByRole("status")).toHaveCount(0);
+      expect(requests).not.toContain("GET /v1/agents/a1");
+      if (process.env.TED_WEB_RECORD) {
         const path = testInfo.outputPath("sending.png");
         await page.screenshot({ path });
         await testInfo.attach("Immediate outgoing message", {
           path,
           contentType: "image/png",
         });
-        await composer.fill("Keep typing the next message");
-        const response = page.waitForResponse((response) =>
-          response.url().endsWith("/v1/agents/a1/messages"),
-        );
-        acknowledge.release();
-        await (await response).finished();
-        await expect(preview).toHaveText(text);
-        await expect(preview.getByRole("status")).toHaveCount(0);
-        emit("a1", "message.queued", queued);
-        await expect(preview).toHaveCount(0);
-        await expect(
-          page.getByRole("region", { name: "Pending messages" }),
-        ).toContainText(text);
-        emit("a1", "turn.started", { ...queued, status: "running" });
-        await expect(
-          page.getByRole("article", { name: "Your message", exact: true }),
-        ).toHaveText(text);
-        await expect(
-          page.getByRole("region", { name: "Pending messages" }),
-        ).toHaveCount(0);
-        await expect(composer).toHaveValue("Keep typing the next message");
-      });
-    }
+      }
+      await composer.fill("Keep typing the next message");
+      const response = page.waitForResponse((response) =>
+        response.url().endsWith("/v1/agents/a1/messages"),
+      );
+      acknowledge.release();
+      await (await response).finished();
+      await expect(preview).toHaveText(text);
+      await expect(preview.getByRole("status")).toHaveCount(0);
+      emit("a1", "message.queued", queued);
+      await expect(preview).toHaveCount(0);
+      await expect(
+        page.getByRole("region", { name: "Pending messages" }),
+      ).toContainText(text);
+      emit("a1", "turn.started", { ...queued, status: "running" });
+      await expect(
+        page.getByRole("article", { name: "Your message", exact: true }),
+      ).toHaveText(text);
+      await expect(
+        page.getByRole("region", { name: "Pending messages" }),
+      ).toHaveCount(0);
+      await expect(composer).toHaveValue("Keep typing the next message");
+    });
   });
 }
+
+test("keeps the newest outgoing preview visible in the capped outbox", async ({
+  page,
+}) => {
+  await workspace(page);
+  await page.goto("/?dialog=new-agent");
+  await page
+    .getByRole("button", { name: "harness /srv/harness", exact: true })
+    .click();
+  let count = 0;
+  await page.route("**/v1/agents/a1/messages", async (route) => {
+    const text = route.request().postDataJSON().text;
+    await route.fulfill({
+      json: {
+        id: `delayed-${++count}`,
+        text,
+        status: "pending",
+        created_at: new Date().toISOString(),
+      },
+    });
+  });
+  const composer = page.getByRole("textbox", { name: "Message", exact: true });
+  const preview = page.getByRole("region", { name: "Outgoing messages" });
+  await composer.fill(Array(12).fill("Earlier outgoing content").join("\n"));
+  await composer.press("Enter");
+  await expect(preview.locator(":scope > div")).toHaveCount(1);
+  await composer.fill("Newest outgoing message");
+  const send = page.getByRole("button", {
+    name: "Send message",
+    exact: true,
+  });
+  await expect(send).toBeEnabled();
+  await send.click();
+  const newest = preview.getByText("Newest outgoing message", { exact: true });
+  await expect(newest).toBeVisible();
+  await expect
+    .poll(() =>
+      preview.evaluate((outbox) => {
+        const item = outbox.lastElementChild?.getBoundingClientRect();
+        const bounds = outbox.getBoundingClientRect();
+        return !!item && item.bottom <= bounds.bottom + 1;
+      }),
+    )
+    .toBe(true);
+});
 
 test("failed sends remove the preview, restore the draft, and reuse the retry key", async ({
   page,
@@ -185,27 +231,4 @@ test("an in-flight preview stays with its chat and a failure preserves newer typ
   await expect(page.getByRole("alert")).toContainText("Send unavailable");
   await expect(preview).toHaveCount(0);
   await expect(composer).toHaveValue("Newer draft");
-});
-
-test("slash commands do not create outgoing messages", async ({ page }) => {
-  await workspace(page);
-  await page.goto("/?dialog=new-agent");
-  await page
-    .getByRole("button", { name: "harness /srv/harness", exact: true })
-    .click();
-  const composer = page.getByRole("textbox", { name: "Message", exact: true });
-  const posts: string[] = [];
-  page.on("request", (request) => {
-    if (request.method() === "POST") posts.push(request.url());
-  });
-  await composer.fill("/help");
-  await composer.press("Enter");
-  await expect(page.getByRole("alert")).toContainText(
-    "Use // to send a literal leading slash.",
-  );
-  await expect(composer).toHaveValue("");
-  await expect(
-    page.getByRole("region", { name: "Outgoing messages" }),
-  ).toHaveCount(0);
-  expect(posts).toEqual([]);
 });

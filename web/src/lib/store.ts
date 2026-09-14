@@ -24,7 +24,7 @@ export type TranscriptItem = {
   output?: string;
   time: string;
 };
-export type OutgoingMessage = {
+type OutgoingMessage = {
   key: string;
   text: string;
   messageId?: string;
@@ -239,6 +239,7 @@ export class ControlPlane {
       ]);
       if (this.stopped || generation !== this.generation) return;
       // Fresh replay on an explicit restart, with no persisted cursor/state mismatch.
+      const active = new Set(agents.map((agent) => agent.id));
       this.set({
         ...initial(),
         agents: Object.fromEntries(
@@ -246,6 +247,9 @@ export class ControlPlane {
         ),
         projects,
         models,
+        outgoing: Object.fromEntries(
+          Object.entries(this.state.outgoing).filter(([id]) => active.has(id)),
+        ),
         loaded: true,
       });
       this.connect();
@@ -539,12 +543,17 @@ export class ControlPlane {
   send = async (id: string, text: string, key: string) => {
     const generation = this.generation;
     const updateOutgoing = (message?: OutgoingMessage) => {
-      if (generation !== this.generation) return;
+      const current = this.state.outgoing[id] || [];
+      if (
+        generation !== this.generation &&
+        (this.stopped || !current.some((item) => item.key === key))
+      )
+        return;
       this.set({
         outgoing: {
           ...this.state.outgoing,
           [id]: [
-            ...(this.state.outgoing[id] || []).filter((m) => m.key !== key),
+            ...current.filter((item) => item.key !== key),
             ...(message ? [message] : []),
           ],
         },
@@ -569,13 +578,13 @@ export class ControlPlane {
         await restore();
         message = await submit();
       }
-      if (generation !== this.generation) return message;
       // Either transport can win. Retain the preview until replay owns the ID.
       updateOutgoing(
         this.state.agents[id]?.queue?.some((m) => m.id === message.id)
           ? undefined
           : { key, text, messageId: message.id },
       );
+      if (generation !== this.generation) return message;
       const agent = this.state.agents[id];
       // The message response is intentionally queue-only, but a successful
       // first submission guarantees the server locked the location. Reflect

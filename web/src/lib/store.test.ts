@@ -807,6 +807,41 @@ describe("sidebar branch refresh", () => {
     );
     return new ControlPlane();
   }
+  it("preserves an in-flight preview through restart and reconciles replay before acknowledgement", async () => {
+    let acknowledge!: (response: Response) => void;
+    const fetcher = vi.fn(async (path: string) => {
+      if (path === "/v1/agents/a/messages")
+        return new Promise<Response>((resolve) => {
+          acknowledge = resolve;
+        });
+      if (path.startsWith("/v1/agents")) return Response.json([agent()]);
+      if (path === "/v1/projects") return Response.json(projects);
+      if (path === "/v1/models") return Response.json([]);
+      return Response.json(projects[0]);
+    });
+    const client = prepare(fetcher);
+    client.state = state();
+    const sending = client.send("a", "Hello", "key");
+    expect(client.state.outgoing.a).toEqual([{ key: "key", text: "Hello" }]);
+    try {
+      await client.start();
+      expect(client.state.outgoing.a).toHaveLength(1);
+      (WebSocket as any).instances[0].onmessage({
+        data: JSON.stringify({
+          type: "event",
+          event: event(1, "message.queued", queued),
+        }),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(client.state.outgoing.a).toHaveLength(1);
+      acknowledge(Response.json(queued));
+      await sending;
+      expect(client.state.outgoing.a).toEqual([]);
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
   it.each([
     { initialRace: false, failReload: false },
     { initialRace: true, failReload: false },

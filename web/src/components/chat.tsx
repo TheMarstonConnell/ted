@@ -3,6 +3,7 @@ import { usePanel } from "@/lib/navigation";
 import {
   memo,
   useCallback,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -347,6 +348,37 @@ export function Chat() {
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">
       <ChatWorkspace />
     </MessageScrollerProvider>
+  );
+}
+
+function OutgoingMessages({
+  messages,
+}: {
+  messages: { key: string; text: string }[];
+}) {
+  const viewport = useRef<HTMLElement>(null);
+  const newest = messages.at(-1)?.key;
+  useLayoutEffect(() => {
+    if (viewport.current)
+      viewport.current.scrollTo({ top: viewport.current.scrollHeight });
+  }, [newest]);
+  return (
+    <section
+      ref={viewport}
+      aria-label="Outgoing messages"
+      className="max-h-40 space-y-2 overflow-y-auto"
+    >
+      {messages.map((message) => (
+        <div
+          key={message.key}
+          className="ml-auto w-fit max-w-[90%] rounded-xl bg-muted p-4"
+        >
+          <p className="whitespace-pre-wrap text-sm leading-6 [overflow-wrap:anywhere]">
+            {message.text}
+          </p>
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -705,21 +737,7 @@ function ChatWorkspace() {
               </div>
             )}
             {!!outgoing[agentId]?.length && (
-              <section
-                aria-label="Outgoing messages"
-                className="max-h-40 space-y-2 overflow-y-auto"
-              >
-                {outgoing[agentId].map((message) => (
-                  <div
-                    key={message.key}
-                    className="ml-auto w-fit max-w-[90%] rounded-xl bg-muted p-4"
-                  >
-                    <p className="whitespace-pre-wrap text-sm leading-6 [overflow-wrap:anywhere]">
-                      {message.text}
-                    </p>
-                  </div>
-                ))}
-              </section>
+              <OutgoingMessages messages={outgoing[agentId]} />
             )}
             <form onSubmit={submit} aria-label="Message composer">
               <InputGroup
