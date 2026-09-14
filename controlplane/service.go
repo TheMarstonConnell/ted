@@ -295,15 +295,15 @@ func (s *Service) DeleteProject(id string) error {
 	if _, ok := s.state.Projects[id]; !ok {
 		return problem(404, "not_found", "project not found")
 	}
-	for _, a := range s.state.Agents {
-		if a.Agent.ProjectID == id && !a.Agent.Settled {
+	for agentID, a := range s.state.Agents {
+		if a.Agent.ProjectID != id {
+			continue
+		}
+		if !a.Agent.Settled {
 			return problem(409, "project_not_empty", "project still has unsettled agents; settle all agents before deleting it")
 		}
-	}
-	// Settling cancels a turn asynchronously. Let its worker finish before
-	// removing the records it still needs to persist its final output.
-	for agentID, a := range s.state.Agents {
-		if a.Agent.ProjectID == id && s.running[agentID] != nil {
+		// Cancellation is asynchronous; workers still need their final records.
+		if s.running[agentID] != nil {
 			return problem(409, "project_not_empty", "settled agents are still stopping; try deleting the project again shortly")
 		}
 	}
