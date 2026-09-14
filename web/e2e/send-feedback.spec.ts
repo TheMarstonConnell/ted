@@ -59,10 +59,10 @@ for (const mobile of [false, true]) {
             .click();
         await posted.promise;
         await expect(composer).toHaveValue("");
-        await expect(preview).toContainText(text);
+        await expect(preview).toHaveText(text);
         await expect(preview).toBeInViewport();
         await expect(composer).toBeInViewport();
-        await expect(preview.getByRole("status")).toHaveText("Sending…");
+        await expect(preview.getByRole("status")).toHaveCount(0);
         expect(requests).not.toContain("GET /v1/agents/a1");
         const path = testInfo.outputPath("sending.png");
         await page.screenshot({ path });
@@ -71,8 +71,13 @@ for (const mobile of [false, true]) {
           contentType: "image/png",
         });
         await composer.fill("Keep typing the next message");
+        const response = page.waitForResponse((response) =>
+          response.url().endsWith("/v1/agents/a1/messages"),
+        );
         acknowledge.release();
-        await expect(preview.getByRole("status")).toHaveText("Sent · syncing…");
+        await (await response).finished();
+        await expect(preview).toHaveText(text);
+        await expect(preview.getByRole("status")).toHaveCount(0);
         emit("a1", "message.queued", queued);
         await expect(preview).toHaveCount(0);
         await expect(

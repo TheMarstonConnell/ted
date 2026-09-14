@@ -717,12 +717,6 @@ function ChatWorkspace() {
                     <p className="whitespace-pre-wrap text-sm leading-6 [overflow-wrap:anywhere]">
                       {message.text}
                     </p>
-                    <p
-                      role="status"
-                      className="mt-2 text-xs text-muted-foreground"
-                    >
-                      {message.messageId ? "Sent · syncing…" : "Sending…"}
-                    </p>
                   </div>
                 ))}
               </section>
