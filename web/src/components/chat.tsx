@@ -354,30 +354,6 @@ export function Chat() {
   );
 }
 
-function OutgoingMessages({
-  messages,
-}: {
-  messages: { key: string; text: string }[];
-}) {
-  const viewport = useRef<HTMLElement>(null);
-  const newest = messages.at(-1)?.key;
-  useLayoutEffect(() => {
-    if (viewport.current)
-      viewport.current.scrollTo({ top: viewport.current.scrollHeight });
-  }, [newest]);
-  return (
-    <section
-      ref={viewport}
-      aria-label="Outgoing messages"
-      className="max-h-40 space-y-6 overflow-y-auto"
-    >
-      {messages.map((message) => (
-        <ConversationMessage key={message.key} text={message.text} user />
-      ))}
-    </section>
-  );
-}
-
 function ChatWorkspace() {
   const { agentId = "" } = useParams();
   const {
@@ -389,6 +365,14 @@ function ChatWorkspace() {
     loaded,
     status,
   } = useControl();
+  const outgoingViewport = useRef<HTMLElement>(null);
+  const newestOutgoing = outgoing[agentId]?.at(-1)?.key;
+  useLayoutEffect(() => {
+    if (outgoingViewport.current)
+      outgoingViewport.current.scrollTo({
+        top: outgoingViewport.current.scrollHeight,
+      });
+  }, [agentId, newestOutgoing]);
   const { open } = usePanel();
   const navigate = useNavigate();
   const agent = agents[agentId];
@@ -736,7 +720,19 @@ function ChatWorkspace() {
               </div>
             )}
             {!!outgoing[agentId]?.length && (
-              <OutgoingMessages messages={outgoing[agentId]} />
+              <section
+                ref={outgoingViewport}
+                aria-label="Outgoing messages"
+                className="max-h-40 space-y-6 overflow-y-auto"
+              >
+                {outgoing[agentId].map((message) => (
+                  <ConversationMessage
+                    key={message.key}
+                    text={message.text}
+                    user
+                  />
+                ))}
+              </section>
             )}
             <form onSubmit={submit} aria-label="Message composer">
               <InputGroup

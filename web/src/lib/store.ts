@@ -91,6 +91,7 @@ export function reduceEvent(state: State, event: Event): State {
       `Event gap for ${id}; reconnecting from the last processed cursor.`,
     );
   let item: TranscriptItem | undefined;
+  let outgoing = state.outgoing;
   let agent = state.agents[id];
   if (!agent) throw new Error(`Missing inventory for ${id}`);
   if (type === "agent.created" || type === "agent.updated") {
@@ -106,6 +107,12 @@ export function reduceEvent(state: State, event: Event): State {
   }
   if (type.startsWith("message.") || type.startsWith("turn.")) {
     const q = data as QueueMessage;
+    outgoing = {
+      ...outgoing,
+      [id]: (outgoing[id] || []).filter(
+        (message) => message.messageId !== q.id,
+      ),
+    };
     const queue = [...(agent.queue || [])];
     const index = queue.findIndex((m) => m.id === q.id);
     if (index < 0) queue.push(q);
@@ -182,15 +189,7 @@ export function reduceEvent(state: State, event: Event): State {
     ready: { ...state.ready, [id]: state.ready[id] || cursor >= agent.cursor },
     agents: { ...state.agents, [id]: agent },
     cursors: { ...state.cursors, [id]: cursor },
-    outgoing:
-      type.startsWith("message.") || type.startsWith("turn.")
-        ? {
-            ...state.outgoing,
-            [id]: (state.outgoing[id] || []).filter(
-              (message) => message.messageId !== (data as QueueMessage).id,
-            ),
-          }
-        : state.outgoing,
+    outgoing,
     transcripts: item
       ? { ...state.transcripts, [id]: transcript }
       : state.transcripts,
