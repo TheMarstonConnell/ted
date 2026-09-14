@@ -521,3 +521,36 @@ func TestHTTPWebSocketSettledStoppingFlushesFinalEvents(t *testing.T) {
 		t.Fatalf("settled subscription dropped terminal frames: terminal=%v idle=%v", sawTerminal, sawIdle)
 	}
 }
+
+func TestHTTPWebSocketProjectDeletionCanResumeRemainingAgents(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	project := f.project()
+	a := f.agent(project)
+	other := f.agent(f.project())
+	c := dialHTTPWS(t, f.server)
+	subscribeHTTPWS(t, c, true, []string{a.ID}, nil)
+	cursors := map[string]uint64{}
+	drainHTTPWS(t, c, cursors, map[string]uint64{a.ID: a.Cursor, other.ID: other.Cursor})
+	settled, err := f.s.SetSettled(a.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainHTTPWS(t, c, cursors, map[string]uint64{a.ID: settled.Cursor})
+	f.request("DELETE", "/v1/projects/"+project.ID, "", "", 204)
+	if got := readHTTPWS(t, c); got.Type != "error" || got.Code != "cursor_invalid" {
+		t.Fatalf("expected invalidated cursor: %+v", got)
+	}
+	remaining := decodeHTTP[[]Agent](t, f.request("GET", "/v1/agents?include_settled=true", "", "", 200))
+	if len(remaining) != 1 || remaining[0].ID != other.ID {
+		t.Fatalf("remaining inventory: %+v", remaining)
+	}
+	delete(cursors, a.ID)
+	fresh := dialHTTPWS(t, f.server)
+	subscribeHTTPWS(t, fresh, true, nil, cursors)
+	effort := "high"
+	updated, err := f.s.UpdateSettings(other.ID, SettingsPatch{Effort: &effort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainHTTPWS(t, fresh, cursors, map[string]uint64{other.ID: updated.Cursor})
+}

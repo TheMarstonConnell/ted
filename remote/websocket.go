@@ -2,6 +2,7 @@ package remote
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -9,6 +10,24 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+var ErrAgentDeleted = errors.New("this agent was permanently deleted; start or select another agent")
+
+// A missing resume cursor can also mean an invalid cursor for an existing agent.
+func (a *Agent) subscriptionError(ctx context.Context, err error) error {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		if apiErr.Code == "cursor_invalid" {
+			_, lookupErr := a.client.GetAgent(ctx, a.id)
+			if errors.As(lookupErr, &apiErr) && apiErr.Code == "not_found" {
+				err = ErrAgentDeleted
+			}
+		} else if apiErr.Code == "not_found" {
+			err = ErrAgentDeleted
+		}
+	}
+	return err
+}
 
 type frame struct {
 	Type    string   `json:"type"`
@@ -56,7 +75,7 @@ func (a *Agent) dial(ctx context.Context) (*websocket.Conn, error) {
 	}
 	if ack.Type != "subscribed" {
 		conn.Close()
-		return nil, fmt.Errorf("subscribe: %s: %s", ack.Code, ack.Message)
+		return nil, &APIError{Code: ack.Code, Message: ack.Message}
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 	return conn, nil
@@ -68,13 +87,18 @@ func (a *Agent) dial(ctx context.Context) (*websocket.Conn, error) {
 func (a *Agent) Subscribe(ctx context.Context, notify func(Update)) error {
 	conn, err := a.dial(ctx)
 	if err != nil {
-		return fmt.Errorf("subscribe: %w", err)
+		return fmt.Errorf("subscribe: %w", a.subscriptionError(ctx, err))
 	}
 	go func() {
 		for {
 			err := a.read(ctx, conn, notify)
 			conn.Close()
 			if ctx.Err() != nil {
+				return
+			}
+			err = a.subscriptionError(ctx, err)
+			if errors.Is(err, ErrAgentDeleted) {
+				notify(Update{Err: err})
 				return
 			}
 			notify(Update{Err: fmt.Errorf("event connection lost: %w; reconnecting", err)})
@@ -87,6 +111,11 @@ func (a *Agent) Subscribe(ctx context.Context, notify func(Update)) error {
 				conn, err = a.dial(ctx)
 				if err == nil {
 					break
+				}
+				err = a.subscriptionError(ctx, err)
+				if errors.Is(err, ErrAgentDeleted) {
+					notify(Update{Err: err})
+					return
 				}
 			}
 		}
@@ -111,7 +140,7 @@ func (a *Agent) read(ctx context.Context, conn *websocket.Conn, notify func(Upda
 		}
 		switch f.Type {
 		case "error":
-			return fmt.Errorf("%s: %s", f.Code, f.Message)
+			return &APIError{Code: f.Code, Message: f.Message}
 		case "inventory":
 			a.mu.Lock()
 			if f.Agent.ID != a.snapshot.ID {

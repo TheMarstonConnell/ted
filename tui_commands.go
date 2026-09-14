@@ -12,6 +12,7 @@ import (
 type turnDoneMsg struct{ err error }
 type submitDoneMsg struct{ err error }
 type remoteStateMsg bool
+type remoteDeletedMsg struct{ err error }
 
 type pickerState struct {
 	selection commands.Selection

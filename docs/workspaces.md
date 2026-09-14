@@ -142,6 +142,8 @@ Launching from a server-managed worktree, with or without `--parent-agent`, keep
 its original project identity and shares that tree unless a fresh Worktree is
 explicitly requested. This also applies to worktrees owned by settled agents.
 Explicit `--cwd` may select another project without changing the child relationship.
+Project deletion is blocked while any of its agents have children in other projects,
+even settled children, so parentage cannot become dangling.
 Parentage itself does not copy model/effort settings; project defaults and the
 existing `--model` / `--effort` flags still apply.
 

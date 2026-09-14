@@ -70,6 +70,15 @@ cursor is remembered on the connection; if restored to unsettled, only newer
 events are sent. An all-mode client reconnecting should send cursors for every
 previously observed agent to catch offline settlements.
 
+Deleting a project invalidates its agents' cursors, including those on existing
+subscriptions. On `cursor_invalid`, refresh HTTP inventory and remove deleted
+identities before reconnecting. The web client rebuilds inventory and replay
+when project refresh detects a missing project or, while disconnected, an
+orphaned agent: immediately after its own DELETE, or on its periodic poll for
+external deletions. The
+terminal client exits with a deletion message if its selected agent no longer
+exists, rather than retrying forever; start or select another agent.
+
 ## Submit
 
 ```json

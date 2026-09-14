@@ -512,7 +512,20 @@ describe("WebSocket cursor safety", () => {
     const fetcher = vi.fn((path: string) => {
       if (path.includes("/events/")) return reference();
       return Promise.resolve(
-        Response.json(path.includes("/agents") ? [agent()] : []),
+        Response.json(
+          path.includes("/agents")
+            ? [agent()]
+            : path === "/v1/projects"
+              ? [
+                  {
+                    id: "p",
+                    name: "p",
+                    root: "/srv/p",
+                    defaults: { model: "test/model", effort: "high" },
+                  },
+                ]
+              : [],
+        ),
       );
     });
     vi.stubGlobal("fetch", fetcher);
@@ -672,12 +685,82 @@ describe("sidebar branch refresh", () => {
       "WebSocket",
       class {
         static OPEN = 1;
+        static instances: any[] = [];
         readyState = 0;
-        close() {}
+        onmessage?: (message: { data: string }) => void;
+        onclose?: () => void;
+        constructor() {
+          (WebSocket as any).instances.push(this);
+        }
+        close() {
+          this.onclose?.();
+        }
       },
     );
     return new ControlPlane();
   }
+  it.each([
+    { initialRace: false, failReload: false },
+    { initialRace: true, failReload: false },
+    { initialRace: false, failReload: true },
+  ])(
+    "rebuilds after deletion found by project polling: %j",
+    async ({ initialRace, failReload }) => {
+      let deleted = false;
+      let failed = false;
+      const fetcher = vi.fn(async (path: string) => {
+        if (path.startsWith("/v1/agents"))
+          return Response.json(deleted ? [] : [agent()]);
+        if (path === "/v1/projects")
+          return Response.json(deleted || initialRace ? [] : [projects[0]]);
+        if (path === "/v1/models") {
+          if (deleted && failReload && !failed) {
+            failed = true;
+            return Response.json(
+              { error: { code: "internal", message: "temporary failure" } },
+              { status: 503 },
+            );
+          }
+          return Response.json([]);
+        }
+        return Response.json(projects[0]);
+      });
+      const client = prepare(fetcher);
+      try {
+        await client.start();
+        expect(client.state.agents.a).toBeDefined();
+        (WebSocket as any).instances[0].onmessage({
+          data: JSON.stringify({
+            type: "error",
+            code: "cursor_invalid",
+            message: "agent deleted",
+          }),
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(client.state.status).toBe("offline");
+        deleted = true;
+        await vi.advanceTimersByTimeAsync(15000);
+        if (failReload) {
+          expect(client.state.status).toBe("offline");
+          expect(client.state.error).toContain("temporary failure");
+          await vi.advanceTimersByTimeAsync(1000);
+        }
+        expect(client.state.projects).toEqual([]);
+        expect(client.state.agents).toEqual({});
+        expect(
+          fetcher.mock.calls.filter(([path]) => path.startsWith("/v1/agents")),
+        ).toHaveLength(failReload ? 3 : 2);
+        fetcher.mockClear();
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(
+          fetcher.mock.calls.some(([path]) => path === "/v1/projects"),
+        ).toBe(true);
+      } finally {
+        client.stop();
+        vi.useRealTimers();
+      }
+    },
+  );
   it("refreshes all represented projects once, including unselected and settled chats, and clears removed branches", async () => {
     const branches: Record<string, string | undefined> = {
       p: "main",

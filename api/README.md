@@ -27,7 +27,7 @@ generated. Edit the YAML, then regenerate; never edit `generated.go` manually.
 | --- | --- | --- |
 | GET | `/health` | `{ "api_version": "1" }` |
 | GET, POST | `/v1/projects` | List or create projects |
-| GET, PATCH, DELETE | `/v1/projects/{project_id}` | Read, update name/defaults, delete an empty project |
+| GET, PATCH, DELETE | `/v1/projects/{project_id}` | Read, update name/defaults, delete a project and its settled agents |
 | GET, POST | `/v1/agents` | List or create durable agents |
 | GET, PATCH | `/v1/agents/{agent_id}` | Read agent or update required `settled` boolean |
 | PATCH | `/v1/agents/{agent_id}/settings` | Patch model and/or effort for future turns |
@@ -72,8 +72,12 @@ Agent lists default to unsettled only; set `include_settled=true` to inspect all
 and optionally filter by `project_id`. Settling a running agent initiates
 cancellation; the final output and conversation still remain replayable.
 Settled agents must be restored with `PATCH {"settled":false}` before continuing
-or submitting. Deleting projects with any agents (including settled) returns
-409; there is no destructive agent/log deletion endpoint.
+or submitting. Deleting a project permanently removes its settled agents, chat
+history, and associated idempotency receipts. Unsettled agents or workers still
+finishing cancellation block deletion with 409. Agents with children in other
+projects also block deletion, even if those children are settled; deleting the
+child project first preserves immutable parentage. The project directory is never
+removed. The web UI asks for confirmation before deletion.
 
 HTTP create-agent and submit-message operations accept optional
 `Idempotency-Key`. A key is global for agent creation, per agent for messages,

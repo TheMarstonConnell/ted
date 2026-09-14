@@ -85,6 +85,7 @@ type model struct {
 	agentStyle     lipgloss.Style
 	toolCallStyle  lipgloss.Style
 	err            error
+	exitErr        error
 	agent          tuiAgent
 	commands       *commands.Handler
 	picker         *pickerState
@@ -535,6 +536,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.appendMessage(agentMessage, msg.Content)
 		}
 		return m, nil
+	case remoteDeletedMsg:
+		m.exitErr = msg.err
+		m.messages = nil
+		m.textarea.Reset()
+		m.picker = nil
+		m.initialPrompt = ""
+		m.busy = false
+		m.renderTranscript()
+		return m, tea.Quit
 	case remoteStateMsg:
 		wasBusy := m.busy
 		m.busy = bool(msg)

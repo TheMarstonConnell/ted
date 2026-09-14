@@ -456,3 +456,143 @@ func TestServiceWorkspacesAndToolOutputSurviveRestart(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteProjectWithSettledAgents(t *testing.T) {
+	s, _, project, a := serviceFixture(t)
+	other, err := s.CreateProject(CreateProjectRequest{Name: "other", Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherAgent, err := s.CreateAgent(CreateAgentRequest{ProjectID: other.ID}, "other-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.CreateAgent(CreateAgentRequest{ProjectID: project.ID, ParentAgentID: a.ID}, "delete-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SetSettled(a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus(t, s.DeleteProject(project.ID), 409)
+	if _, err = s.GetAgent(a.ID); err != nil {
+		t.Fatal("blocked deletion removed settled agent", err)
+	}
+	if _, err = s.SetSettled(second.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DeleteProject(project.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{a.ID, second.ID} {
+		_, err = s.GetAgent(id)
+		assertStatus(t, err, 404)
+	}
+	if _, err = s.GetAgent(otherAgent.ID); err != nil {
+		t.Fatal(err)
+	}
+	state, err := loadState(s.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Projects) != 1 || len(state.Agents) != 1 || len(state.Receipts) != 1 {
+		t.Fatalf("unexpected persisted state: %+v", state)
+	}
+	if _, err = os.Stat(project.Root); err != nil {
+		t.Fatal("project directory removed", err)
+	}
+	assertStatus(t, s.DeleteProject(project.ID), 404)
+}
+
+func TestDeleteSettledProjectRollsBackOnStorageFailure(t *testing.T) {
+	s, _, project, a := serviceFixture(t)
+	if _, err := s.SetSettled(a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.save = func(string, diskState) error { return errors.New("disk full") }
+	s.mu.Unlock()
+	assertStatus(t, s.DeleteProject(project.ID), 503)
+	if _, err := s.GetAgent(a.ID); err != nil {
+		t.Fatal("failed deletion removed agent", err)
+	}
+	if _, ok := s.state.Projects[project.ID]; !ok {
+		t.Fatal("failed deletion removed project")
+	}
+}
+
+func TestDeleteProjectWaitsForSettledWorker(t *testing.T) {
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	release := make(chan struct{})
+	f := newHTTPFixture(t, &httpTestProvider{complete: func(r agent.CompletionRequest) (*agent.Response, error) {
+		close(started)
+		<-r.Context.Done()
+		close(cancelled)
+		<-release
+		return nil, r.Context.Err()
+	}})
+	var finish sync.Once
+	defer finish.Do(func() { close(release) })
+	project := f.project()
+	a := f.agent(project)
+	if _, err := f.s.Submit(a.ID, "run", ""); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("turn did not start")
+	}
+	if _, err := f.s.SetSettled(a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("settlement did not cancel the turn")
+	}
+	assertStatus(t, f.s.DeleteProject(project.ID), 409)
+	got, err := f.s.GetAgent(a.ID)
+	if err != nil || got.State != "stopping" {
+		t.Fatalf("stopping agent was not retained: %+v %v", got, err)
+	}
+	finish.Do(func() { close(release) })
+	awaitAgent(t, f.s, a.ID, func(a Agent) bool { return a.State == "idle" })
+	if err := f.s.DeleteProject(project.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteProjectPreservesCrossProjectParentage(t *testing.T) {
+	s, _, project, parent := serviceFixture(t)
+	childProject, err := s.CreateProject(CreateProjectRequest{Name: "child", Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.CreateAgent(CreateAgentRequest{ProjectID: childProject.ID, ParentAgentID: parent.ID}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SetSettled(parent.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus(t, s.DeleteProject(project.ID), 409)
+	if _, err = s.SetSettled(child.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus(t, s.DeleteProject(project.ID), 409)
+	persisted, err := loadState(s.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Projects) != 2 || len(persisted.Agents) != 2 || persisted.Agents[child.ID].Agent.ParentAgentID != parent.ID {
+		t.Fatal("blocked deletion damaged the family")
+	}
+	if err = s.DeleteProject(childProject.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DeleteProject(project.ID); err != nil {
+		t.Fatal(err)
+	}
+}

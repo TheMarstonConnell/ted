@@ -50,7 +50,7 @@ export interface paths {
         get: operations["GetProject"];
         put?: never;
         post?: never;
-        /** @description Delete an empty project. Returns 409 while agents belong to it. */
+        /** @description Delete a project and all its settled agents and chat history. Returns 409 while any agents are unsettled or still stopping, or have children in other projects. The project directory is not removed. */
         delete: operations["DeleteProject"];
         options?: never;
         head?: never;

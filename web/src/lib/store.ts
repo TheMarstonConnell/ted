@@ -207,8 +207,13 @@ export class ControlPlane {
         void this.refreshProjects().catch(() => {});
       }, 15000);
     } catch (error) {
-      if (!this.stopped && generation === this.generation)
+      if (!this.stopped && generation === this.generation) {
         this.set({ status: "offline", error: String(error) });
+        this.retry = setTimeout(
+          () => void this.start(),
+          Math.min(1000 * 2 ** this.failures++, 15000),
+        );
+      }
     }
   };
   stop = () => {
@@ -327,15 +332,26 @@ export class ControlPlane {
   refreshProjects = async () => {
     const generation = this.generation;
     const projects = await api<Project[]>("/v1/projects");
-    if (!this.stopped && this.generation === generation)
-      this.set({
-        projects: projects.map((project) => ({
-          ...this.state.projects.find((p) => p.id === project.id),
-          ...project,
-        })),
-      });
-    if (!this.stopped && this.generation === generation)
-      void this.refreshAgentProjects();
+    if (this.stopped || this.generation !== generation) return;
+    if (
+      this.state.projects.some(
+        (known) => !projects.some((project) => project.id === known.id),
+      ) ||
+      (this.state.status === "offline" &&
+        Object.values(this.state.agents).some(
+          (agent) => !projects.some((project) => project.id === agent.project_id),
+        ))
+    ) {
+      await this.start();
+      return;
+    }
+    this.set({
+      projects: projects.map((project) => ({
+        ...this.state.projects.find((p) => p.id === project.id),
+        ...project,
+      })),
+    });
+    void this.refreshAgentProjects();
   };
   private refreshAgentProjects = async () => {
     if (this.stopped) return;

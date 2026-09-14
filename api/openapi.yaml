@@ -182,7 +182,7 @@ paths:
               $ref: '#/components/schemas/PatchProjectRequest'
     delete:
       operationId: DeleteProject
-      description: Delete an empty project. Returns 409 while agents belong to it.
+      description: Delete a project and all its settled agents and chat history. Returns 409 while any agents are unsettled or still stopping, or have children in other projects. The project directory is not removed.
       responses:
         '204':
           description: Success
