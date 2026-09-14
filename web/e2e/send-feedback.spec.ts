@@ -59,7 +59,9 @@ for (const { mobile, method } of [
           .click();
       await posted.promise;
       await expect(composer).toHaveValue("");
-      await expect(preview).toHaveText(text);
+      await expect(
+        preview.getByRole("article", { name: "Your message", exact: true }),
+      ).toHaveText(text);
       await expect(preview).toBeInViewport();
       await expect(composer).toBeInViewport();
       await expect(preview.getByRole("status")).toHaveCount(0);
@@ -121,7 +123,7 @@ test("keeps the newest outgoing preview visible in the capped outbox", async ({
   const preview = page.getByRole("region", { name: "Outgoing messages" });
   await composer.fill(Array(12).fill("Earlier outgoing content").join("\n"));
   await composer.press("Enter");
-  await expect(preview.locator(":scope > div")).toHaveCount(1);
+  await expect(preview.locator(":scope > article")).toHaveCount(1);
   await composer.fill("Newest outgoing message");
   const send = page.getByRole("button", {
     name: "Send message",
@@ -253,10 +255,12 @@ test("failed sends remove the preview, restore the draft, and reuse the retry ke
   await expect(preview).toHaveCount(0);
   await expect(composer).toHaveValue("//literal slash");
   await composer.press("Enter");
-  await expect(
-    page.getByRole("article", { name: "Your message", exact: true }),
-  ).toHaveText("/literal slash");
   await expect(preview).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("region", { name: "Messages", exact: true })
+      .getByRole("article", { name: "Your message", exact: true }),
+  ).toHaveText("/literal slash");
   expect(keys).toHaveLength(2);
   expect(keys[0]).toBeTruthy();
   expect(keys[1]).toBe(keys[0]);
