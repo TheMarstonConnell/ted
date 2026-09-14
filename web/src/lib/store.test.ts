@@ -699,16 +699,30 @@ describe("sidebar branch refresh", () => {
     );
     return new ControlPlane();
   }
-  it.each([false, true])(
-    "rebuilds after deletion found by project polling (initial inventory race: %s)",
-    async (initialRace) => {
+  it.each([
+    { initialRace: false, failReload: false },
+    { initialRace: true, failReload: false },
+    { initialRace: false, failReload: true },
+  ])(
+    "rebuilds after deletion found by project polling: %j",
+    async ({ initialRace, failReload }) => {
       let deleted = false;
+      let failed = false;
       const fetcher = vi.fn(async (path: string) => {
         if (path.startsWith("/v1/agents"))
           return Response.json(deleted ? [] : [agent()]);
         if (path === "/v1/projects")
           return Response.json(deleted || initialRace ? [] : [projects[0]]);
-        if (path === "/v1/models") return Response.json([]);
+        if (path === "/v1/models") {
+          if (deleted && failReload && !failed) {
+            failed = true;
+            return Response.json(
+              { error: { code: "internal", message: "temporary failure" } },
+              { status: 503 },
+            );
+          }
+          return Response.json([]);
+        }
         return Response.json(projects[0]);
       });
       const client = prepare(fetcher);
@@ -726,11 +740,21 @@ describe("sidebar branch refresh", () => {
         expect(client.state.status).toBe("offline");
         deleted = true;
         await vi.advanceTimersByTimeAsync(15000);
+        if (failReload) {
+          expect(client.state.status).toBe("offline");
+          expect(client.state.error).toContain("temporary failure");
+          await vi.advanceTimersByTimeAsync(1000);
+        }
         expect(client.state.projects).toEqual([]);
         expect(client.state.agents).toEqual({});
         expect(
           fetcher.mock.calls.filter(([path]) => path.startsWith("/v1/agents")),
-        ).toHaveLength(2);
+        ).toHaveLength(failReload ? 3 : 2);
+        fetcher.mockClear();
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(
+          fetcher.mock.calls.some(([path]) => path === "/v1/projects"),
+        ).toBe(true);
       } finally {
         client.stop();
         vi.useRealTimers();

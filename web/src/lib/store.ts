@@ -207,8 +207,13 @@ export class ControlPlane {
         void this.refreshProjects().catch(() => {});
       }, 15000);
     } catch (error) {
-      if (!this.stopped && generation === this.generation)
+      if (!this.stopped && generation === this.generation) {
         this.set({ status: "offline", error: String(error) });
+        this.retry = setTimeout(
+          () => void this.start(),
+          Math.min(1000 * 2 ** this.failures++, 15000),
+        );
+      }
     }
   };
   stop = () => {
