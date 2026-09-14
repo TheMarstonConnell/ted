@@ -523,6 +523,79 @@ describe("WebSocket cursor safety", () => {
     socket.frame({ type: "subscribed", request_id: "sub" });
     return { client, socket, fetcher };
   }
+  it("retires deleted history and cursors without interrupting other agents", async () => {
+    const { client, socket } = await setup(async () => Response.json(null));
+    try {
+      socket.frame({ type: "event", event: event(1, "output", output) });
+      socket.frame({ type: "inventory", agent: agent("b") });
+      socket.frame({
+        type: "event",
+        event: { ...event(1, "output", output), agent_id: "b" },
+      });
+      await vi.waitFor(() =>
+        expect(client.state.cursors).toEqual({ a: 1, b: 1 }),
+      );
+      socket.frame({ type: "agent_deleted", agent_id: "a" });
+      await vi.waitFor(() => expect(client.state.agents.a).toBeUndefined());
+      expect(client.state.transcripts.a).toBeUndefined();
+      expect(client.state.ready.a).toBeUndefined();
+      expect(client.state.cursors).toEqual({ b: 1 });
+      expect(client.state.status).toBe("live");
+      client.select("b");
+      expect(socket.sent.at(-1).agent_ids).toEqual(["b"]);
+      expect(socket.sent.at(-1).cursors).toEqual({ b: 1 });
+      socket.frame({
+        type: "event",
+        event: { ...event(2, "output", output), agent_id: "b" },
+      });
+      await vi.waitFor(() => expect(client.state.cursors.b).toBe(2));
+    } finally {
+      client.stop();
+    }
+  });
+  it.each(["cursor_invalid", "not_found", "deleted event reference"])(
+    "rebuilds inventory after deletion races a subscription or fetch: %s",
+    async (failure) => {
+      const { client, socket, fetcher } = await setup(async () =>
+        Response.json(
+          { error: { code: "not_found", message: "agent deleted" } },
+          { status: 404 },
+        ),
+      );
+      try {
+        socket.frame({ type: "event", event: event(1, "output", output) });
+        await vi.waitFor(() => expect(client.state.cursors.a).toBe(1));
+        fetcher.mockImplementation(async (path: string) =>
+          path.includes("/events/")
+            ? Response.json(
+                { error: { code: "not_found", message: "agent deleted" } },
+                { status: 404 },
+              )
+            : Response.json([]),
+        );
+        socket.frame(
+          failure === "deleted event reference"
+            ? { type: "event_ref", agent_id: "a", cursor: 2, url: "/ignored" }
+            : {
+                type: "error",
+                request_id: "sub",
+                code: failure,
+                message: "agent deleted",
+              },
+        );
+        await vi.waitFor(() => expect(Socket.instances).toHaveLength(2));
+        const replacement = Socket.instances[1];
+        replacement.open();
+        expect(replacement.sent.at(-1).agent_ids).toEqual([]);
+        expect(replacement.sent.at(-1).cursors).toEqual({});
+        expect(client.state.transcripts).toEqual({});
+        replacement.frame({ type: "subscribed", request_id: "new-sub" });
+        await vi.waitFor(() => expect(client.state.status).toBe("live"));
+      } finally {
+        client.stop();
+      }
+    },
+  );
   it("serializes event references before following frames, never acknowledging inventory", async () => {
     let resolve!: (response: Response) => void;
     const reference = new Promise<Response>((r) => {

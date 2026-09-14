@@ -26,6 +26,7 @@ export function projectWorkspaceDefaults(
 }
 export type Frame =
   | Schema["WSInventory"]
+  | Schema["WSAgentDeleted"]
   | Schema["WSEvent"]
   | Schema["WSEventReference"]
   | Schema["WSError"]

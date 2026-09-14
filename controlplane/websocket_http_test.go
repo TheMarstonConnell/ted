@@ -58,7 +58,7 @@ func readHTTPWS(t *testing.T, c *websocket.Conn) wsTestFrame {
 		t.Fatalf("invalid frame kind/size: %d %d", kind, len(data))
 	}
 	f := decodeHTTP[wsTestFrame](t, data)
-	names := map[string]string{"subscribed": "WSSubscribed", "inventory": "WSInventory", "event": "WSEvent", "event_ref": "WSEventReference", "ack": "WSAck", "error": "WSError"}
+	names := map[string]string{"subscribed": "WSSubscribed", "inventory": "WSInventory", "agent_deleted": "WSAgentDeleted", "event": "WSEvent", "event_ref": "WSEventReference", "ack": "WSAck", "error": "WSError"}
 	name, ok := names[f.Type]
 	if !ok {
 		t.Fatalf("unknown frame: %s", data)
@@ -519,5 +519,47 @@ func TestHTTPWebSocketSettledStoppingFlushesFinalEvents(t *testing.T) {
 	}
 	if !sawTerminal || !sawIdle {
 		t.Fatalf("settled subscription dropped terminal frames: terminal=%v idle=%v", sawTerminal, sawIdle)
+	}
+}
+
+func TestHTTPWebSocketProjectDeletionRetiresObservedAgents(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit=%v", explicit), func(t *testing.T) {
+			f := newHTTPFixture(t, nil)
+			project := f.project()
+			a := f.agent(project)
+			other := f.agent(f.project())
+			c := dialHTTPWS(t, f.server)
+			var ids []string
+			if explicit {
+				ids = []string{a.ID, other.ID}
+			}
+			subscribeHTTPWS(t, c, !explicit, ids, nil)
+			cursors := map[string]uint64{}
+			drainHTTPWS(t, c, cursors, map[string]uint64{a.ID: a.Cursor, other.ID: other.Cursor})
+			settled, err := f.s.SetSettled(a.ID, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			drainHTTPWS(t, c, cursors, map[string]uint64{a.ID: settled.Cursor})
+			f.request("DELETE", "/v1/projects/"+project.ID, "", "", 204)
+			deleted := readHTTPWS(t, c)
+			if deleted.Type != "agent_deleted" || deleted.AgentID != a.ID {
+				t.Fatalf("deletion frame: %+v", deleted)
+			}
+			delete(cursors, a.ID)
+			effort := "high"
+			updated, err := f.s.UpdateSettings(other.ID, SettingsPatch{Effort: &effort})
+			if err != nil {
+				t.Fatal(err)
+			}
+			drainHTTPWS(t, c, cursors, map[string]uint64{other.ID: updated.Cursor})
+			// Fresh subscriptions do not silently accept deleted identities.
+			fresh := dialHTTPWS(t, f.server)
+			sendHTTPWS(t, fresh, map[string]any{"type": "subscribe", "request_id": "stale", "subscribe_all": true, "cursors": map[string]uint64{a.ID: settled.Cursor}})
+			if got := readHTTPWS(t, fresh); got.Type != "error" || got.Code != "cursor_invalid" {
+				t.Fatalf("stale resume: %+v", got)
+			}
+		})
 	}
 }

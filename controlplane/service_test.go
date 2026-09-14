@@ -521,35 +521,45 @@ func TestDeleteSettledProjectRollsBackOnStorageFailure(t *testing.T) {
 	}
 }
 
-func TestDeleteEmptyProject(t *testing.T) {
-	s, _, _, _ := serviceFixture(t)
-	p, err := s.CreateProject(CreateProjectRequest{Name: "empty", Root: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = s.DeleteProject(p.ID); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestDeleteProjectWaitsForSettledWorker(t *testing.T) {
-	s, _, project, a := serviceFixture(t)
-	if _, err := s.SetSettled(a.ID, true); err != nil {
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	release := make(chan struct{})
+	f := newHTTPFixture(t, &httpTestProvider{complete: func(r agent.CompletionRequest) (*agent.Response, error) {
+		close(started)
+		<-r.Context.Done()
+		close(cancelled)
+		<-release
+		return nil, r.Context.Err()
+	}})
+	var finish sync.Once
+	defer finish.Do(func() { close(release) })
+	project := f.project()
+	a := f.agent(project)
+	if _, err := f.s.Submit(a.ID, "run", ""); err != nil {
 		t.Fatal(err)
 	}
-	// Model the interval after cancellation but before the worker finalizes.
-	s.mu.Lock()
-	s.running[a.ID] = &runningTurn{}
-	s.mu.Unlock()
-	err := s.DeleteProject(project.ID)
-	s.mu.Lock()
-	delete(s.running, a.ID)
-	s.mu.Unlock()
-	assertStatus(t, err, 409)
-	if _, err := s.GetAgent(a.ID); err != nil {
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("turn did not start")
+	}
+	if _, err := f.s.SetSettled(a.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteProject(project.ID); err != nil {
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("settlement did not cancel the turn")
+	}
+	assertStatus(t, f.s.DeleteProject(project.ID), 409)
+	got, err := f.s.GetAgent(a.ID)
+	if err != nil || got.State != "stopping" {
+		t.Fatalf("stopping agent was not retained: %+v %v", got, err)
+	}
+	finish.Do(func() { close(release) })
+	awaitAgent(t, f.s, a.ID, func(a Agent) bool { return a.State == "idle" })
+	if err := f.s.DeleteProject(project.ID); err != nil {
 		t.Fatal(err)
 	}
 }

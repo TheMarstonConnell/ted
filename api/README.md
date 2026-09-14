@@ -72,8 +72,10 @@ Agent lists default to unsettled only; set `include_settled=true` to inspect all
 and optionally filter by `project_id`. Settling a running agent initiates
 cancellation; the final output and conversation still remain replayable.
 Settled agents must be restored with `PATCH {"settled":false}` before continuing
-or submitting. Deleting projects with any agents (including settled) returns
-409; there is no destructive agent/log deletion endpoint.
+or submitting. Deleting a project permanently removes its settled agents, chat
+history, and associated idempotency receipts. Unsettled agents or workers still
+finishing cancellation block deletion with 409. The project directory is never
+removed. The web UI asks for confirmation before deletion.
 
 HTTP create-agent and submit-message operations accept optional
 `Idempotency-Key`. A key is global for agent creation, per agent for messages,

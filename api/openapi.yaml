@@ -1515,6 +1515,19 @@ components:
       required:
       - type
       - agent
+    WSAgentDeleted:
+      type: object
+      additionalProperties: false
+      description: A previously inventoried agent was permanently deleted. Discard its local state and resume cursor.
+      properties:
+        type:
+          type: string
+          enum:
+          - agent_deleted
+        agent_id: *id010
+      required:
+      - type
+      - agent_id
     WSEvent:
       type: object
       additionalProperties: false

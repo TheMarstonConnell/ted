@@ -314,7 +314,7 @@ func (s *Service) DeleteProject(id string) error {
 		}
 	}
 	for key, receipt := range s.state.Receipts {
-		if _, ok := s.state.Agents[receipt.AgentID]; !ok {
+		if a := before.Agents[receipt.AgentID]; a != nil && a.Agent.ProjectID == id {
 			delete(s.state.Receipts, key)
 		}
 	}
@@ -831,6 +831,10 @@ func (s *Service) Events(id string, after uint64, limit int) ([]Event, error) {
 func (s *Service) SnapshotEvents(cursors map[string]uint64, all bool, ids []string) ([]Agent, []Event, <-chan struct{}, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.snapshotEventsLocked(cursors, all, ids)
+}
+
+func (s *Service) snapshotEventsLocked(cursors map[string]uint64, all bool, ids []string) ([]Agent, []Event, <-chan struct{}, error) {
 	if s.storageErr != nil {
 		return nil, nil, nil, problem(503, "storage_failed", s.storageErr.Error())
 	}

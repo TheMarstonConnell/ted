@@ -109,13 +109,13 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-wake:
-			agents, events, next, err := h.snapshotWS(sub)
+			agents, events, deleted, next, err := h.snapshotWS(sub)
 			if err != nil {
 				_ = writeWSError(c, "", err)
 				return
 			}
 			sub.wake = next
-			if err = h.deliverWS(c, sub, agents, events); err != nil {
+			if err = h.deliverWS(c, sub, agents, events, deleted); err != nil {
 				return
 			}
 		case input := <-inputs:
@@ -145,7 +145,7 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 					}
 					continue
 				}
-				agents, events, next, err := h.snapshotWS(candidate)
+				agents, events, deleted, next, err := h.snapshotWS(candidate)
 				if err != nil {
 					if writeWSError(c, requestID, err) != nil {
 						return
@@ -157,7 +157,7 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				sub = candidate
-				if err = h.deliverWS(c, sub, agents, events); err != nil {
+				if err = h.deliverWS(c, sub, agents, events, deleted); err != nil {
 					return
 				}
 			case "submit":
@@ -226,7 +226,21 @@ func newWSSubscription(command api.WSSubscribe) (*wsSubscription, error) {
 	return s, nil
 }
 
-func (h *httpAPI) snapshotWS(s *wsSubscription) ([]Agent, []Event, <-chan struct{}, error) {
+func (h *httpAPI) snapshotWS(s *wsSubscription) ([]Agent, []Event, []string, <-chan struct{}, error) {
+	h.service.mu.Lock()
+	defer h.service.mu.Unlock()
+	var deleted []string
+	// Only retire identities already delivered on this subscription. New
+	// subscriptions still reject unknown IDs and invalid resume cursors.
+	for id := range s.inventory {
+		if _, ok := h.service.state.Agents[id]; !ok {
+			deleted = append(deleted, id)
+			delete(s.explicit, id)
+			delete(s.known, id)
+			delete(s.cursors, id)
+			delete(s.inventory, id)
+		}
+	}
 	selected := map[string]bool{}
 	for id := range s.explicit {
 		selected[id] = true
@@ -239,7 +253,8 @@ func (h *httpAPI) snapshotWS(s *wsSubscription) ([]Agent, []Event, <-chan struct
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	return h.service.SnapshotEvents(s.cursors, s.all, ids)
+	agents, events, next, err := h.service.snapshotEventsLocked(s.cursors, s.all, ids)
+	return agents, events, deleted, next, err
 }
 
 func summaryWS(a Agent) (api.AgentSummary, error) {
@@ -257,7 +272,12 @@ func summaryWS(a Agent) (api.AgentSummary, error) {
 	return summary, err
 }
 
-func (h *httpAPI) deliverWS(c *websocket.Conn, s *wsSubscription, agents []Agent, events []Event) error {
+func (h *httpAPI) deliverWS(c *websocket.Conn, s *wsSubscription, agents []Agent, events []Event, deleted []string) error {
+	for _, id := range deleted {
+		if err := writeWS(c, api.WSAgentDeleted{Type: api.AgentDeleted, AgentId: id}); err != nil {
+			return err
+		}
+	}
 	for _, a := range agents {
 		summary, err := summaryWS(a)
 		if err != nil {

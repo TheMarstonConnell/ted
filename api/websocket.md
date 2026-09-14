@@ -7,7 +7,7 @@ Browser `Origin` must match the request's scheme and host (including port).
 Non-browser clients may omit `Origin`. No wildcard CORS is enabled.
 
 The normative payload schemas are `WSSubscribe`, `WSSubmit`, `WSSubscribed`,
-`WSInventory`, `WSEvent`, `WSEventReference`, `WSAck`, and `WSError` in
+`WSInventory`, `WSAgentDeleted`, `WSEvent`, `WSEventReference`, `WSAck`, and `WSError` in
 [`openapi.yaml`](openapi.yaml). The server validates client frames against these
 same embedded schemas. HTTP and WS share `Settings`, `AgentSummary`, `Event`, and
 message schemas. Each application message is a single UTF-8 JSON text message.
@@ -69,6 +69,21 @@ observed, unless explicitly selected. Its processed
 cursor is remembered on the connection; if restored to unsettled, only newer
 events are sent. An all-mode client reconnecting should send cursors for every
 previously observed agent to catch offline settlements.
+
+Deleting a project retires its agents from existing live subscriptions. For each
+previously inventoried agent, the server sends a deletion notification and drops
+its subscription cursor, including explicit selections and already-settled agents:
+
+```json
+{"type":"agent_deleted","agent_id":"agent-a"}
+```
+
+Discard that agent's local inventory, history, and resume cursor. Other agents'
+live streams continue without resetting their cursors. These notifications are
+connection-local, not retained events. New subscriptions still reject unknown
+IDs and cursors, including agents deleted while disconnected; refresh HTTP
+inventory and rebuild subscriptions if deletion invalidates saved cursors. The
+web client also rebuilds after a deletion races an event-reference fetch.
 
 ## Submit
 
