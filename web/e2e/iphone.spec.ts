@@ -11,7 +11,8 @@ for (const colorScheme of ["light", "dark"] as const) {
     test("selected chats, tool responses and short viewports remain usable", async ({
       page,
     }, testInfo) => {
-      const { agents, emit } = await workspace(page);
+      const fixture = await workspace(page);
+      const { agents, emit } = fixture;
       const output = (
         id: string,
         ResponseType: string,
@@ -181,6 +182,42 @@ for (const colorScheme of ["light", "dark"] as const) {
       await composer.tap();
       await expect(composer).toBeFocused();
       await expect(composer).toHaveValue("A longer draft\n".repeat(20));
+      fixture.setWorkspace("a1", {
+        mode: "worktree",
+        base_branch: "origin/main",
+        locked: false,
+        status: "draft",
+      });
+      await page.route("**/v1/agents/a1/messages", async (route) => {
+        const text = route.request().postDataJSON().text;
+        await route.fulfill({
+          json: {
+            id: "setup-delayed",
+            text,
+            status: "pending",
+            created_at: new Date().toISOString(),
+          },
+        });
+      });
+      await composer.press("Enter");
+      await expect(page.getByText("Setting up workspace")).toBeVisible();
+      await expect(
+        page.getByRole("region", { name: "Outgoing messages" }),
+      ).toBeVisible();
+      const pane = page.locator('[data-slot="composer-pane"]');
+      expect(await pane.evaluate((element) => element.clientHeight)).toBe(424);
+      expect(
+        await pane.evaluate((element) => element.scrollHeight),
+      ).toBeGreaterThan(424);
+      const sidebar = page.getByRole("button", {
+        name: "Open sidebar",
+        exact: true,
+      });
+      await sidebar.scrollIntoViewIfNeeded();
+      await expect(sidebar).toBeInViewport();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollHeight),
+      ).toBe(480);
     });
   });
 }
