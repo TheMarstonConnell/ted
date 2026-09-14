@@ -87,7 +87,7 @@ func (a *Agent) path() string { return agentPath(a.id) }
 func (a *Agent) updateSnapshot(s Snapshot) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if s.ID != a.snapshot.ID || s.Cursor < a.snapshot.Cursor {
+	if s.Cursor < a.snapshot.Cursor {
 		return
 	}
 	s.Messages = a.snapshot.Messages // only consumed conversation events advance history

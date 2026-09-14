@@ -309,8 +309,8 @@ export class ControlPlane {
         .catch((error) => {
           failed = true;
           if (ws !== this.socket || this.stopped) return;
-          // Deletion can race a reconnect, replacement subscription, or an
-          // event-reference fetch. Rebuild inventory and replay from scratch.
+          // Deletion can race the initial inventory fetch, before any missing
+          // project is known to refreshProjects, or an event-reference fetch.
           if (
             error instanceof APIError &&
             (error.code === "cursor_invalid" || error.code === "not_found")
@@ -336,23 +336,22 @@ export class ControlPlane {
   refreshProjects = async () => {
     const generation = this.generation;
     const projects = await api<Project[]>("/v1/projects");
-    if (!this.stopped && this.generation === generation)
-      this.set({
-        agents: Object.fromEntries(
-          Object.entries(this.state.agents).filter(
-            ([, agent]) =>
-              !this.state.projects.some(
-                (project) => project.id === agent.project_id,
-              ) || projects.some((project) => project.id === agent.project_id),
-          ),
-        ),
-        projects: projects.map((project) => ({
-          ...this.state.projects.find((p) => p.id === project.id),
-          ...project,
-        })),
-      });
-    if (!this.stopped && this.generation === generation)
-      void this.refreshAgentProjects();
+    if (this.stopped || this.generation !== generation) return;
+    if (
+      this.state.projects.some(
+        (known) => !projects.some((project) => project.id === known.id),
+      )
+    ) {
+      await this.start();
+      return;
+    }
+    this.set({
+      projects: projects.map((project) => ({
+        ...this.state.projects.find((p) => p.id === project.id),
+        ...project,
+      })),
+    });
+    void this.refreshAgentProjects();
   };
   private refreshAgentProjects = async () => {
     if (this.stopped) return;

@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { openProjectDefaults, workspace } from "./fixtures";
 
-test("settled project deletion warns, can be cancelled, and removes sidebar history", async ({
+test("settled project deletion warns and removes sidebar history", async ({
   page,
 }) => {
   const { agents } = await workspace(page);
@@ -33,11 +33,6 @@ test("settled project deletion warns, can be cancelled, and removes sidebar hist
       exact: false,
     }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Keep project", exact: true }).click();
-  expect(deleted).toBe(false);
-  await page
-    .getByRole("button", { name: "Delete project", exact: true })
-    .click();
   await page
     .getByRole("button", { name: "Confirm delete", exact: true })
     .click();

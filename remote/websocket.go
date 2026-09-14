@@ -26,13 +26,6 @@ func (a *Agent) subscriptionError(ctx context.Context, err error) error {
 			err = ErrAgentDeleted
 		}
 	}
-	if errors.Is(err, ErrAgentDeleted) {
-		a.mu.Lock()
-		a.snapshot = Snapshot{}
-		a.cursor = 0
-		a.root = ""
-		a.mu.Unlock()
-	}
 	return err
 }
 

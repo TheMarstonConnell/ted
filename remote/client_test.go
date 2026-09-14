@@ -172,7 +172,7 @@ func TestGitBranchComesFromServer(t *testing.T) {
 	}
 }
 
-func TestDeletedAgentStopsSubscriptionAndDiscardsState(t *testing.T) {
+func TestDeletedAgentStopsSubscription(t *testing.T) {
 	for _, mode := range []string{"live", "reconnect", "initial"} {
 		t.Run(mode, func(t *testing.T) {
 			var connections atomic.Int32
@@ -210,7 +210,7 @@ func TestDeletedAgentStopsSubscriptionAndDiscardsState(t *testing.T) {
 			defer server.Close()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			a := NewAgent(ctx, New(server.URL), Snapshot{ID: "a", State: "idle", Cursor: 5, Messages: []agent.Message{{Role: "user", Content: agent.TextContent("private history")}}}, "/server", nil)
+			a := NewAgent(ctx, New(server.URL), Snapshot{ID: "a", State: "idle", Cursor: 5}, "/server", nil)
 			updates := make(chan Update, 10)
 			err := a.Subscribe(ctx, func(u Update) { updates <- u })
 			if mode == "initial" {
@@ -233,15 +233,6 @@ func TestDeletedAgentStopsSubscriptionAndDiscardsState(t *testing.T) {
 						t.Fatal("no terminal deletion notification")
 					}
 				}
-			}
-			if len(a.Messages()) != 0 || a.WorkingDir() != "" || a.Ready() {
-				t.Fatal("deleted agent retained renderable state")
-			}
-			a.mu.RLock()
-			cursor, id := a.cursor, a.snapshot.ID
-			a.mu.RUnlock()
-			if cursor != 0 || id != "" {
-				t.Fatalf("retained deleted subscription: %s/%d", id, cursor)
 			}
 			count := connections.Load()
 			time.Sleep(1200 * time.Millisecond)
