@@ -420,9 +420,7 @@ seconds of deliberate pauses:
 ted browser record start
 sleep 2
 ted browser fill --label Email --value test@example.com
-sleep 2
-ted browser press --key Tab
-sleep 2
+sleep 4
 ted browser click --role button --name 'Sign in'
 ted browser wait --url-pattern '*/dashboard'
 sleep 4
@@ -439,8 +437,7 @@ ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:no
 ```
 
 Review the saved clip's pacing and visible outcome, and re-record it if it is
-rushed or unclear. The same guidance applies to recordings made with other
-tools, such as Playwright.
+rushed or unclear.
 
 ### Raw CDP escape hatch
 
