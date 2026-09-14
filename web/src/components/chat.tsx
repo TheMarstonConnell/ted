@@ -60,7 +60,12 @@ import {
   type QueueMessage,
   type WorkspaceSelection,
 } from "@/lib/api";
-import { control, useControl, type TranscriptItem } from "@/lib/store";
+import {
+  control,
+  renderedResponseCursor,
+  useControl,
+  type TranscriptItem,
+} from "@/lib/store";
 import { ErrorNotice, Loading, ModelFields } from "./common";
 import { ChatImage } from "./chat-image";
 import {
@@ -384,9 +389,7 @@ function ChatWorkspace() {
   };
   const [notice, setNotice] = useState<string | null>(null);
   const ready = !!agent && replayed[agentId];
-  const responseCursor = Number(
-    items.findLast((item) => item.kind === "agent")?.id || 0,
-  );
+  const responseCursor = renderedResponseCursor(items);
   useChatRead(
     agentId,
     responseCursor,

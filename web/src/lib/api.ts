@@ -34,9 +34,11 @@ export type Frame =
 
 export class APIError extends Error {
   code: string;
-  constructor(code: string, message: string) {
+  status?: number;
+  constructor(code: string, message: string, status?: number) {
     super(message);
     this.code = code;
+    this.status = status;
   }
 }
 export async function api<T>(
@@ -58,6 +60,7 @@ export async function api<T>(
     throw new APIError(
       data?.error?.code || String(response.status),
       data?.error?.message || response.statusText,
+      response.status,
     );
   }
   return response.status === 204 ? (undefined as T) : response.json();

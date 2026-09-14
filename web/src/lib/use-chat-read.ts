@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
+import { APIError } from "./api";
 import { control } from "./store";
 
 function subscribeForeground(listener: () => void) {
@@ -39,8 +40,14 @@ export function useChatRead(
         !document.hasFocus()
       )
         return;
-      void control.markRead(id, cursor).catch(() => {
-        if (!disposed) retry = setTimeout(acknowledge, 3000);
+      void control.markRead(id, cursor).catch((error: unknown) => {
+        if (
+          !disposed &&
+          (!(error instanceof APIError) ||
+            error.status === undefined ||
+            error.status >= 500)
+        )
+          retry = setTimeout(acknowledge, 3000);
       });
     };
     acknowledge();

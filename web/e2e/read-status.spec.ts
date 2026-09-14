@@ -176,6 +176,25 @@ test("failed receipts retry only while the chat is in the foreground", async ({
   expect(attempts).toBe(2);
 });
 
+test("permanent receipt failures are not retried", async ({ page }) => {
+  const { emit, agents } = await seed(page);
+  let attempts = 0;
+  await page.route("**/v1/agents/a", async (route) => {
+    attempts++;
+    await route.fulfill({
+      status: 410,
+      json: {
+        error: { code: "cursor_invalid", message: "Cursor is no longer valid" },
+      },
+    });
+  });
+  emit("a", "output", response("A response with an invalid receipt."));
+  await expect.poll(() => attempts).toBe(1);
+  await page.waitForTimeout(3200);
+  expect(attempts).toBe(1);
+  expect(agents.a.read_cursor).toBe(0);
+});
+
 test("opening a chat waits for its response to load before acknowledging it", async ({
   page,
 }) => {

@@ -70,6 +70,10 @@ export function isUnread(agent: Agent, pending = 0) {
   );
 }
 
+export function renderedResponseCursor(items: TranscriptItem[] | undefined) {
+  return Number(items?.findLast((item) => item.kind === "agent")?.id || 0);
+}
+
 // Output events are completed display messages (not token deltas). Conversation
 // events are model checkpoints and must not be rendered again as duplicate output.
 export function reduceEvent(state: State, event: Event): State {

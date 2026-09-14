@@ -24,7 +24,12 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { groupAgents, agentTitle, agentWorkspace, type Agent } from "@/lib/api";
-import { control, isUnread, useControl } from "@/lib/store";
+import {
+  control,
+  isUnread,
+  renderedResponseCursor,
+  useControl,
+} from "@/lib/store";
 import { useChatForeground } from "@/lib/use-chat-read";
 import { usePanel } from "@/lib/navigation";
 import { ErrorNotice } from "@/components/common";
@@ -69,9 +74,8 @@ export function AgentLink({
     selected &&
     foreground &&
     ready[agent.id] &&
-    Number(
-      transcripts[agent.id]?.findLast((item) => item.kind === "agent")?.id || 0,
-    ) >= (agent.last_response_cursor || 0);
+    renderedResponseCursor(transcripts[agent.id]) >=
+      (agent.last_response_cursor || 0);
   const unread = !viewed && isUnread(agent, readPending[agent.id]);
   const children = childrenByParent.get(agent.id) || [];
   const hasChildren = children.length > 0;
