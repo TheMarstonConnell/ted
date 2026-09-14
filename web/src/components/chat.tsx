@@ -366,7 +366,7 @@ function OutgoingMessages({
     <section
       ref={viewport}
       aria-label="Outgoing messages"
-      className="max-h-40 space-y-2 overflow-y-auto"
+      className="max-h-40 space-y-6 overflow-y-auto"
     >
       {messages.map((message) => (
         <div

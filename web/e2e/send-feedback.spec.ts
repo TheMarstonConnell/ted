@@ -134,12 +134,17 @@ test("keeps the newest outgoing preview visible in the capped outbox", async ({
   await expect
     .poll(() =>
       preview.evaluate((outbox) => {
-        const item = outbox.lastElementChild?.getBoundingClientRect();
+        const items = [...outbox.children].map((item) =>
+          item.getBoundingClientRect(),
+        );
         const bounds = outbox.getBoundingClientRect();
-        return !!item && item.bottom <= bounds.bottom + 1;
+        return {
+          newestVisible: items.at(-1)!.bottom <= bounds.bottom + 1,
+          messageGap: Math.round(items[1].top - items[0].bottom),
+        };
       }),
     )
-    .toBe(true);
+    .toEqual({ newestVisible: true, messageGap: 24 });
 });
 
 test("failed sends remove the preview, restore the draft, and reuse the retry key", async ({
