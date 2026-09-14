@@ -85,6 +85,7 @@ type model struct {
 	agentStyle     lipgloss.Style
 	toolCallStyle  lipgloss.Style
 	err            error
+	exitErr        error
 	agent          tuiAgent
 	commands       *commands.Handler
 	picker         *pickerState
@@ -536,7 +537,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case remoteDeletedMsg:
-		m.err = msg.err
+		m.exitErr = msg.err
 		m.messages = nil
 		m.textarea.Reset()
 		m.picker = nil

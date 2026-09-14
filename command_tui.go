@@ -125,7 +125,7 @@ func runRemoteTUISession(ctx context.Context, server, prompt, modelID, effort, r
 	if err != nil {
 		return fmt.Errorf("could not run tea program: %w", err)
 	}
-	return final.(model).err
+	return final.(model).exitErr
 }
 
 // Startup options select a project/location without changing the process cwd.

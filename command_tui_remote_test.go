@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -172,7 +174,7 @@ func TestRemoteDeletionClearsUIAndExits(t *testing.T) {
 	m.initialPrompt = "pending initial prompt"
 	next, cmd := m.Update(remoteDeletedMsg{err: remote.ErrAgentDeleted})
 	got := next.(model)
-	if got.err != remote.ErrAgentDeleted || len(got.messages) != 0 || got.textarea.Value() != "" || got.initialPrompt != "" || got.transcriptContent != "" {
+	if got.exitErr != remote.ErrAgentDeleted || len(got.messages) != 0 || got.textarea.Value() != "" || got.initialPrompt != "" || got.transcriptContent != "" {
 		t.Fatal("deleted session remains visible or submittable")
 	}
 	if cmd == nil {
@@ -180,5 +182,24 @@ func TestRemoteDeletionClearsUIAndExits(t *testing.T) {
 	}
 	if _, ok := cmd().(tea.QuitMsg); !ok {
 		t.Fatal("deletion did not exit the TUI")
+	}
+}
+
+func TestRemoteNormalExitPreservesMarkdownFallback(t *testing.T) {
+	instance := remote.NewAgent(context.Background(), remote.New("http://unused"), remote.Snapshot{ID: "a", State: "idle"}, "/server", nil)
+	m := initialModel(instance)
+	m.markdown = nil
+	m.err = errors.New("renderer unavailable")
+	m.appendMessage(agentMessage, "raw fallback")
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	got := next.(model)
+	if got.exitErr != nil || !strings.Contains(got.transcriptContent, "raw fallback") {
+		t.Fatal("renderer fallback became fatal or lost the transcript")
+	}
+	if cmd == nil {
+		t.Fatal("no quit command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("normal exit did not quit")
 	}
 }
