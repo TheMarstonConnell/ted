@@ -297,6 +297,9 @@ func (s *Service) DeleteProject(id string) error {
 	}
 	for agentID, a := range s.state.Agents {
 		if a.Agent.ProjectID != id {
+			if parent := s.state.Agents[a.Agent.ParentAgentID]; parent != nil && parent.Agent.ProjectID == id {
+				return problem(409, "project_not_empty", "project has child agents in other projects")
+			}
 			continue
 		}
 		if !a.Agent.Settled {

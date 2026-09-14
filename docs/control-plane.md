@@ -33,7 +33,7 @@ state directory. This is not a distributed/multi-process service.
 A project has a stable ID, display name, canonical absolute root directory, and
 model/effort defaults. The directory must already exist on the server. A canonical
 root identifies one project. Roots are immutable; names and defaults can change.
-Projects can be deleted when all their agents are settled and have finished stopping. Deletion permanently removes those agents and their chat history, but does not remove the project directory. The web UI asks for confirmation before deletion.
+Projects can be deleted when all their agents are settled, have finished stopping, and have no child agents in other projects. Deletion permanently removes those agents and their chat history, but does not remove the project directory. The web UI asks for confirmation before deletion.
 
 Each new chat snapshots project workspace defaults and can choose Current checkout
 or Worktree before its first message. Current checkout uses the root as-is;

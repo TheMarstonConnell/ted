@@ -255,7 +255,7 @@ function ProjectForm() {
                 Are you sure you want to delete this project? This will
                 permanently delete all your settled agents in this project,
                 including their chat history. Projects with unsettled agents
-                cannot be deleted. The directory itself will not be removed.
+                or child agents in other projects cannot be deleted. The directory itself will not be removed.
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button
