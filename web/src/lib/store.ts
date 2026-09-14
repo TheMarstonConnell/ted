@@ -238,7 +238,6 @@ export class ControlPlane {
       ]);
       if (this.stopped || generation !== this.generation) return;
       // Fresh replay on an explicit restart, with no persisted cursor/state mismatch.
-      const active = new Set(agents.map((agent) => agent.id));
       this.set({
         ...initial(),
         agents: Object.fromEntries(
@@ -246,9 +245,7 @@ export class ControlPlane {
         ),
         projects,
         models,
-        outgoing: Object.fromEntries(
-          Object.entries(this.state.outgoing).filter(([id]) => active.has(id)),
-        ),
+        outgoing: this.state.outgoing,
         loaded: true,
       });
       this.connect();
@@ -561,12 +558,8 @@ export class ControlPlane {
     updateOutgoing({ key, text });
     const submit = () =>
       api<QueueMessage>(`${agentPath(id)}/messages`, "POST", { text }, key);
-    const restore = async () => {
-      const agent = await this.settle(id, false);
-      if (generation === this.generation) this.mergeAgent(agent);
-    };
     try {
-      if (this.state.agents[id]?.settled) await restore();
+      if (this.state.agents[id]?.settled) await this.settle(id, false);
       let message: QueueMessage;
       try {
         message = await submit();
@@ -574,7 +567,7 @@ export class ControlPlane {
         // Another client may have settled the chat since our last event.
         if (!(error instanceof APIError) || error.code !== "settled")
           throw error;
-        await restore();
+        await this.settle(id, false);
         message = await submit();
       }
       // Either transport can win. Retain the preview until replay owns the ID.

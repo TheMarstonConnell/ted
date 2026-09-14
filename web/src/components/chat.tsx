@@ -637,10 +637,7 @@ function ChatWorkspace() {
           state={agent.state}
           onScrollIntent={onScrollIntent}
         />
-        <div
-          data-slot="composer-pane"
-          className="workspace-scroll-gutter scrollbar-thin max-h-full shrink-0 overflow-y-auto"
-        >
+        <div className="workspace-scroll-gutter scrollbar-thin max-h-full shrink-0 overflow-y-auto">
           <div className="mx-auto w-full max-w-chat space-y-4 px-4 pb-4 pt-2 md:px-8">
             <ErrorNotice error={error} />
             {workspace && workspace.status !== "draft" && (

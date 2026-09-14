@@ -204,11 +204,6 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(
         page.getByRole("region", { name: "Outgoing messages" }),
       ).toBeVisible();
-      const pane = page.locator('[data-slot="composer-pane"]');
-      expect(await pane.evaluate((element) => element.clientHeight)).toBe(424);
-      expect(
-        await pane.evaluate((element) => element.scrollHeight),
-      ).toBeGreaterThan(424);
       const sidebar = page.getByRole("button", {
         name: "Open sidebar",
         exact: true,

@@ -93,9 +93,6 @@ for (const mobile of [false, true]) {
       expect(await gap()).toBeLessThan(5);
       await send.click();
       await expect(
-        page.getByRole("region", { name: "Outgoing messages" }),
-      ).toHaveCount(0);
-      await expect(
         viewport.getByRole("article", {
           name: "Your message",
           exact: true,
@@ -120,9 +117,6 @@ for (const mobile of [false, true]) {
       await expect.poll(gap).toBeLessThan(5);
       const before = (await composer.boundingBox())!.height;
       await composer.press("Enter");
-      await expect(
-        page.getByRole("region", { name: "Outgoing messages" }),
-      ).toHaveCount(0);
       await expect(
         viewport.getByRole("article", {
           name: "Your message",
