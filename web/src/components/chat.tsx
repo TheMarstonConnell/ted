@@ -726,7 +726,7 @@ function ChatWorkspace() {
               <section
                 ref={outgoingViewport}
                 aria-label="Outgoing messages"
-                className="max-h-40 space-y-6 overflow-y-auto"
+                className="workspace-scroll-gutter scrollbar-thin max-h-40 space-y-6 overflow-y-auto"
               >
                 {outgoing[agentId].map((message) => (
                   <ConversationMessage

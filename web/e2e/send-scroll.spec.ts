@@ -411,8 +411,13 @@ test("keeps the newest outgoing preview visible in the capped outbox", async ({
         return {
           newestVisible: items.at(-1)!.bottom <= bounds.bottom + 1,
           messageGap: Math.round(items[1].top - items[0].bottom),
+          scrollbarGutter: getComputedStyle(outbox).scrollbarGutter,
         };
       }),
     )
-    .toEqual({ newestVisible: true, messageGap: 24 });
+    .toEqual({
+      newestVisible: true,
+      messageGap: 24,
+      scrollbarGutter: "stable both-edges",
+    });
 });
