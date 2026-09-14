@@ -356,6 +356,7 @@ function ChatWorkspace() {
     agents,
     projects,
     transcripts,
+    outgoing,
     ready: replayed,
     loaded,
     status,
@@ -702,6 +703,29 @@ function ChatWorkspace() {
                   </div>
                 )}
               </div>
+            )}
+            {!!outgoing[agentId]?.length && (
+              <section
+                aria-label="Outgoing messages"
+                className="max-h-40 space-y-2 overflow-y-auto"
+              >
+                {outgoing[agentId].map((message) => (
+                  <div
+                    key={message.key}
+                    className="ml-auto w-fit max-w-[90%] rounded-xl bg-muted p-4"
+                  >
+                    <p className="whitespace-pre-wrap text-sm leading-6 [overflow-wrap:anywhere]">
+                      {message.text}
+                    </p>
+                    <p
+                      role="status"
+                      className="mt-2 text-xs text-muted-foreground"
+                    >
+                      {message.messageId ? "Sent · syncing…" : "Sending…"}
+                    </p>
+                  </div>
+                ))}
+              </section>
             )}
             <form onSubmit={submit} aria-label="Message composer">
               <InputGroup

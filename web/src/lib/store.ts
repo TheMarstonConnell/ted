@@ -24,6 +24,11 @@ export type TranscriptItem = {
   output?: string;
   time: string;
 };
+export type OutgoingMessage = {
+  key: string;
+  text: string;
+  messageId?: string;
+};
 export type State = {
   agents: Record<string, Agent>;
   projects: Project[];
@@ -32,6 +37,7 @@ export type State = {
   cursors: Record<string, number>;
   ready: Record<string, boolean>;
   readPending: Record<string, number>;
+  outgoing: Record<string, OutgoingMessage[]>;
   status: "connecting" | "live" | "offline";
   error: string | null;
   loaded: boolean;
@@ -44,6 +50,7 @@ const initial = (): State => ({
   cursors: {},
   ready: {},
   readPending: {},
+  outgoing: {},
   status: "connecting",
   error: null,
   loaded: false,
@@ -175,6 +182,15 @@ export function reduceEvent(state: State, event: Event): State {
     ready: { ...state.ready, [id]: state.ready[id] || cursor >= agent.cursor },
     agents: { ...state.agents, [id]: agent },
     cursors: { ...state.cursors, [id]: cursor },
+    outgoing:
+      type.startsWith("message.") || type.startsWith("turn.")
+        ? {
+            ...state.outgoing,
+            [id]: (state.outgoing[id] || []).filter(
+              (message) => message.messageId !== (data as QueueMessage).id,
+            ),
+          }
+        : state.outgoing,
     transcripts: item
       ? { ...state.transcripts, [id]: transcript }
       : state.transcripts,
@@ -521,22 +537,50 @@ export class ControlPlane {
       "DELETE",
     );
   send = async (id: string, text: string, key: string) => {
-    // Check current server state, not a potentially stale sidebar summary.
-    const agent = await api<Agent>(agentPath(id));
-    this.mergeAgent(agent);
-    if (agent.settled) await this.settle(id, false);
+    const generation = this.generation;
+    const updateOutgoing = (message?: OutgoingMessage) => {
+      if (generation !== this.generation) return;
+      this.set({
+        outgoing: {
+          ...this.state.outgoing,
+          [id]: [
+            ...(this.state.outgoing[id] || []).filter((m) => m.key !== key),
+            ...(message ? [message] : []),
+          ],
+        },
+      });
+    };
+    updateOutgoing({ key, text });
+    const submit = () =>
+      api<QueueMessage>(`${agentPath(id)}/messages`, "POST", { text }, key);
+    const restore = async () => {
+      const agent = await this.settle(id, false);
+      if (generation === this.generation) this.mergeAgent(agent);
+    };
     try {
-      const message = await api<QueueMessage>(
-        `${agentPath(id)}/messages`,
-        "POST",
-        { text },
-        key,
+      if (this.state.agents[id]?.settled) await restore();
+      let message: QueueMessage;
+      try {
+        message = await submit();
+      } catch (error) {
+        // Another client may have settled the chat since our last event.
+        if (!(error instanceof APIError) || error.code !== "settled")
+          throw error;
+        await restore();
+        message = await submit();
+      }
+      if (generation !== this.generation) return message;
+      // Either transport can win. Retain the preview until replay owns the ID.
+      updateOutgoing(
+        this.state.agents[id]?.queue?.some((m) => m.id === message.id)
+          ? undefined
+          : { key, text, messageId: message.id },
       );
+      const agent = this.state.agents[id];
       // The message response is intentionally queue-only, but a successful
       // first submission guarantees the server locked the location. Reflect
       // that immediately if its WebSocket update has not arrived yet.
-      const latest = this.state.agents[id];
-      if (agent.workspace && !latest?.workspace?.locked)
+      if (agent?.workspace && !agent.workspace.locked)
         this.mergeAgent({
           ...agent,
           workspace: {
@@ -547,10 +591,12 @@ export class ControlPlane {
         });
       return message;
     } catch (error) {
+      updateOutgoing();
       // First send locks a workspace even when setup or submission fails. Pull
       // the authoritative state so a stale draft UI never offers a retry.
       try {
-        this.mergeAgent(await api<Agent>(agentPath(id)));
+        const agent = await api<Agent>(agentPath(id));
+        if (generation === this.generation) this.mergeAgent(agent);
       } catch {
         // Preserve the original submission error.
       }
