@@ -190,7 +190,13 @@ const Message = memo(function Message({ item }: { item: TranscriptItem }) {
   return <ConversationMessage text={item.text} user={item.kind === "user"} />;
 });
 
-function ConversationMessage({ text, user }: { text: string; user: boolean }) {
+const ConversationMessage = memo(function ConversationMessage({
+  text,
+  user,
+}: {
+  text: string;
+  user: boolean;
+}) {
   return (
     <article
       aria-label={user ? "Your message" : "Assistant message"}
@@ -206,7 +212,7 @@ function ConversationMessage({ text, user }: { text: string; user: boolean }) {
       </div>
     </article>
   );
-}
+});
 
 const Transcript = memo(function Transcript({
   items,
