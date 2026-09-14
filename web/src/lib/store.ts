@@ -269,18 +269,6 @@ export class ControlPlane {
             this.failures = 0;
             this.set({ status: "live", error: null });
           }
-          if (frame.type === "agent_deleted") {
-            const agents = { ...this.state.agents };
-            const transcripts = { ...this.state.transcripts };
-            const cursors = { ...this.state.cursors };
-            const ready = { ...this.state.ready };
-            delete agents[frame.agent_id];
-            delete transcripts[frame.agent_id];
-            delete cursors[frame.agent_id];
-            delete ready[frame.agent_id];
-            this.set({ agents, transcripts, cursors, ready });
-            void this.refreshProjects().catch(() => {});
-          }
           if (frame.type === "inventory") {
             const previous = this.state.agents[frame.agent.id];
             this.set({
@@ -350,6 +338,14 @@ export class ControlPlane {
     const projects = await api<Project[]>("/v1/projects");
     if (!this.stopped && this.generation === generation)
       this.set({
+        agents: Object.fromEntries(
+          Object.entries(this.state.agents).filter(
+            ([, agent]) =>
+              !this.state.projects.some(
+                (project) => project.id === agent.project_id,
+              ) || projects.some((project) => project.id === agent.project_id),
+          ),
+        ),
         projects: projects.map((project) => ({
           ...this.state.projects.find((p) => p.id === project.id),
           ...project,

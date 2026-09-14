@@ -831,10 +831,6 @@ func (s *Service) Events(id string, after uint64, limit int) ([]Event, error) {
 func (s *Service) SnapshotEvents(cursors map[string]uint64, all bool, ids []string) ([]Agent, []Event, <-chan struct{}, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.snapshotEventsLocked(cursors, all, ids)
-}
-
-func (s *Service) snapshotEventsLocked(cursors map[string]uint64, all bool, ids []string) ([]Agent, []Event, <-chan struct{}, error) {
 	if s.storageErr != nil {
 		return nil, nil, nil, problem(503, "storage_failed", s.storageErr.Error())
 	}

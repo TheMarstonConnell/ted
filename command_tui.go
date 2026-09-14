@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -112,16 +113,19 @@ func runRemoteTUISession(ctx context.Context, server, prompt, modelID, effort, r
 		if update.Busy != nil {
 			p.Send(remoteStateMsg(*update.Busy))
 		}
-		if update.Err != nil {
+		if errors.Is(update.Err, remote.ErrAgentDeleted) {
+			p.Send(remoteDeletedMsg{err: update.Err})
+		} else if update.Err != nil {
 			p.Send(agent.AgentResponse{ResponseType: "status", Content: update.Err.Error()})
 		}
 	}); err != nil {
 		return err
 	}
-	if _, err := p.Run(); err != nil {
+	final, err := p.Run()
+	if err != nil {
 		return fmt.Errorf("could not run tea program: %w", err)
 	}
-	return nil
+	return final.(model).err
 }
 
 // Startup options select a project/location without changing the process cwd.

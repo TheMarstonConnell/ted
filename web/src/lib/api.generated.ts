@@ -612,12 +612,6 @@ export interface components {
             type: "inventory";
             agent: components["schemas"]["AgentSummary"];
         };
-        /** @description A previously inventoried agent was permanently deleted. Discard its local state and resume cursor. */
-        WSAgentDeleted: {
-            /** @enum {string} */
-            type: "agent_deleted";
-            agent_id: string;
-        };
         WSEvent: {
             /** @enum {string} */
             type: "event";

@@ -163,3 +163,22 @@ func TestPrepareRemoteAgentIdleResumeAndQueuedUI(t *testing.T) {
 		t.Fatal("continue did not release restored queue")
 	}
 }
+
+func TestRemoteDeletionClearsUIAndExits(t *testing.T) {
+	instance := remote.NewAgent(context.Background(), remote.New("http://unused"), remote.Snapshot{ID: "deleted", State: "idle"}, "/server", nil)
+	m := initialModel(instance)
+	m.appendMessage(userMessage, "private transcript")
+	m.textarea.SetValue("unsent message")
+	m.initialPrompt = "pending initial prompt"
+	next, cmd := m.Update(remoteDeletedMsg{err: remote.ErrAgentDeleted})
+	got := next.(model)
+	if got.err != remote.ErrAgentDeleted || len(got.messages) != 0 || got.textarea.Value() != "" || got.initialPrompt != "" || got.transcriptContent != "" {
+		t.Fatal("deleted session remains visible or submittable")
+	}
+	if cmd == nil {
+		t.Fatal("no quit command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("deletion did not exit the TUI")
+	}
+}

@@ -4,13 +4,13 @@ import { openProjectDefaults, workspace } from "./fixtures";
 test("settled project deletion warns, can be cancelled, and removes sidebar history", async ({
   page,
 }) => {
-  const { agents, deleteAgent } = await workspace(page);
+  const { agents } = await workspace(page);
   let deleted = false;
   await page.route("**/v1/projects/p", async (route) => {
     if (route.request().method() !== "DELETE") return route.fallback();
     expect(Object.values(agents).every((agent) => agent.settled)).toBe(true);
     deleted = true;
-    for (const id of Object.keys(agents)) deleteAgent(id);
+    for (const id of Object.keys(agents)) delete agents[id];
     await route.fulfill({ status: 204 });
   });
   await page.route("**/v1/projects", async (route) => {

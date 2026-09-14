@@ -523,36 +523,6 @@ describe("WebSocket cursor safety", () => {
     socket.frame({ type: "subscribed", request_id: "sub" });
     return { client, socket, fetcher };
   }
-  it("retires deleted history and cursors without interrupting other agents", async () => {
-    const { client, socket } = await setup(async () => Response.json(null));
-    try {
-      socket.frame({ type: "event", event: event(1, "output", output) });
-      socket.frame({ type: "inventory", agent: agent("b") });
-      socket.frame({
-        type: "event",
-        event: { ...event(1, "output", output), agent_id: "b" },
-      });
-      await vi.waitFor(() =>
-        expect(client.state.cursors).toEqual({ a: 1, b: 1 }),
-      );
-      socket.frame({ type: "agent_deleted", agent_id: "a" });
-      await vi.waitFor(() => expect(client.state.agents.a).toBeUndefined());
-      expect(client.state.transcripts.a).toBeUndefined();
-      expect(client.state.ready.a).toBeUndefined();
-      expect(client.state.cursors).toEqual({ b: 1 });
-      expect(client.state.status).toBe("live");
-      client.select("b");
-      expect(socket.sent.at(-1).agent_ids).toEqual(["b"]);
-      expect(socket.sent.at(-1).cursors).toEqual({ b: 1 });
-      socket.frame({
-        type: "event",
-        event: { ...event(2, "output", output), agent_id: "b" },
-      });
-      await vi.waitFor(() => expect(client.state.cursors.b).toBe(2));
-    } finally {
-      client.stop();
-    }
-  });
   it.each(["cursor_invalid", "not_found", "deleted event reference"])(
     "rebuilds inventory after deletion races a subscription or fetch: %s",
     async (failure) => {

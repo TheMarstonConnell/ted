@@ -194,13 +194,6 @@ export async function workspace(page: Page) {
     agents,
     events,
     emit,
-    deleteAgent(id: string) {
-      delete agents[id];
-      delete events[id];
-      sockets.forEach((ws) =>
-        ws.send(JSON.stringify({ type: "agent_deleted", agent_id: id })),
-      );
-    },
     updateAgent(id: string, patch: Record<string, unknown>) {
       Object.assign(agents[id], patch);
       inventory(id);

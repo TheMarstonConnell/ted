@@ -171,3 +171,83 @@ func TestGitBranchComesFromServer(t *testing.T) {
 		t.Fatal(branch, err)
 	}
 }
+
+func TestDeletedAgentStopsSubscriptionAndDiscardsState(t *testing.T) {
+	for _, mode := range []string{"live", "reconnect", "initial"} {
+		t.Run(mode, func(t *testing.T) {
+			var connections atomic.Int32
+			upgrader := websocket.Upgrader{}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/agents/a" {
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"agent deleted"}}`))
+					return
+				}
+				if r.URL.Path != "/v1/ws" {
+					t.Errorf("unexpected request: %s", r.URL)
+					w.WriteHeader(404)
+					return
+				}
+				conn, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				var sub any
+				if err := conn.ReadJSON(&sub); err != nil {
+					return
+				}
+				n := connections.Add(1)
+				if mode == "initial" || (mode == "reconnect" && n > 1) {
+					_ = conn.WriteJSON(map[string]any{"type": "error", "code": "cursor_invalid", "message": "unknown agent"})
+					return
+				}
+				_ = conn.WriteJSON(map[string]any{"type": "subscribed"})
+				if mode == "live" {
+					_ = conn.WriteJSON(map[string]any{"type": "error", "code": "cursor_invalid", "message": "agent deleted"})
+				}
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			a := NewAgent(ctx, New(server.URL), Snapshot{ID: "a", State: "idle", Cursor: 5, Messages: []agent.Message{{Role: "user", Content: agent.TextContent("private history")}}}, "/server", nil)
+			updates := make(chan Update, 10)
+			err := a.Subscribe(ctx, func(u Update) { updates <- u })
+			if mode == "initial" {
+				if !errors.Is(err, ErrAgentDeleted) {
+					t.Fatalf("initial subscription: %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				deadline := time.After(5 * time.Second)
+			wait:
+				for {
+					select {
+					case u := <-updates:
+						if errors.Is(u.Err, ErrAgentDeleted) {
+							break wait
+						}
+					case <-deadline:
+						t.Fatal("no terminal deletion notification")
+					}
+				}
+			}
+			if len(a.Messages()) != 0 || a.WorkingDir() != "" || a.Ready() {
+				t.Fatal("deleted agent retained renderable state")
+			}
+			a.mu.RLock()
+			cursor, id := a.cursor, a.snapshot.ID
+			a.mu.RUnlock()
+			if cursor != 0 || id != "" {
+				t.Fatalf("retained deleted subscription: %s/%d", id, cursor)
+			}
+			count := connections.Load()
+			time.Sleep(1200 * time.Millisecond)
+			if connections.Load() != count {
+				t.Fatal("continued reconnecting after deletion")
+			}
+		})
+	}
+}
