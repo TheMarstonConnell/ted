@@ -685,8 +685,16 @@ describe("sidebar branch refresh", () => {
       "WebSocket",
       class {
         static OPEN = 1;
+        static instances: any[] = [];
         readyState = 0;
-        close() {}
+        onmessage?: (message: { data: string }) => void;
+        onclose?: () => void;
+        constructor() {
+          (WebSocket as any).instances.push(this);
+        }
+        close() {
+          this.onclose?.();
+        }
       },
     );
     return new ControlPlane();
@@ -707,6 +715,15 @@ describe("sidebar branch refresh", () => {
       try {
         await client.start();
         expect(client.state.agents.a).toBeDefined();
+        (WebSocket as any).instances[0].onmessage({
+          data: JSON.stringify({
+            type: "error",
+            code: "cursor_invalid",
+            message: "agent deleted",
+          }),
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(client.state.status).toBe("offline");
         deleted = true;
         await vi.advanceTimersByTimeAsync(15000);
         expect(client.state.projects).toEqual([]);

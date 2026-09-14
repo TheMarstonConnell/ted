@@ -332,9 +332,10 @@ export class ControlPlane {
       this.state.projects.some(
         (known) => !projects.some((project) => project.id === known.id),
       ) ||
-      Object.values(this.state.agents).some(
-        (agent) => !projects.some((project) => project.id === agent.project_id),
-      )
+      (this.state.status === "offline" &&
+        Object.values(this.state.agents).some(
+          (agent) => !projects.some((project) => project.id === agent.project_id),
+        ))
     ) {
       await this.start();
       return;
