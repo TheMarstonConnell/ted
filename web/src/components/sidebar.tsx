@@ -24,7 +24,8 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { groupAgents, agentTitle, agentWorkspace, type Agent } from "@/lib/api";
-import { control, useControl } from "@/lib/store";
+import { control, isUnread, useControl } from "@/lib/store";
+import { useChatForeground } from "@/lib/use-chat-read";
 import { usePanel } from "@/lib/navigation";
 import { ErrorNotice } from "@/components/common";
 
@@ -43,7 +44,8 @@ export function AgentLink({
   childrenByParent?: ReadonlyMap<string, Agent[]>;
 }) {
   const { agentId } = useParams();
-  const { projects, status } = useControl();
+  const { projects, status, readPending, ready, transcripts } = useControl();
+  const foreground = useChatForeground();
   const project = projects.find((p) => p.id === agent.project_id);
   const workspace = agentWorkspace(agent);
   const isWorktree = workspace?.mode === "worktree";
@@ -63,6 +65,14 @@ export function AgentLink({
         : "No project";
   const title = agentTitle(agent);
   const selected = agentId === agent.id;
+  const viewed =
+    selected &&
+    foreground &&
+    ready[agent.id] &&
+    Number(
+      transcripts[agent.id]?.findLast((item) => item.kind === "agent")?.id || 0,
+    ) >= (agent.last_response_cursor || 0);
+  const unread = !viewed && isUnread(agent, readPending[agent.id]);
   const children = childrenByParent.get(agent.id) || [];
   const hasChildren = children.length > 0;
   const [childrenOpen, setChildrenOpen] = useState(true);
@@ -116,7 +126,7 @@ export function AgentLink({
           )}
           <Button
             variant="ghost"
-            className={`h-auto min-w-0 flex-1 justify-start py-2 font-normal text-foreground ${selected ? "shadow-sm bg-sidebar-selected hover:bg-sidebar-selected dark:hover:bg-sidebar-selected" : ""} ${running ? "agent-running" : ""}`}
+            className={`relative h-auto min-w-0 flex-1 justify-start py-2 font-normal text-foreground ${selected ? "shadow-sm bg-sidebar-selected hover:bg-sidebar-selected dark:hover:bg-sidebar-selected" : ""} ${running ? "agent-running" : ""}`}
             render={
               <Link
                 to={`/agents/${encodeURIComponent(agent.id)}`}
@@ -125,6 +135,16 @@ export function AgentLink({
               />
             }
           >
+            {unread && (
+              <>
+                <span
+                  className="pointer-events-none absolute left-0 top-0 size-2 rounded-full bg-destructive"
+                  aria-hidden="true"
+                  data-unread-dot
+                />
+                <span className="sr-only">Unread: </span>
+              </>
+            )}
             {running && (
               <span className="agent-running-border" aria-hidden="true" />
             )}

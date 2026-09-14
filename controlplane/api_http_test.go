@@ -524,3 +524,40 @@ func TestProjectLiveGitBranch(t *testing.T) {
 	git("symbolic-ref", "HEAD", "refs/heads/feature/remote")
 	check("feature/remote")
 }
+
+func TestHTTPReadStatusContract(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	project := f.project()
+	data := f.request("POST", "/v1/agents", fmt.Sprintf(`{"project_id":%q}`, project.ID), "", 201)
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if last, ok := raw["last_response_cursor"]; !ok || last != float64(0) {
+		t.Fatalf("agent omitted zero last_response_cursor: %s", data)
+	}
+	if read, ok := raw["read_cursor"]; !ok || read != float64(0) {
+		t.Fatalf("agent omitted zero read_cursor: %s", data)
+	}
+	a := decodeHTTP[Agent](t, data)
+	base := "/v1/agents/" + a.ID + "/read"
+	for _, body := range []string{
+		`{}`,
+		`{"cursor":-1}`,
+		`{"cursor":null}`,
+		`{"cursor":1.5}`,
+		`{"cursor":0,"unknown":true}`,
+		`{"cursor":9223372036854775808}`,
+	} {
+		f.request("POST", base, body, "", 400)
+	}
+	f.request("POST", base, fmt.Sprintf(`{"cursor":%d}`, a.Cursor+1), "", 410)
+	marked := decodeHTTP[Agent](t, f.request("POST", base, fmt.Sprintf(`{"cursor":%d}`, a.Cursor), "", 200))
+	if marked.ReadCursor != a.Cursor || marked.Cursor != a.Cursor+1 {
+		t.Fatalf("read response: %+v", marked)
+	}
+	duplicate := decodeHTTP[Agent](t, f.request("POST", base, `{"cursor":0}`, "", 200))
+	if duplicate.ReadCursor != marked.ReadCursor || duplicate.Cursor != marked.Cursor {
+		t.Fatalf("lower read cursor was not a no-op: %+v", duplicate)
+	}
+}

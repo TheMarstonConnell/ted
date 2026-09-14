@@ -2150,7 +2150,8 @@ for (const width of [1440, 390]) {
       page.on("request", (request) => {
         if (
           request.method() !== "GET" &&
-          request.url().includes("/v1/agents/a1/")
+          request.url().includes("/v1/agents/a1/") &&
+          !request.url().endsWith("/read")
         )
           mutations.push(
             `${request.method()} ${new URL(request.url()).pathname}`,

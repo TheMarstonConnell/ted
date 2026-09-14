@@ -154,7 +154,7 @@ func (s *Service) eventLocked(a *storedAgent, typ string, data any) {
 // Updates intentionally omit transcript and queue bodies; clients fetch them
 // when needed. Replay does not grow quadratically with conversation length.
 func (s *Service) summaryLocked(a *storedAgent) any {
-	summary := map[string]any{"id": a.Agent.ID, "project_id": a.Agent.ProjectID, "title": a.Agent.Title, "settings": a.Agent.Settings, "active_settings": a.Agent.ActiveSettings, "settled": a.Agent.Settled, "state": a.Agent.State, "held": a.Agent.Held, "context_usage": a.Agent.ContextUsage, "workspace": a.Agent.Workspace}
+	summary := map[string]any{"id": a.Agent.ID, "project_id": a.Agent.ProjectID, "title": a.Agent.Title, "settings": a.Agent.Settings, "active_settings": a.Agent.ActiveSettings, "settled": a.Agent.Settled, "state": a.Agent.State, "held": a.Agent.Held, "context_usage": a.Agent.ContextUsage, "workspace": a.Agent.Workspace, "last_response_cursor": a.Agent.LastResponseCursor, "read_cursor": a.Agent.ReadCursor}
 	if a.Agent.ParentAgentID != "" {
 		summary["parent_agent_id"] = a.Agent.ParentAgentID
 	}
@@ -362,6 +362,30 @@ func (s *Service) GetAgent(id string) (Agent, error) {
 	}
 	return copyJSON(a.Agent), nil
 }
+func (s *Service) ReadAgent(id string, cursor uint64) (Agent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.writableLocked(); err != nil {
+		return Agent{}, err
+	}
+	a, err := s.recordLocked(id)
+	if err != nil {
+		return Agent{}, err
+	}
+	if cursor > a.Agent.Cursor {
+		return Agent{}, problem(410, "cursor_invalid", "read cursor is beyond current agent events")
+	}
+	if cursor <= a.Agent.ReadCursor {
+		return copyJSON(a.Agent), nil
+	}
+	before := copyJSON(s.state)
+	a.Agent.ReadCursor = cursor
+	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
+	if err = s.commitLocked(before); err != nil {
+		return Agent{}, err
+	}
+	return copyJSON(a.Agent), nil
+}
 func (s *Service) CreateAgent(req CreateAgentRequest, key string) (Agent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -402,7 +426,7 @@ func (s *Service) CreateAgent(req CreateAgentRequest, key string) (Agent, error)
 	}
 	now := time.Now().UTC()
 	id := newID()
-	a := &storedAgent{Agent: Agent{ParentAgentID: req.ParentAgentID, Workspace: workspace, ID: id, ProjectID: p.ID, Title: req.Title, Settings: settings, State: "idle", Queue: []QueuedMessage{}, Messages: []agent.Message{}, CreatedAt: now, UpdatedAt: now}, Events: []Event{}}
+	a := &storedAgent{ReadCursorsInitialized: true, Agent: Agent{ParentAgentID: req.ParentAgentID, Workspace: workspace, ID: id, ProjectID: p.ID, Title: req.Title, Settings: settings, State: "idle", Queue: []QueuedMessage{}, Messages: []agent.Message{}, CreatedAt: now, UpdatedAt: now}, Events: []Event{}}
 	before := copyJSON(s.state)
 	s.state.Agents[id] = a
 	s.eventLocked(a, "agent.created", s.summaryLocked(a))
@@ -739,6 +763,9 @@ func (s *Service) run(ctx context.Context, id string, r *runningTurn, project Pr
 			before := copyJSON(s.state)
 			a.Agent.ContextUsage = instance.ContextUsage()
 			s.eventLocked(a, "output", output)
+			if output.ResponseType == "agent" {
+				a.Agent.LastResponseCursor = a.Agent.Cursor
+			}
 			if err := s.commitLocked(before); err != nil {
 				s.logger.Error("could not save agent event", zap.Error(err))
 			}

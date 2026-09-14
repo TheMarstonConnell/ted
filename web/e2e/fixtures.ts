@@ -32,6 +32,11 @@ export async function workspace(page: Page) {
       data,
       created_at: new Date().toISOString(),
     };
+    if (
+      type === "output" &&
+      (data as { ResponseType?: string }).ResponseType === "agent"
+    )
+      agents[id].last_response_cursor = event.cursor;
     events[id].push(event);
     inventory(id);
     sockets.forEach((ws) => ws.send(JSON.stringify({ type: "event", event })));
@@ -91,6 +96,8 @@ export async function workspace(page: Page) {
           held: false,
           state: "idle",
           cursor: 0,
+          read_cursor: 0,
+          last_response_cursor: 0,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           workspace: {
@@ -108,6 +115,13 @@ export async function workspace(page: Page) {
       if (method === "PATCH" && !operation) {
         agents[id].settled = body.settled;
         inventory(id);
+      }
+      if (operation === "read" && method === "POST") {
+        expect(body.cursor).toBeLessThanOrEqual(agents[id].cursor);
+        if (body.cursor > (agents[id].read_cursor || 0)) {
+          agents[id].read_cursor = body.cursor;
+          emit(id, "agent.updated", { ...agents[id] });
+        }
       }
       if (operation === "workspace" && method === "PATCH") {
         agents[id].workspace = {

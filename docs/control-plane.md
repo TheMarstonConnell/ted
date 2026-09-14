@@ -108,6 +108,30 @@ conversation rolls back to the last valid checkpoint. Cancelled turns retain a
 valid partial conversation with a result for every issued tool call, including
 cancelled results for calls that never executed. Neither behavior undoes tools.
 
+## Shared unread and read status
+
+Read status belongs to the durable agent, not to a browser or device. Agent
+resources expose `last_response_cursor` and `read_cursor`, and the same values
+are present in `agent.created` and `agent.updated` state payloads and WebSocket
+inventory. An agent is unread exactly when `last_response_cursor > read_cursor`.
+Only visible assistant output (`output` with `ResponseType: "agent"`) advances
+`last_response_cursor`, to that output event's cursor. Tool notices, tool results,
+status messages, and usage events never mark a chat unread.
+
+A client marks displayed work read with
+`POST /v1/agents/{agent_id}/read` and `{ "cursor": n }`, where `n` is an event
+cursor it actually observed. The cursor advances monotonically; duplicate or
+older acknowledgements are no-ops. Future cursors are rejected. The server
+records exactly `n`, rather than clamping to its current cursor, so assistant
+output racing with the request remains unread. An advancing acknowledgement is
+persisted with an `agent.updated` event, allowing all connected clients to
+converge on the shared state.
+
+Agents stored by versions without read status are migrated once at startup.
+Both cursors initialize to the last historical assistant-output event, so old
+chats begin read. The migration marker is durable and does not overwrite newer
+unread state on later restarts.
+
 ## Events and history
 
 Clients may multiplex explicit agents or subscribe to **all unsettled agents

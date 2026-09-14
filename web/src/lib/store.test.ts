@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ControlPlane, reduceEvent, type State } from "./store";
+import { ControlPlane, isUnread, reduceEvent, type State } from "./store";
 import {
   groupAgents,
   projectName,
   type Agent,
   type Event,
   type Project,
+  type Schema,
 } from "./api";
 
 const agent = (id = "a", overrides: Partial<Agent> = {}): Agent => ({
@@ -17,6 +18,8 @@ const agent = (id = "a", overrides: Partial<Agent> = {}): Agent => ({
   held: false,
   state: "idle",
   cursor: 0,
+  read_cursor: 0,
+  last_response_cursor: 0,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
   ...overrides,
@@ -28,6 +31,7 @@ const state = (): State => ({
   transcripts: {},
   cursors: {},
   ready: {},
+  readPending: {},
   loaded: true,
   status: "live",
   error: null,
@@ -839,5 +843,111 @@ describe("sidebar branch refresh", () => {
       client.stop();
       vi.useRealTimers();
     }
+  });
+});
+
+describe("read receipts", () => {
+  it("only agent responses mark a chat unread; replay cannot undo a receipt", () => {
+    let s = state();
+    s.agents.a = agent("a", { read_cursor: 1, last_response_cursor: 1 });
+    s = reduceEvent(s, event(1, "output", output));
+    expect(isUnread(s.agents.a)).toBe(false);
+    s = reduceEvent(s, event(2, "output", { ...output, ResponseType: "tool" }));
+    s = reduceEvent(
+      s,
+      event(3, "output", { ...output, ResponseType: "tool_result" }),
+    );
+    s = reduceEvent(
+      s,
+      event(4, "output", { ...output, ResponseType: "usage" }),
+    );
+    expect(isUnread(s.agents.a)).toBe(false);
+    s = reduceEvent(s, event(5, "output", output));
+    expect(isUnread(s.agents.a)).toBe(true);
+    s = reduceEvent(
+      s,
+      event(6, "agent.updated", {
+        ...s.agents.a,
+        read_cursor: 5,
+      } as Schema["AgentUpdate"]),
+    );
+    expect(isUnread(s.agents.a)).toBe(false);
+    s = reduceEvent(
+      s,
+      event(7, "agent.updated", {
+        ...s.agents.a,
+        read_cursor: 1,
+        last_response_cursor: 1,
+      } as Schema["AgentUpdate"]),
+    );
+    expect(s.agents.a.read_cursor).toBe(5);
+    expect(s.agents.a.last_response_cursor).toBe(5);
+    expect(isUnread(s.agents.a)).toBe(false);
+  });
+
+  it("deduplicates reads and does not hide a response newer than the requested cursor", async () => {
+    let finish!: (response: Response) => void;
+    const fetcher = vi.fn(
+      (_path: string, _options: RequestInit) =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const client = new ControlPlane();
+    client.state = state();
+    client.state.agents.a = agent("a", { cursor: 5, last_response_cursor: 5 });
+    const first = client.markRead("a", 5);
+    expect(client.markRead("a", 5)).toBe(first);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetcher.mock.calls[0][1].body as string)).toEqual({
+      cursor: 5,
+    });
+    expect(isUnread(client.state.agents.a, client.state.readPending.a)).toBe(
+      false,
+    );
+    client.state.agents.a = agent("a", {
+      cursor: 8,
+      last_response_cursor: 8,
+      read_cursor: 7,
+    });
+    expect(isUnread(client.state.agents.a, client.state.readPending.a)).toBe(
+      true,
+    );
+    finish(
+      Response.json(
+        agent("a", { cursor: 6, read_cursor: 5, last_response_cursor: 5 }),
+      ),
+    );
+    await first;
+    expect(client.state.agents.a.last_response_cursor).toBe(8);
+    expect(client.state.agents.a.read_cursor).toBe(7);
+    expect(client.state.readPending.a).toBe(0);
+    expect(isUnread(client.state.agents.a)).toBe(true);
+    await client.markRead("a", 5);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores the unread indicator if saving a read fails, and allows retry", async () => {
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Offline"))
+      .mockResolvedValueOnce(
+        Response.json(
+          agent("a", { cursor: 3, last_response_cursor: 2, read_cursor: 2 }),
+        ),
+      );
+    vi.stubGlobal("fetch", fetcher);
+    const client = new ControlPlane();
+    client.state = state();
+    client.state.agents.a = agent("a", { cursor: 2, last_response_cursor: 2 });
+    await expect(client.markRead("a", 2)).rejects.toThrow("Offline");
+    expect(isUnread(client.state.agents.a, client.state.readPending.a)).toBe(
+      true,
+    );
+    await client.markRead("a", 2);
+    expect(isUnread(client.state.agents.a, client.state.readPending.a)).toBe(
+      false,
+    );
   });
 });

@@ -13,7 +13,8 @@ type storedAgent struct {
 	Agent  Agent   `json:"agent"`
 	Events []Event `json:"events"`
 	// Browser artifact consumption is private runtime state.
-	ManifestOffset int64 `json:"manifest_offset"`
+	ManifestOffset         int64 `json:"manifest_offset"`
+	ReadCursorsInitialized bool  `json:"read_cursors_initialized,omitempty"`
 }
 type receipt struct {
 	Fingerprint string `json:"fingerprint"`
@@ -70,6 +71,24 @@ func loadState(dir string) (diskState, error) {
 			if e.AgentID != id || e.Cursor != uint64(i+1) {
 				return state, fmt.Errorf("invalid event sequence for agent %q", id)
 			}
+		}
+		if !a.ReadCursorsInitialized {
+			for _, e := range a.Events {
+				if e.Type != "output" {
+					continue
+				}
+				var output struct {
+					ResponseType string `json:"ResponseType"`
+				}
+				if json.Unmarshal(e.Data, &output) == nil && output.ResponseType == "agent" {
+					a.Agent.LastResponseCursor = e.Cursor
+				}
+			}
+			a.Agent.ReadCursor = a.Agent.LastResponseCursor
+			a.ReadCursorsInitialized = true
+		}
+		if a.Agent.LastResponseCursor > a.Agent.Cursor || a.Agent.ReadCursor > a.Agent.Cursor {
+			return state, fmt.Errorf("invalid read cursor for agent %q", id)
 		}
 	}
 	return state, nil

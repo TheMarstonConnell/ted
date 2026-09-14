@@ -30,6 +30,7 @@ generated. Edit the YAML, then regenerate; never edit `generated.go` manually.
 | GET, PATCH, DELETE | `/v1/projects/{project_id}` | Read, update name/defaults, delete a project and its settled agents |
 | GET, POST | `/v1/agents` | List or create durable agents |
 | GET, PATCH | `/v1/agents/{agent_id}` | Read agent or update required `settled` boolean |
+| POST | `/v1/agents/{agent_id}/read` | Advance the shared durable read cursor with required `{ "cursor": n }` |
 | PATCH | `/v1/agents/{agent_id}/settings` | Patch model and/or effort for future turns |
 | GET, POST | `/v1/agents/{agent_id}/messages` | Inspect queue (including terminal entries) or submit text |
 | DELETE | `/v1/agents/{agent_id}/messages/{message_id}` | Cancel a pending entry only |
@@ -84,6 +85,20 @@ HTTP create-agent and submit-message operations accept optional
 and retained durably across retries/restarts. Reusing it with a different
 semantic request yields 409. HTTP and WS submissions share the message-key
 namespace. A submission response is acceptance, not successful execution.
+
+Agent resources expose `last_response_cursor` and `read_cursor`. The fields are
+optional in the schema so older payloads remain compatible, but this server emits
+both, including zero. An agent is unread when `last_response_cursor > read_cursor`.
+Only an `output` event whose `ResponseType` is `agent` advances the response
+cursor; tool calls, tool results, status, and usage output do not.
+
+`POST /v1/agents/{agent_id}/read` requires one nonnegative int64 `cursor`. It
+advances `read_cursor` monotonically to that exact event cursor and returns the
+full Agent. Duplicate and lower values are no-ops. A cursor beyond the agent's
+current event cursor returns 410 `cursor_invalid`. The server does not substitute
+its newer current cursor, so a response racing with the acknowledgement remains
+unread. A successful advance emits `agent.updated` and updates WebSocket
+inventory, synchronizing other clients.
 
 ## Pagination
 

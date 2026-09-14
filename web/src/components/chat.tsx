@@ -1,3 +1,4 @@
+import { useChatRead } from "@/lib/use-chat-read";
 import { usePanel } from "@/lib/navigation";
 import {
   memo,
@@ -383,6 +384,15 @@ function ChatWorkspace() {
   };
   const [notice, setNotice] = useState<string | null>(null);
   const ready = !!agent && replayed[agentId];
+  const responseCursor = Number(
+    items.findLast((item) => item.kind === "agent")?.id || 0,
+  );
+  useChatRead(
+    agentId,
+    responseCursor,
+    agent?.read_cursor || 0,
+    !!ready && status === "live",
+  );
   const queue = agent?.queue || [];
   const pending = queue.filter((m) => m.status === "pending");
   const running = queue.find((m) => m.status === "running");
