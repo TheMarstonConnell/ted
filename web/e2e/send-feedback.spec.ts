@@ -147,6 +147,72 @@ test("keeps the newest outgoing preview visible in the capped outbox", async ({
     .toEqual({ newestVisible: true, messageGap: 24 });
 });
 
+test.describe("short mobile worktree feedback", () => {
+  test.use({
+    viewport: { width: 320, height: 480 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  test("keeps composer footer controls available during first-send setup", async ({
+    page,
+  }) => {
+    const fixture = await workspace(page);
+    fixture.setProjectWorkspaceDefaults({ mode: "worktree" });
+    await page.goto("/?dialog=new-agent");
+    await page
+      .getByRole("button", { name: "harness /srv/harness", exact: true })
+      .click();
+    await page.route("**/v1/agents/a1/messages", async (route) => {
+      const text = route.request().postDataJSON().text;
+      await route.fulfill({
+        json: {
+          id: "setup-delayed",
+          text,
+          status: "pending",
+          created_at: new Date().toISOString(),
+        },
+      });
+    });
+    const composer = page.getByRole("textbox", {
+      name: "Message",
+      exact: true,
+    });
+    await composer.fill(Array(12).fill("Prepare the worktree").join("\n"));
+    await composer.press("Enter");
+    await expect(page.getByText("Setting up workspace")).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Outgoing messages" }),
+    ).toBeVisible();
+    await expect(composer).toBeInViewport();
+    const pane = page.locator('[data-slot="composer-pane"]');
+    await expect
+      .poll(() =>
+        pane.evaluate((element) => ({
+          bottom: Math.round(element.getBoundingClientRect().bottom),
+          clientHeight: element.clientHeight,
+          scrollHeight: element.scrollHeight,
+        })),
+      )
+      .toMatchObject({ bottom: 480, clientHeight: 424 });
+    expect(
+      await pane.evaluate((element) => element.scrollHeight),
+    ).toBeGreaterThan(424);
+    const sidebar = page.getByRole("button", {
+      name: "Open sidebar",
+      exact: true,
+    });
+    await sidebar.scrollIntoViewIfNeeded();
+    await expect(sidebar).toBeInViewport();
+    await sidebar.click();
+    await expect(
+      page.getByRole("dialog", { name: "Workspace", exact: true }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollHeight),
+    ).toBe(480);
+  });
+});
+
 test("failed sends remove the preview, restore the draft, and reuse the retry key", async ({
   page,
 }) => {
