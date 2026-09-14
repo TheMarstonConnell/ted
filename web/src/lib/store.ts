@@ -309,15 +309,6 @@ export class ControlPlane {
         .catch((error) => {
           failed = true;
           if (ws !== this.socket || this.stopped) return;
-          // Deletion can race the initial inventory fetch, before any missing
-          // project is known to refreshProjects, or an event-reference fetch.
-          if (
-            error instanceof APIError &&
-            (error.code === "cursor_invalid" || error.code === "not_found")
-          ) {
-            void this.start();
-            return;
-          }
           this.set({ error: String(error), status: "offline" });
           ws.close();
         });
@@ -340,6 +331,9 @@ export class ControlPlane {
     if (
       this.state.projects.some(
         (known) => !projects.some((project) => project.id === known.id),
+      ) ||
+      Object.values(this.state.agents).some(
+        (agent) => !projects.some((project) => project.id === agent.project_id),
       )
     ) {
       await this.start();

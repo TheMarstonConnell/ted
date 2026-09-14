@@ -512,7 +512,20 @@ describe("WebSocket cursor safety", () => {
     const fetcher = vi.fn((path: string) => {
       if (path.includes("/events/")) return reference();
       return Promise.resolve(
-        Response.json(path.includes("/agents") ? [agent()] : []),
+        Response.json(
+          path.includes("/agents")
+            ? [agent()]
+            : path === "/v1/projects"
+              ? [
+                  {
+                    id: "p",
+                    name: "p",
+                    root: "/srv/p",
+                    defaults: { model: "test/model", effort: "high" },
+                  },
+                ]
+              : [],
+        ),
       );
     });
     vi.stubGlobal("fetch", fetcher);
@@ -523,49 +536,6 @@ describe("WebSocket cursor safety", () => {
     socket.frame({ type: "subscribed", request_id: "sub" });
     return { client, socket, fetcher };
   }
-  it.each(["cursor_invalid", "not_found", "deleted event reference"])(
-    "rebuilds inventory after deletion races a subscription or fetch: %s",
-    async (failure) => {
-      const { client, socket, fetcher } = await setup(async () =>
-        Response.json(
-          { error: { code: "not_found", message: "agent deleted" } },
-          { status: 404 },
-        ),
-      );
-      try {
-        socket.frame({ type: "event", event: event(1, "output", output) });
-        await vi.waitFor(() => expect(client.state.cursors.a).toBe(1));
-        fetcher.mockImplementation(async (path: string) =>
-          path.includes("/events/")
-            ? Response.json(
-                { error: { code: "not_found", message: "agent deleted" } },
-                { status: 404 },
-              )
-            : Response.json([]),
-        );
-        socket.frame(
-          failure === "deleted event reference"
-            ? { type: "event_ref", agent_id: "a", cursor: 2, url: "/ignored" }
-            : {
-                type: "error",
-                request_id: "sub",
-                code: failure,
-                message: "agent deleted",
-              },
-        );
-        await vi.waitFor(() => expect(Socket.instances).toHaveLength(2));
-        const replacement = Socket.instances[1];
-        replacement.open();
-        expect(replacement.sent.at(-1).agent_ids).toEqual([]);
-        expect(replacement.sent.at(-1).cursors).toEqual({});
-        expect(client.state.transcripts).toEqual({});
-        replacement.frame({ type: "subscribed", request_id: "new-sub" });
-        await vi.waitFor(() => expect(client.state.status).toBe("live"));
-      } finally {
-        client.stop();
-      }
-    },
-  );
   it("serializes event references before following frames, never acknowledging inventory", async () => {
     let resolve!: (response: Response) => void;
     const reference = new Promise<Response>((r) => {
@@ -721,6 +691,35 @@ describe("sidebar branch refresh", () => {
     );
     return new ControlPlane();
   }
+  it.each([false, true])(
+    "rebuilds after deletion found by project polling (initial inventory race: %s)",
+    async (initialRace) => {
+      let deleted = false;
+      const fetcher = vi.fn(async (path: string) => {
+        if (path.startsWith("/v1/agents"))
+          return Response.json(deleted ? [] : [agent()]);
+        if (path === "/v1/projects")
+          return Response.json(deleted || initialRace ? [] : [projects[0]]);
+        if (path === "/v1/models") return Response.json([]);
+        return Response.json(projects[0]);
+      });
+      const client = prepare(fetcher);
+      try {
+        await client.start();
+        expect(client.state.agents.a).toBeDefined();
+        deleted = true;
+        await vi.advanceTimersByTimeAsync(15000);
+        expect(client.state.projects).toEqual([]);
+        expect(client.state.agents).toEqual({});
+        expect(
+          fetcher.mock.calls.filter(([path]) => path.startsWith("/v1/agents")),
+        ).toHaveLength(2);
+      } finally {
+        client.stop();
+        vi.useRealTimers();
+      }
+    },
+  );
   it("refreshes all represented projects once, including unselected and settled chats, and clears removed branches", async () => {
     const branches: Record<string, string | undefined> = {
       p: "main",

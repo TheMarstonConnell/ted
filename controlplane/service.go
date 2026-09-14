@@ -324,10 +324,7 @@ func (s *Service) DeleteProject(id string) error {
 	}
 	for agentID, a := range before.Agents {
 		if a.Agent.ProjectID == id {
-			if instance := s.instances[agentID]; instance != nil {
-				_ = instance.Close()
-				delete(s.instances, agentID)
-			}
+			delete(s.instances, agentID)
 		}
 	}
 	return nil
