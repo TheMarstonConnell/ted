@@ -261,7 +261,7 @@ func TestAgentsPageRequestMetadataAndValidation(t *testing.T) {
 	}
 }
 
-func TestAgentsPageRejectsMissingOrInvalidMetadataAndOverflow(t *testing.T) {
+func TestAgentsPageRejectsMissingOrInvalidMetadata(t *testing.T) {
 	missing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode([]Snapshot{{ID: "must not be accepted"}})
 	}))
@@ -281,16 +281,6 @@ func TestAgentsPageRejectsMissingOrInvalidMetadataAndOverflow(t *testing.T) {
 		t.Fatalf("invalid metadata: result=%+v total=%d err=%v", result, total, err)
 	}
 
-	oversized := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Total-Count", "1")
-		_ = json.NewEncoder(w).Encode([]Snapshot{{ID: "a"}, {ID: "unexpected"}})
-	}))
-	defer oversized.Close()
-	result, total, err = New(oversized.URL).AgentsPage(context.Background(), "", 1, 1)
-	if err == nil || !strings.Contains(err.Error(), "expected 1") || result != nil || total != 1 {
-		t.Fatalf("oversized page: result=%+v total=%d err=%v", result, total, err)
-	}
-
 	var requests atomic.Int32
 	validation := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -302,11 +292,50 @@ func TestAgentsPageRejectsMissingOrInvalidMetadataAndOverflow(t *testing.T) {
 			t.Errorf("accepted invalid pagination %#v", tc)
 		}
 	}
-	maxInt := int(^uint(0) >> 1)
-	if _, _, err := c.AgentsPage(context.Background(), "", maxInt, 2); err == nil || !strings.Contains(err.Error(), "overflow") {
-		t.Errorf("overflow validation: %v", err)
-	}
 	if requests.Load() != 0 {
 		t.Fatalf("validation made %d requests", requests.Load())
+	}
+}
+
+func TestAgentsPageLegacyRejectionGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		name, code, message string
+		status              int
+		guidance            bool
+	}{
+		{"legacy page", "invalid", "unknown or repeated query parameter: page", 400, true},
+		{"legacy page size", "invalid", "unknown or repeated query parameter: page_size", 400, true},
+		{"other parameter", "invalid", "unknown or repeated query parameter: project_id", 400, false},
+		{"invalid project", "invalid_project", "invalid project", 400, false},
+		{"unavailable", "shutting_down", "server shutting down", 503, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !r.URL.Query().Has("page") {
+					_ = json.NewEncoder(w).Encode([]Snapshot{{ID: "legacy"}})
+					return
+				}
+				w.WriteHeader(tc.status)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": APIError{Code: tc.code, Message: tc.message}})
+			}))
+			defer server.Close()
+			client := New(server.URL)
+			rows, total, err := client.AgentsPage(context.Background(), "", 1, 25)
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.Status != tc.status || apiErr.Code != tc.code || apiErr.Message != tc.message || rows != nil || total != 0 {
+				t.Fatalf("rows=%v total=%d error=%v", rows, total, err)
+			}
+			for _, guidance := range []string{"upgrade the server", "sessions --all"} {
+				if strings.Contains(err.Error(), guidance) != tc.guidance {
+					t.Fatalf("guidance %q: %v", guidance, err)
+				}
+			}
+			if tc.guidance {
+				rows, err = client.Agents(context.Background(), "")
+				if err != nil || len(rows) != 1 || rows[0].ID != "legacy" {
+					t.Fatalf("legacy unpaged request: %v, %v", rows, err)
+				}
+			}
+		})
 	}
 }

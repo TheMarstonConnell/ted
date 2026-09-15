@@ -190,10 +190,6 @@ func (c *Client) AgentsPage(ctx context.Context, project string, page, pageSize 
 	if page <= 0 || pageSize <= 0 {
 		return nil, 0, fmt.Errorf("page and page_size must be positive")
 	}
-	maxInt := int(^uint(0) >> 1)
-	if page-1 > maxInt/pageSize {
-		return nil, 0, fmt.Errorf("page and page_size overflow pagination offset")
-	}
 	query := url.Values{}
 	query.Set("include_settled", "true")
 	query.Set("page", strconv.Itoa(page))
@@ -204,6 +200,12 @@ func (c *Client) AgentsPage(ctx context.Context, project string, page, pageSize 
 	var result []Snapshot
 	headers, err := c.requestWithHeaders(ctx, "GET", "/v1/agents?"+query.Encode(), nil, &result, "")
 	if err != nil {
+		if apiErr, ok := err.(*APIError); ok && apiErr.Status == http.StatusBadRequest && apiErr.Code == "invalid" {
+			switch apiErr.Message {
+			case "unknown or repeated query parameter: page", "unknown or repeated query parameter: page_size":
+				return nil, 0, fmt.Errorf("server does not support pagination; upgrade the server or use sessions --all: %w", err)
+			}
+		}
 		return result, 0, err
 	}
 	totalValue := headers.Get("X-Total-Count")
@@ -213,18 +215,6 @@ func (c *Client) AgentsPage(ctx context.Context, project string, page, pageSize 
 	total, err := strconv.Atoi(totalValue)
 	if err != nil || total < 0 {
 		return nil, 0, fmt.Errorf("invalid X-Total-Count response header %q", totalValue)
-	}
-	offset := (page - 1) * pageSize
-	expected := 0
-	if offset < total {
-		remaining := total - offset
-		expected = pageSize
-		if remaining < expected {
-			expected = remaining
-		}
-	}
-	if len(result) != expected {
-		return nil, total, fmt.Errorf("server returned %d agents for page, expected %d", len(result), expected)
 	}
 	return result, total, nil
 }

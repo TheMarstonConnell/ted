@@ -284,6 +284,7 @@ func (h *httpAPI) ListAgents(w http.ResponseWriter, r *http.Request, p api.ListA
 			return
 		}
 	}
+	var result []Agent
 	if p.Page != nil || p.PageSize != nil {
 		page, pageSize := int64(1), int64(25)
 		if p.Page != nil {
@@ -292,21 +293,19 @@ func (h *httpAPI) ListAgents(w http.ResponseWriter, r *http.Request, p api.ListA
 		if p.PageSize != nil {
 			pageSize = *p.PageSize
 		}
-		result, total, err := h.service.AgentsPage(value(p.IncludeSettled), value(p.ProjectId), page, pageSize)
+		var total int
+		var err error
+		result, total, err = h.service.AgentsPage(value(p.IncludeSettled), value(p.ProjectId), page, pageSize)
 		if err != nil {
 			writeRuntimeError(w, err)
 			return
 		}
-		agents := make([]httpAgent, 0, len(result))
-		for _, a := range result {
-			agents = append(agents, wireAgent(a))
-		}
 		w.Header().Set("X-Total-Count", strconv.Itoa(total))
-		writeJSON(w, 200, agents)
-		return
+	} else {
+		result = h.service.Agents(value(p.IncludeSettled), value(p.ProjectId))
 	}
-	agents := []httpAgent{}
-	for _, a := range h.service.Agents(value(p.IncludeSettled), value(p.ProjectId)) {
+	agents := make([]httpAgent, 0, len(result))
+	for _, a := range result {
 		agents = append(agents, wireAgent(a))
 	}
 	writeJSON(w, 200, agents)

@@ -104,7 +104,7 @@ func newEffortsCommand(load catalogAgentLoader) *cobra.Command {
 				return err
 			}
 			efforts := a.ListEfforts()
-			if len(efforts) == 0 {
+			if len(efforts) == 0 && pagination.page == 1 {
 				_, err := fmt.Fprintf(cmd.OutOrStdout(), "Model %q does not expose configurable effort.\n", args[0])
 				return err
 			}

@@ -174,3 +174,31 @@ func TestCatalogPagination(t *testing.T) {
 		})
 	}
 }
+
+func TestEffortsEmptyInventoryPagination(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		flags       []string
+		out, notice string
+	}{
+		{"default", nil, "Model \"openrouter/meta/muse-spark-1.3-contributor\" does not expose configurable effort.\n", ""},
+		{"all", []string{"--all"}, "Model \"openrouter/meta/muse-spark-1.3-contributor\" does not expose configurable effort.\n", ""},
+		{"past end", []string{"--page", "2"}, "", "No results on page 2 (0 efforts total).\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newEffortsCommand(func() (*agent.Agent, error) {
+				return agent.NewAgent(nil, []agent.Provider{agent.NewOpenRouterProvider("")}), nil
+			})
+			var out, notice bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&notice)
+			cmd.SetArgs(append([]string{"openrouter/meta/muse-spark-1.3-contributor"}, tc.flags...))
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != tc.out || notice.String() != tc.notice {
+				t.Fatalf("stdout=%q stderr=%q", out.String(), notice.String())
+			}
+		})
+	}
+}

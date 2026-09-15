@@ -145,7 +145,7 @@ func TestBrowserListPagination(t *testing.T) {
 					if req.Action != action || req.Thread != "thread 'one'" {
 						t.Fatal(req)
 					}
-					items := make([]map[string]any, 32)
+					items := make([]any, 32)
 					for i := range items {
 						items[i] = map[string]any{"id": i, "text": "preserved"}
 					}

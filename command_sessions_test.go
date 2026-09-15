@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -47,7 +48,7 @@ func TestSessionsCommand(t *testing.T) {
 	if got := run(); !strings.Contains(got, "No saved sessions") {
 		t.Fatal(got)
 	}
-	sessions = []remote.Snapshot{{ID: "old", Title: "Older", ProjectID: "p", UpdatedAt: time.Now().Add(-time.Hour)}, {ID: "new", Title: "Newest", ProjectID: "p", UpdatedAt: time.Now()}}
+	sessions = []remote.Snapshot{{ID: "new", Title: "Newest", ProjectID: "p", UpdatedAt: time.Now()}, {ID: "old", Title: "Older", ProjectID: "p", UpdatedAt: time.Now().Add(-time.Hour)}}
 	got := run()
 	if !strings.Contains(got, "/server/root") || strings.Index(got, "new") > strings.Index(got, "old") {
 		t.Fatal(got)
@@ -92,9 +93,11 @@ func TestSessionsPagination(t *testing.T) {
 						w.Header().Set("X-Total-Count", "63")
 					}
 					rows := []remote.Snapshot{}
-					// Reverse the response to exercise sorting for --all as well as paged results.
-					for i := tc.last; i >= tc.first && tc.count > 0; i-- {
+					for i := tc.first; i <= tc.last && tc.count > 0; i++ {
 						rows = append(rows, remote.Snapshot{ID: fmt.Sprintf("session-%02d", i), ProjectID: "p", Title: "Saved session", UpdatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(-time.Duration(i) * time.Hour)})
+					}
+					if tc.page == "" {
+						slices.Reverse(rows)
 					}
 					_ = json.NewEncoder(w).Encode(rows)
 				case "/v1/projects":

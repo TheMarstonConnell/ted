@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -108,31 +107,23 @@ func (p *listPagination) nextCommand(cmd *cobra.Command, args []string) string {
 }
 
 func (p *listPagination) browserData(cmd *cobra.Command, key string, data any) (any, error) {
-	encoded, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
+	fields, ok := data.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("browser response is not an object")
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(encoded, &fields); err != nil {
-		return nil, fmt.Errorf("decode browser list: %w", err)
-	}
-	var items []json.RawMessage
 	raw, ok := fields[key]
 	if !ok {
 		return nil, fmt.Errorf("browser response is missing %q", key)
 	}
-	if err := json.Unmarshal(raw, &items); err != nil {
-		return nil, fmt.Errorf("decode browser %s: %w", key, err)
+	items, ok := raw.([]any)
+	if raw != nil && !ok {
+		return nil, fmt.Errorf("browser %s is not a list", key)
+	}
+	if items == nil {
+		items = []any{}
 	}
 	start, end := p.bounds(len(items))
-	selected := items[start:end]
-	if selected == nil {
-		selected = []json.RawMessage{}
-	}
-	fields[key], err = json.Marshal(selected)
-	if err != nil {
-		return nil, err
-	}
+	fields[key] = items[start:end]
 	metadata := struct {
 		Page        int    `json:"page"`
 		PageSize    int    `json:"page_size"`
@@ -145,6 +136,6 @@ func (p *listPagination) browserData(cmd *cobra.Command, key string, data any) (
 		metadata.NextPage = p.page + 1
 		metadata.NextCommand = p.nextCommand(cmd, nil)
 	}
-	fields["pagination"], err = json.Marshal(metadata)
-	return fields, err
+	fields["pagination"] = metadata
+	return fields, nil
 }

@@ -49,12 +49,14 @@ func newSessionsCommand() *cobra.Command {
 		for _, p := range projects {
 			roots[p.ID] = p.Root
 		}
-		sort.Slice(sessions, func(i, j int) bool {
-			if sessions[i].UpdatedAt.Equal(sessions[j].UpdatedAt) {
-				return sessions[i].ID < sessions[j].ID
-			}
-			return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
-		})
+		if pagination.all {
+			sort.Slice(sessions, func(i, j int) bool {
+				if sessions[i].UpdatedAt.Equal(sessions[j].UpdatedAt) {
+					return sessions[i].ID < sessions[j].ID
+				}
+				return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+			})
+		}
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "ID\tUPDATED (UTC)\tMODEL\tPROJECT\tTITLE")
 		for _, s := range sessions {
