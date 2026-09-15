@@ -173,7 +173,12 @@ action with an accessible label and hover title. Project creation is no longer r
   or keyboard-focused. Entries use the full width at rest, then smoothly shrink
   by the action’s width and gap on reveal without changing row height. Reduced
   motion preferences are respected. Touch devices keep the action and its space
-  visible. Sidebar actions do not switch chats or discard drafts; failures are
+  visible. Chats with children use the same hover/focus reveal for a compact
+  expand/collapse control to the right of the title, before the rightmost
+  settle/restore button. Child lists start collapsed at every nesting level and
+  only open when explicitly expanded, even when the selected chat is a child.
+  Both controls stay visible on touch devices.
+  Sidebar actions do not switch chats or discard drafts; failures are
   shown beside the affected row. The sidebar has no persistent connection-status
   footer; connection failures still show the main reconnect notice.
 - Sending to a settled agent explicitly restores it, then submits the message.
