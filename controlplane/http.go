@@ -36,13 +36,13 @@ var _ api.ServerInterface = (*httpAPI)(nil)
 // NewHandler exposes the versioned, spec-validated HTTP and WebSocket API.
 // Authentication/TLS, if needed, belong at the caller's trusted reverse proxy.
 func NewHandler(s *Service) http.Handler {
-	spec, router, metadata, err := sharedHTTPDefinition()
+	definition, err := sharedHTTPDefinition()
 	if err != nil {
 		panic(err)
 	}
-	h := &httpAPI{service: s, spec: spec}
+	h := &httpAPI{service: s, spec: definition.spec}
 	generated := api.HandlerWithOptions(h, api.StdHTTPServerOptions{ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) { writeProblem(w, 400, "invalid", err.Error()) }})
-	return validateHTTP(router, generated, metadata)
+	return validateHTTP(definition.router, generated, definition.metadata)
 }
 
 type httpRouteMetadata struct {
@@ -50,50 +50,39 @@ type httpRouteMetadata struct {
 	allow string
 }
 type httpValidationMetadata struct {
-	routes  map[*openapi3.Operation]httpRouteMetadata
-	methods []string
+	routes map[*openapi3.Operation]httpRouteMetadata
+}
+
+type httpDefinition struct {
+	spec     *openapi3.T
+	router   routers.Router
+	metadata *httpValidationMetadata
 }
 
 var (
-	httpDefinitionOnce     sync.Once
-	httpDefinitionSpec     *openapi3.T
-	httpDefinitionRouter   routers.Router
-	httpDefinitionMetadata *httpValidationMetadata
-	httpDefinitionErr      error
-	emptyQuery             = url.Values{}
-	requestValidationOpts  = &openapi3filter.Options{SkipSettingDefaults: true}
-)
-
-// The generated OpenAPI document and legacy router are immutable after setup.
-// Sharing them avoids parsing and validating the same embedded schema for every
-// server or test fixture.
-func sharedHTTPDefinition() (*openapi3.T, routers.Router, *httpValidationMetadata, error) {
-	httpDefinitionOnce.Do(func() {
-		httpDefinitionSpec, httpDefinitionErr = api.GetSwagger()
-		if httpDefinitionErr != nil {
-			httpDefinitionErr = fmt.Errorf("load embedded API spec: %w", httpDefinitionErr)
-			return
+	emptyQuery            = url.Values{}
+	requestValidationOpts = &openapi3filter.Options{SkipSettingDefaults: true}
+	sharedHTTPDefinition  = sync.OnceValues(func() (httpDefinition, error) {
+		spec, err := api.GetSwagger()
+		if err != nil {
+			return httpDefinition{}, fmt.Errorf("load embedded API spec: %w", err)
 		}
 		// NewRouter validates the complete document before constructing routes.
-		httpDefinitionRouter, httpDefinitionErr = legacy.NewRouter(httpDefinitionSpec)
-		if httpDefinitionErr != nil {
-			httpDefinitionErr = fmt.Errorf("invalid API spec: %w", httpDefinitionErr)
-			return
+		router, err := legacy.NewRouter(spec)
+		if err != nil {
+			return httpDefinition{}, fmt.Errorf("invalid API spec: %w", err)
 		}
-		httpDefinitionMetadata = newHTTPValidationMetadata(httpDefinitionSpec)
+		return httpDefinition{spec: spec, router: router, metadata: newHTTPValidationMetadata(spec)}, nil
 	})
-	return httpDefinitionSpec, httpDefinitionRouter, httpDefinitionMetadata, httpDefinitionErr
-}
+)
 
 func newHTTPValidationMetadata(spec *openapi3.T) *httpValidationMetadata {
 	metadata := &httpValidationMetadata{routes: make(map[*openapi3.Operation]httpRouteMetadata)}
-	methodSet := make(map[string]struct{})
 	for _, pathItem := range spec.Paths.Map() {
 		operations := pathItem.Operations()
 		allow := make([]string, 0, len(operations))
 		for method := range operations {
 			allow = append(allow, method)
-			methodSet[strings.ToUpper(method)] = struct{}{}
 		}
 		sort.Strings(allow)
 		allowHeader := strings.Join(allow, ", ")
@@ -112,13 +101,6 @@ func newHTTPValidationMetadata(spec *openapi3.T) *httpValidationMetadata {
 			metadata.routes[operation] = httpRouteMetadata{query: query, allow: allowHeader}
 		}
 	}
-	// Preserve the historical probe preference while dropping methods absent
-	// from this document.
-	for _, method := range []string{"GET", "POST", "PATCH", "DELETE", "PUT", "HEAD", "OPTIONS"} {
-		if _, ok := methodSet[method]; ok {
-			metadata.methods = append(metadata.methods, method)
-		}
-	}
 	return metadata
 }
 
@@ -129,9 +111,8 @@ func validateHTTP(router routers.Router, next http.Handler, metadata *httpValida
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		route, pathParams, err := router.FindRoute(r)
 		if err != nil {
-			// legacy.Router reports method mismatches on templated paths as path
-			// misses. Probe only methods that actually occur in the document.
-			for _, method := range metadata.methods {
+			// legacy.Router reports method mismatches on templated paths as path misses.
+			for _, method := range []string{"GET", "POST", "PATCH", "DELETE", "PUT", "HEAD", "OPTIONS"} {
 				probe := new(http.Request)
 				*probe = *r
 				probe.Method = method

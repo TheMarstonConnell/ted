@@ -13,13 +13,13 @@ import (
 
 func benchmarkValidationHandler(b *testing.B) http.Handler {
 	b.Helper()
-	_, router, metadata, err := sharedHTTPDefinition()
+	definition, err := sharedHTTPDefinition()
 	if err != nil {
 		b.Fatal(err)
 	}
-	return validateHTTP(router, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	return validateHTTP(definition.router, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}), metadata)
+	}), definition.metadata)
 }
 
 func BenchmarkValidateHTTP(b *testing.B) {
@@ -89,11 +89,11 @@ func BenchmarkSummaryWS(b *testing.B) {
 }
 
 func BenchmarkValidateWS(b *testing.B) {
-	spec, _, _, err := sharedHTTPDefinition()
+	definition, err := sharedHTTPDefinition()
 	if err != nil {
 		b.Fatal(err)
 	}
-	h := &httpAPI{spec: spec}
+	h := &httpAPI{spec: definition.spec}
 	data := []byte(`{"type":"subscribe","request_id":"request","subscribe_all":true,"agent_ids":["one","two"],"cursors":{"one":42}}`)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -104,17 +104,16 @@ func BenchmarkValidateWS(b *testing.B) {
 }
 
 func TestValidateHTTPPrecomputedMetadataPreservesContracts(t *testing.T) {
-	_, router, metadata, err := sharedHTTPDefinition()
+	definition, err := sharedHTTPDefinition()
 	if err != nil {
 		t.Fatal(err)
 	}
 	called := false
-	h := validateHTTP(router, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), metadata)
+	h := validateHTTP(definition.router, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), definition.metadata)
 
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/v1/agents/agent", nil))
 	if w.Code != http.StatusMethodNotAllowed || w.Header().Get("Allow") != "GET, PATCH" || called {
 		t.Fatalf("method contract: status=%d allow=%q called=%v", w.Code, w.Header().Get("Allow"), called)
 	}
-
 }

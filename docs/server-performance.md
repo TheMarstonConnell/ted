@@ -131,11 +131,11 @@ same fixture/binary. Clone state has 8 agents, 384 messages, and 1,024 events.
 | WS inventory: 10 × 100-message agents, no replay | 1.709 ms | 2.725 µs | -99.8% | 904,314 → 5,480 |
 | SPA GET | 1.529 µs | 1.027 µs | -32.8% | 2,864 → 1,936 |
 | SPA HEAD | 0.894 µs | 0.411 µs | -54.0% | 1,504 → 576 |
-| Clone durable state | 5.474 ms | 1.078 ms | -80.3% | 1,513,288 → 450,379 |
-| Clone full agent | 331.100 µs | 62.262 µs | -81.2% | 88,438 → 29,354 |
-| Clone transcript | 285.747 µs | 62.962 µs | -78.0% | 80,338 → 28,170 |
-| Clone event page | 325.940 µs | 70.968 µs | -78.2% | 65,931 → 25,605 |
-| Decode unchanged 256 KiB recording frame | 236.707 µs | 0.003 µs | <−99.9% | 270,336 → 0 |
+| Clone durable state | 5.247 ms | 1.095 ms | -79.1% | 1,513,288 → 450,379 |
+| Clone full agent | 313.742 µs | 62.218 µs | -80.2% | 88,438 → 29,354 |
+| Clone transcript | 282.102 µs | 64.438 µs | -77.2% | 80,338 → 28,170 |
+| Clone event page | 326.083 µs | 66.900 µs | -79.5% | 65,931 → 25,605 |
+| Decode unchanged 256 KiB recording frame | 239.016 µs | 0.002 µs | <−99.9% | 270,336 → 0 |
 
 The repeated-frame result measures only decoding a 256 KiB unchanged frame, not
 Chrome capture, ffmpeg, I/O, or full video generation; its one cached allocation
@@ -147,18 +147,19 @@ HTTP validation and direct WebSocket mapping also have standalone
 `BenchmarkValidateWS` benchmarks. Repeated handler construction benefits from
 shared setup; the first process-wide schema load still has a cold-start cost.
 
-A post-review simplification removed a generic clone dispatcher, settings-selector
-forwarders, and a one-use JSON-whitespace helper. The clone and WebSocket
-validation benchmarks were rerun for all five samples, as were all 26 route
-scenarios because direct clone calls are used across route paths. Raw output is
-in `docs/performance/review-simplification.txt` and
-`docs/performance/routes-review-after.txt`. This later shared-host run was
-a separate shared-host observation and is not substituted into the paired table
-above: clone medians were 1.081 ms (durable state), 66.381 µs (agent),
-63.387 µs (transcript), and 69.736 µs (events); WebSocket validation was
-4.519 µs. Clone allocation counts were unchanged. The route rerun retains every
-sample, including wide durable write variation (for example DELETE project
-ranged from 12.706 to 114.706 ms).
+Post-review simplification removed generic clone and settings-selector façades,
+a one-use JSON-whitespace helper, a one-use frame decoder type, manual shallow
+clone loops, and manual `sync.Once` result storage. All standalone clone,
+HTTP-validation/handler, WebSocket mapping/validation, and recording benchmarks
+were rerun for five samples, as were all 26 route scenarios because clone calls
+span route paths. Raw output is in `docs/performance/review-simplification.txt`,
+`docs/performance/recording-benchmark.txt`, and
+`docs/performance/routes-review-after.txt`. The clone and recording rows above
+now use these final results. The later route run is a separate shared-host
+observation and is not substituted into the sequential route table; it retains
+every sample, including wide durable write variation (for example DELETE
+project ranged from 12.475 to 123.848 ms). WebSocket validation's final median
+was 4.466 µs; clone allocation counts were unchanged.
 
 ## Additional review findings and deliberate limits
 

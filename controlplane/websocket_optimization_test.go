@@ -57,11 +57,11 @@ func TestSummaryWSMatchesJSONWireConversion(t *testing.T) {
 }
 
 func TestValidateWSReturnsSchemaValidatedTypedCommand(t *testing.T) {
-	spec, _, _, err := sharedHTTPDefinition()
+	definition, err := sharedHTTPDefinition()
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &httpAPI{spec: spec}
+	h := &httpAPI{spec: definition.spec}
 	command, err := h.validateWS([]byte(`{"type":"subscribe","request_id":"request","subscribe_all":true,"agent_ids":["one"],"cursors":{"one":9007199254740993}}`))
 	if err != nil {
 		t.Fatal(err)

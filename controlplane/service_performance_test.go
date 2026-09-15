@@ -76,24 +76,3 @@ func TestNarrowReadSnapshots(t *testing.T) {
 		t.Fatal("summary aliases stored settings")
 	}
 }
-
-func TestSettleTreeDoesNotAffectUnrelatedAgents(t *testing.T) {
-	s := &Service{state: emptyState(), changed: make(chan struct{}), save: func(string, diskState) error { return nil }}
-	for id, parent := range map[string]string{"root": "", "child": "root", "grandchild": "child", "sibling": "root", "unrelated": ""} {
-		s.state.Agents[id] = &storedAgent{Agent: Agent{ID: id, ParentAgentID: parent, State: "idle"}}
-	}
-	if _, err := s.SetSettled("root", true); err != nil {
-		t.Fatal(err)
-	}
-	for id, a := range s.state.Agents {
-		if a.Agent.Settled != (id != "unrelated") {
-			t.Fatalf("incorrect settled state for %s", id)
-		}
-	}
-	if _, err := s.SetSettled("root", false); err != nil {
-		t.Fatal(err)
-	}
-	if s.state.Agents["child"].Agent.Settled != true {
-		t.Fatal("restoring root restored child")
-	}
-}

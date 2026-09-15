@@ -54,11 +54,15 @@ func cloneMessages(values []agent.Message) []agent.Message {
 }
 
 func cloneMessage(value agent.Message) agent.Message {
+	content, err := value.Content.CloneJSON()
+	if err != nil {
+		panic(err)
+	}
 	// Private runtime provenance is excluded; SourceModel is durable.
 	cloned := agent.Message{
 		SourceModel: value.SourceModel,
 		Role:        value.Role,
-		Content:     cloneContent(value.Content),
+		Content:     content,
 		Reasoning:   value.Reasoning,
 		ToolCallId:  value.ToolCallId,
 	}
@@ -73,14 +77,6 @@ func cloneMessage(value agent.Message) agent.Message {
 		cloned.ToolCalls = slices.Clone(value.ToolCalls)
 	}
 	return cloned
-}
-
-func cloneContent(value agent.Content) agent.Content {
-	snapshot, err := value.CloneJSON()
-	if err != nil {
-		panic(err)
-	}
-	return snapshot
 }
 
 func cloneEvents(values []Event) []Event {
