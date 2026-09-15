@@ -96,7 +96,9 @@ model's default, matching the existing model-selection behavior.
 Settled is an archive/visibility flag, independent of execution state. Default
 lists omit settled agents; explicit inspection and historical subscriptions work.
 Settling is durable before active cancellation is requested. It may return a
-settled agent whose execution state is still `stopping`.
+settled agent whose execution state is still `stopping`. Settling includes all
+descendants, even across projects or through already-settled children, in one
+durable update. Restoring affects only the requested agent.
 
 Server shutdown blocks starts globally, cancels active turns without ordinary
 Stop's queue-advance behavior, persists pending work, and waits for bounded

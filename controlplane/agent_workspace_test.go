@@ -126,13 +126,16 @@ func TestChildSharedWorktreePersistsAndRunsInParentsCurrentBranch(t *testing.T) 
 	if _, err = s.UpdateWorkspace(child.ID, WorkspaceSelection{Mode: "current_checkout"}); err == nil {
 		t.Fatal("shared workspace not locked")
 	}
-	// Settling the parent is independent of every child.
+	// Restore the child separately before checking its missing workspace.
 	if _, err = s.SetSettled(parent.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	current, _ := s.GetAgent(child.ID)
-	if current.Settled {
-		t.Fatal("parent cascaded settling")
+	if !current.Settled {
+		t.Fatal("parent did not settle child")
+	}
+	if _, err = s.SetSettled(child.ID, false); err != nil {
+		t.Fatal(err)
 	}
 	// Missing shared worktrees fail without recreation/fallback to checkout.
 	if err = os.RemoveAll(path); err != nil {

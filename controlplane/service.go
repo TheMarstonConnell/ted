@@ -629,25 +629,52 @@ func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 	if err != nil {
 		return Agent{}, err
 	}
-	if a.Agent.Settled == settled {
+	targets := []*storedAgent{a}
+	if settled {
+		children := make(map[string][]*storedAgent)
+		for _, child := range s.state.Agents {
+			children[child.Agent.ParentAgentID] = append(children[child.Agent.ParentAgentID], child)
+		}
+		seen := map[string]bool{id: true}
+		for i := 0; i < len(targets); i++ {
+			for _, child := range children[targets[i].Agent.ID] {
+				if !seen[child.Agent.ID] {
+					seen[child.Agent.ID] = true
+					targets = append(targets, child)
+				}
+			}
+		}
+	}
+	changed := make([]*storedAgent, 0, len(targets))
+	for _, target := range targets {
+		if target.Agent.Settled != settled {
+			changed = append(changed, target)
+		}
+	}
+	if len(changed) == 0 {
 		return copyJSON(a.Agent), nil
 	}
 	before := copyJSON(s.state)
-	a.Agent.Settled = settled
-	a.Agent.Held = true
-	r := s.running[id]
-	if settled && r != nil {
-		a.Agent.State = "stopping"
+	for _, target := range changed {
+		target.Agent.Settled = settled
+		target.Agent.Held = true
+		if settled && s.running[target.Agent.ID] != nil {
+			target.Agent.State = "stopping"
+		}
+		s.eventLocked(target, "agent.updated", s.summaryLocked(target))
 	}
-	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
 	if err = s.commitLocked(before); err != nil {
 		return Agent{}, err
 	}
-	if settled && r != nil {
-		r.stopped = true
-		r.cancel()
-	} else if settled && s.instances[id] != nil {
-		_ = s.instances[id].Close()
+	if settled {
+		for _, target := range changed {
+			if r := s.running[target.Agent.ID]; r != nil {
+				r.stopped = true
+				r.cancel()
+			} else if instance := s.instances[target.Agent.ID]; instance != nil {
+				_ = instance.Close()
+			}
+		}
 	}
 	return copyJSON(a.Agent), nil
 }

@@ -148,3 +148,9 @@ non-browser clients may omit Origin. An ordinary client disconnect does not end 
 TUI that auto-started a server does intentionally shut down that entire server. Slow WS writes time out after 5 seconds; clients resume from
 persisted event cursors. Output remains fully retained on HTTP, not truncated
 to satisfy WebSocket transport bounds.
+
+Settling an agent also settles all of its descendants, including children in
+other projects. The family update is committed atomically, holds queued work,
+and cancels running turns. Repeating settlement still visits descendants of an
+already-settled agent. Restoring (`settled: false`) affects only the requested
+agent and does not resume queued work.
