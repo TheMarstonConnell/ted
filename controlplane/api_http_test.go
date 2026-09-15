@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -560,5 +561,98 @@ func TestHTTPReadStatusContract(t *testing.T) {
 	duplicate := decodeHTTP[Agent](t, f.request("PATCH", base, `{"read_cursor":0}`, "", 200))
 	if duplicate.ReadCursor != marked.ReadCursor || duplicate.Cursor != marked.Cursor {
 		t.Fatalf("lower read cursor was not a no-op: %+v", duplicate)
+	}
+}
+
+func TestHTTPAgentPaginationOrderingFilteringAndLegacyList(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	p := f.project()
+	other := decodeHTTP[Project](t, f.request("POST", "/v1/projects", fmt.Sprintf(`{"name":"other","root":%q,"defaults":{"model":"http-test/one","effort":"low"}}`, f.t.TempDir()), "", 201))
+	a1, a2, a3, a4 := f.agent(p), f.agent(p), f.agent(p), f.agent(p)
+	f.agent(other)
+
+	// Set deterministic update times, including a tie. This deliberately only
+	// changes the in-memory test state; the list operation must use UpdatedAt,
+	// not creation order or map iteration order.
+	f.s.mu.Lock()
+	tie := time.Unix(100, 0)
+	f.s.state.Agents[a1.ID].Agent.UpdatedAt = tie
+	f.s.state.Agents[a2.ID].Agent.UpdatedAt = tie
+	f.s.state.Agents[a3.ID].Agent.UpdatedAt = tie.Add(-time.Hour)
+	f.s.state.Agents[a4.ID].Agent.UpdatedAt = tie.Add(-2 * time.Hour)
+	f.s.state.Agents[a4.ID].Agent.Settled = true
+	f.s.mu.Unlock()
+
+	get := func(path string) (*http.Response, []byte) {
+		t.Helper()
+		res, err := f.server.Client().Get(f.server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res, data
+	}
+
+	// Supplying only page_size applies page=1 and the default unsettled filter.
+	res, data := get("/v1/agents?project_id=" + p.ID + "&page_size=2")
+	if res.StatusCode != 200 || res.Header.Get("X-Total-Count") != "3" {
+		t.Fatalf("page response: status=%d total=%q body=%s", res.StatusCode, res.Header.Get("X-Total-Count"), data)
+	}
+	var first []Agent
+	if err := json.Unmarshal(data, &first); err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 2 {
+		t.Fatalf("first page: %+v", first)
+	}
+	tieIDs := []string{a1.ID, a2.ID}
+	sort.Strings(tieIDs)
+	if first[0].ID != tieIDs[0] || first[1].ID != tieIDs[1] {
+		t.Fatalf("tie ordering: got %q,%q want %q", first[0].ID, first[1].ID, tieIDs)
+	}
+
+	res, data = get("/v1/agents?include_settled=true&project_id=" + p.ID + "&page=2&page_size=2")
+	if res.StatusCode != 200 || res.Header.Get("X-Total-Count") != "4" {
+		t.Fatalf("second page: status=%d total=%q body=%s", res.StatusCode, res.Header.Get("X-Total-Count"), data)
+	}
+	var second []Agent
+	if err := json.Unmarshal(data, &second); err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 2 || second[0].ID != a3.ID || second[1].ID != a4.ID {
+		t.Fatalf("second page ordering: %+v", second)
+	}
+
+	res, data = get("/v1/agents?include_settled=true&project_id=" + p.ID + "&page=3&page_size=2")
+	if res.StatusCode != 200 || res.Header.Get("X-Total-Count") != "4" || string(data) != "[]\n" {
+		t.Fatalf("empty page: status=%d total=%q body=%s", res.StatusCode, res.Header.Get("X-Total-Count"), data)
+	}
+
+	// Omitting pagination preserves the legacy list and does not add metadata.
+	res, data = get("/v1/agents?include_settled=true&project_id=" + p.ID)
+	if res.StatusCode != 200 || res.Header.Get("X-Total-Count") != "" {
+		t.Fatalf("legacy response metadata: status=%d total=%q", res.StatusCode, res.Header.Get("X-Total-Count"))
+	}
+	var legacy []Agent
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if len(legacy) != 4 {
+		t.Fatalf("legacy list: got %d agents", len(legacy))
+	}
+
+	for _, path := range []string{
+		"/v1/agents?page=0",
+		"/v1/agents?page_size=0",
+		"/v1/agents?page=not-an-integer",
+	} {
+		res, _ = get(path)
+		if res.StatusCode != 400 {
+			t.Errorf("%s: status=%d, want 400", path, res.StatusCode)
+		}
 	}
 }

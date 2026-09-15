@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/TheMarstonConnell/ted/browser"
+	"github.com/spf13/cobra"
 )
 
 func TestBrowserCommandDispatch(t *testing.T) {
@@ -115,6 +116,113 @@ func TestBrowserCommandServiceErrorIsJSONAndFailure(t *testing.T) {
 		t.Fatal("expected nonzero exit")
 	}
 	if !strings.Contains(out.String(), `"code":"target_missing"`) {
+		t.Fatal(out.String())
+	}
+}
+
+func TestBrowserListPagination(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TED_PROJECT_ROOT", dir)
+	for _, tc := range []struct {
+		action, name             string
+		flags                    []string
+		count, first, last, page int
+		more                     bool
+	}{
+		{"tabs", "default", nil, 25, 0, 24, 1, true},
+		{"tabs", "second", []string{"--page", "2", "--page-size", "10"}, 10, 10, 19, 2, true},
+		{"tabs", "last", []string{"--page", "4", "--page-size", "10"}, 2, 30, 31, 4, false},
+		{"tabs", "past end", []string{"--page", "9"}, 0, 0, 0, 9, false},
+		{"tabs", "all", []string{"--all"}, 32, 0, 31, 0, false},
+		{"status", "default", nil, 25, 0, 24, 1, true},
+		{"console", "default", nil, 25, 0, 24, 1, true},
+		{"errors", "default", nil, 25, 0, 24, 1, true},
+	} {
+		action, key := tc.action, tc.action
+		if action == "status" {
+			key = "projects"
+		}
+		t.Run(action+"/"+tc.name, func(t *testing.T) {
+			cmd := newBrowserCommand(func(_ context.Context, req browser.Request) (browser.Response, error) {
+				if req.Action != action || req.Thread != "thread 'one'" {
+					t.Fatal(req)
+				}
+				items := make([]any, 32)
+				for i := range items {
+					items[i] = map[string]any{"id": i, "text": "preserved"}
+				}
+				return browser.Response{OK: true, Data: map[string]any{key: items, "extra": "unchanged", "daemon": true}}, nil
+			})
+			root := &cobra.Command{Use: "ted"}
+			root.AddCommand(cmd)
+			var out, notices bytes.Buffer
+			root.SetOut(&out)
+			root.SetErr(&notices)
+			root.SetArgs(append([]string{"browser", action, "--project", dir, "--thread", "thread 'one'", "--timeout", "15s"}, tc.flags...))
+			if err := root.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			var response struct {
+				OK   bool                       `json:"ok"`
+				Data map[string]json.RawMessage `json:"data"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			var items []struct {
+				ID   int    `json:"id"`
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(response.Data[key], &items); err != nil {
+				t.Fatal(err)
+			}
+			if !response.OK || len(items) != tc.count || string(response.Data["extra"]) != `"unchanged"` || string(response.Data["daemon"]) != "true" || notices.Len() != 0 {
+				t.Fatalf("stdout=%s stderr=%s", out.String(), notices.String())
+			}
+			if tc.count > 0 && (items[0].ID != tc.first || items[len(items)-1].ID != tc.last || items[0].Text != "preserved") {
+				t.Fatal(items)
+			}
+			if tc.page == 0 {
+				if _, ok := response.Data["pagination"]; ok {
+					t.Fatal("--all unexpectedly changed response shape")
+				}
+				return
+			}
+			var pagination struct {
+				Page, Total int
+				HasMore     bool   `json:"has_more"`
+				NextPage    int    `json:"next_page"`
+				NextCommand string `json:"next_command"`
+			}
+			if err := json.Unmarshal(response.Data["pagination"], &pagination); err != nil {
+				t.Fatal(err)
+			}
+			if pagination.Page != tc.page || pagination.Total != 32 || pagination.HasMore != tc.more {
+				t.Fatal(pagination)
+			}
+			if tc.more {
+				if pagination.NextPage != tc.page+1 || !strings.Contains(pagination.NextCommand, "ted browser "+action) || !strings.Contains(pagination.NextCommand, "--thread 'thread '\"'\"'one'\"'\"''") || !strings.Contains(pagination.NextCommand, "--project "+dir) || !strings.Contains(pagination.NextCommand, "--timeout 15s") {
+					t.Fatal(pagination)
+				}
+			} else if pagination.NextPage != 0 || pagination.NextCommand != "" {
+				t.Fatal(pagination)
+			}
+		})
+	}
+}
+
+func TestBrowserEmptyListPagination(t *testing.T) {
+	t.Setenv("TED_PROJECT_ROOT", t.TempDir())
+	cmd := newBrowserCommand(func(context.Context, browser.Request) (browser.Response, error) {
+		return browser.Response{OK: true, Data: map[string]any{"console": nil}}, nil
+	})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"console"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"console":[]`) || !strings.Contains(out.String(), `"total":0`) {
 		t.Fatal(out.String())
 	}
 }

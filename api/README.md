@@ -69,8 +69,13 @@ WS inventory, and update events and cannot be patched. See
 [workspace precedence](../docs/workspaces.md#child-agents-and-existing-directories).
 
 Agent lists default to unsettled only; set `include_settled=true` to inspect all,
-and optionally filter by `project_id`. Settling a running agent initiates
-cancellation; the final output and conversation still remain replayable.
+and optionally filter by `project_id`. With either positive `page` or `page_size`,
+listing uses server-side pagination (the omitted value defaults to page 1 or page
+size 25) and returns `X-Total-Count` for the matching filtered set. Paged results
+are ordered by `updated_at` descending, then `id` ascending, and an out-of-range
+page is an empty array with the same total. Requests without pagination parameters
+retain the legacy full-array ordering and response shape. Settling a running agent
+initiates cancellation; the final output and conversation still remain replayable.
 Settled agents must be restored with `PATCH {"settled":false}` before continuing
 or submitting. Deleting a project permanently removes its settled agents, chat
 history, and associated idempotency receipts. Unsettled agents or workers still

@@ -82,7 +82,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description ListAgents */
+        /** @description List agents. Without page or page_size, returns the legacy full array and ordering. When either pagination parameter is supplied, an omitted page defaults to 1 and an omitted page_size defaults to 25. Paginated results are sorted by updated_at descending, then id ascending, and X-Total-Count reports the matching total after filtering. */
         get: operations["ListAgents"];
         put?: never;
         /** @description Create an agent; optional prompt queues its first turn. Optional Idempotency-Key makes retries safe; differing payload with the same key returns 409. */
@@ -1374,6 +1374,8 @@ export interface operations {
             query?: {
                 include_settled?: boolean;
                 project_id?: string;
+                page?: number;
+                page_size?: number;
             };
             header?: never;
             path?: never;
@@ -1384,6 +1386,8 @@ export interface operations {
             /** @description Success */
             200: {
                 headers: {
+                    /** @description Total number of agents matching the include_settled and project_id filters when pagination parameters are supplied. */
+                    "X-Total-Count"?: number;
                     [name: string]: unknown;
                 };
                 content: {

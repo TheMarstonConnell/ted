@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/TheMarstonConnell/ted/api"
@@ -283,8 +284,23 @@ func (h *httpAPI) ListAgents(w http.ResponseWriter, r *http.Request, p api.ListA
 			return
 		}
 	}
-	agents := []httpAgent{}
-	for _, a := range h.service.Agents(value(p.IncludeSettled), value(p.ProjectId)) {
+	var result []Agent
+	if p.Page != nil || p.PageSize != nil {
+		page, pageSize := int64(1), int64(25)
+		if p.Page != nil {
+			page = *p.Page
+		}
+		if p.PageSize != nil {
+			pageSize = *p.PageSize
+		}
+		var total int
+		result, total = h.service.AgentsPage(value(p.IncludeSettled), value(p.ProjectId), page, pageSize)
+		w.Header().Set("X-Total-Count", strconv.Itoa(total))
+	} else {
+		result = h.service.Agents(value(p.IncludeSettled), value(p.ProjectId))
+	}
+	agents := make([]httpAgent, 0, len(result))
+	for _, a := range result {
 		agents = append(agents, wireAgent(a))
 	}
 	writeJSON(w, 200, agents)
