@@ -86,8 +86,6 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
     name: /child chats for Parent chat/,
   });
   await expect(rootToggle).toHaveAttribute("aria-expanded", "false");
-  // A websocket inventory can establish parentage while the family is closed
-  // without opening the new child or leaving its old Misc group behind.
   fixture.updateAgent("loose", { parent_agent_id: "root" });
   await expect(page.getByText("Misc", { exact: true })).toHaveCount(0);
   await expect(rootToggle).toHaveAttribute("aria-expanded", "false");
