@@ -37,9 +37,8 @@ import { ErrorNotice } from "@/components/common";
 // Projects and chats share the same reveal behavior. Each group wraps only its
 // own row, so hovering/focusing a child chat never reveals the project action.
 const sidebarRowClass =
-  "group/sidebar-row flex items-center gap-2 transition-[gap] duration-150 [@media(hover:hover)_and_(pointer:fine)]:gap-0 hover:gap-2 focus-within:gap-2";
-const sidebarActionClass =
-  "overflow-hidden border-x-0 [@media(hover:hover)_and_(pointer:fine)]:w-0 group-hover/sidebar-row:w-8 group-focus-within/sidebar-row:w-8 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:disabled:opacity-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:disabled:opacity-50 group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:disabled:opacity-50";
+  "sidebar-action-row flex items-center gap-2 transition-[gap] duration-150";
+const sidebarActionClass = "sidebar-action overflow-hidden border-x-0";
 
 export function AgentLink({
   agent,

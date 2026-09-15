@@ -154,7 +154,7 @@
    The button class also covers composed triggers whose data-slot is renamed.
    Kept in base so explicit layout utilities (e.g. hidden sidebar actions) still work. */
 @layer base {
-  @media (max-width: 767px), (pointer: coarse) {
+  @media (max-width: 767px), (any-pointer: coarse) {
     :where(
       .group\/button,
       [data-slot="button"],
@@ -168,6 +168,46 @@
     :where(.group\/button, [data-slot="button"], [data-slot="select-trigger"]) {
       min-width: 3rem;
     }
+  }
+}
+
+/* Fine-pointer-only sidebar actions make room while their row is active. On
+   narrow layouts they retain the 48px target. Excluding any coarse pointer
+   keeps hybrid touchscreen controls visible even when a mouse is primary. */
+@media (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
+  .sidebar-action-row {
+    gap: 0;
+  }
+
+  .sidebar-action {
+    width: 0;
+    min-width: 0;
+    opacity: 0;
+  }
+
+  .sidebar-action-row:is(:hover, :focus-within) {
+    gap: 0.5rem;
+  }
+
+  .sidebar-action-row:is(:hover, :focus-within) .sidebar-action {
+    width: 2rem;
+    min-width: 2rem;
+    opacity: 1;
+  }
+
+  .sidebar-action:disabled {
+    opacity: 0;
+  }
+
+  .sidebar-action-row:is(:hover, :focus-within) .sidebar-action:disabled {
+    opacity: 0.5;
+  }
+}
+
+@media (max-width: 767px) and (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
+  .sidebar-action-row:is(:hover, :focus-within) .sidebar-action {
+    width: 3rem;
+    min-width: 3rem;
   }
 }
 

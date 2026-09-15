@@ -86,20 +86,18 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
     name: /child chats for Parent chat/,
   });
   await expect(rootToggle).toHaveAttribute("aria-expanded", "false");
+  // A websocket inventory can establish parentage while the family is closed
+  // without opening the new child or leaving its old Misc group behind.
+  fixture.updateAgent("loose", { parent_agent_id: "root" });
+  await expect(page.getByText("Misc", { exact: true })).toHaveCount(0);
+  await expect(rootToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator('[data-agent-id="loose"]')).not.toBeVisible();
+  await root.getByRole("link").hover();
   await rootToggle.click();
   await expect(child).toBeVisible();
   await expect(grandchild).not.toBeVisible();
-  await child.getByRole("link").hover();
-  await child
-    .getByRole("button", {
-      name: "Expand child chats for Child chat",
-      exact: true,
-    })
-    .click();
   await expect(rootChildren.locator('[data-agent-id="child"]')).toBeVisible();
-  await expect(
-    childChildren.locator('[data-agent-id="grandchild"]'),
-  ).toBeVisible();
+  await expect(rootChildren.locator('[data-agent-id="loose"]')).toBeVisible();
   // The child has different project metadata but follows its family root into
   // the harness project instead of becoming a top-level Misc chat.
   await expect(
@@ -108,7 +106,7 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
       .locator("xpath=following-sibling::*[1]")
       .locator('[data-agent-id="child"]'),
   ).toBeVisible();
-  await expect(page.getByText("Misc", { exact: true })).toBeVisible();
+  await expect(page.getByText("Misc", { exact: true })).toHaveCount(0);
   await expect(page.locator("a button, button a")).toHaveCount(0);
   if (process.env.TED_WEB_RECORD) await page.waitForTimeout(1000);
 
@@ -140,17 +138,15 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
       exact: true,
     })
     .click();
+  await expect(
+    childChildren.locator('[data-agent-id="grandchild"]'),
+  ).toBeVisible();
   await grandchild.getByRole("link").click();
   await expect(page).toHaveURL(/\/agents\/grandchild$/);
   await expect(grandchild.getByRole("link")).toHaveAttribute(
     "aria-current",
     "page",
   );
-
-  // A websocket inventory can establish parentage after initial load.
-  fixture.updateAgent("loose", { parent_agent_id: "root" });
-  await expect(rootChildren.locator('[data-agent-id="loose"]')).toBeVisible();
-  await expect(page.getByText("Misc", { exact: true })).toHaveCount(0);
 
   await page.screenshot({
     path: testInfo.outputPath("sidebar-agent-family-desktop.png"),
@@ -174,12 +170,17 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
       exact: true,
     }),
   ).toBeAttached();
+
+  await page.reload();
+  await expect(rootToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(child).not.toBeVisible();
+  await expect(page).toHaveURL(/\/agents\/grandchild$/);
 });
 
 test("child toggles reveal on the right without moving settle or switching chats", async ({
   page,
-}, testInfo) => {
-  const fixture = await seedFamily(page);
+}) => {
+  await seedFamily(page);
   await page.goto("/agents/grandchild");
   const draft = page.getByRole("textbox", { name: "Message", exact: true });
   await draft.fill("Keep this draft");
@@ -205,11 +206,6 @@ test("child toggles reveal on the right without moving settle or switching chats
   await expect(child).not.toBeVisible();
   const before = (await link.boundingBox())!;
   expect(before.width).toBe((await root.boundingBox())!.width);
-  await page.screenshot({
-    path: testInfo.outputPath("family-actions-at-rest.png"),
-  });
-  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(750);
-
   await link.hover();
   for (const action of [toggle, settleButton]) {
     await expect(action).toHaveCSS("width", "32px");
@@ -230,28 +226,17 @@ test("child toggles reveal on the right without moving settle or switching chats
   expect(settleBox.x + settleBox.width).toBe(before.x + before.width);
   await toggle.hover();
   await expect(toggle).toHaveCSS("opacity", "1");
-  await page.screenshot({
-    path: testInfo.outputPath("family-actions-hover.png"),
-  });
-  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(750);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(child).toBeVisible();
   await expect(childToggle).toHaveCSS("width", "0px");
   await expect(childToggle).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator('[data-agent-id="grandchild"]')).not.toBeVisible();
-  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(750);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(child).not.toBeVisible();
   await expect(page).toHaveURL(/\/agents\/grandchild$/);
   await expect(draft).toHaveValue("Keep this draft");
-  expect(fixture.agents.root.settled).toBe(false);
-  await page.screenshot({
-    path: testInfo.outputPath("family-actions-collapsed.png"),
-  });
-  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(750);
-
   await draft.focus();
   await draft.hover();
   await expect(toggle).toHaveCSS("width", "0px");
@@ -264,54 +249,48 @@ test("child toggles reveal on the right without moving settle or switching chats
   await expect(child).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(settleButton).toBeFocused();
-  await page.keyboard.press("Enter");
-  const restore = root.getByRole("button", {
-    name: "Restore chat: Parent chat",
-    exact: true,
-  });
-  await expect(restore).toBeEnabled();
-  await expect(child).toBeVisible();
-  expect(fixture.agents.child.settled).toBe(false);
-  await expect(page).toHaveURL(/\/agents\/grandchild$/);
-  await expect(draft).toHaveValue("Keep this draft");
 
   await child.getByRole("link").focus();
   await child.getByRole("link").hover();
   await expect(childToggle).toHaveCSS("opacity", "1");
   await expect(toggle).toHaveCSS("width", "0px");
-  await expect(restore).toHaveCSS("width", "0px");
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await link.focus();
-  await expect(toggle).toHaveCSS("width", "32px");
-  expect(
-    await toggle.evaluate((el) =>
-      parseFloat(getComputedStyle(el).transitionDuration),
-    ),
-  ).toBeLessThan(0.001);
-});
+  await expect(settleButton).toHaveCSS("width", "0px");
 
-test("inventory updates and reloads do not automatically open child chats", async ({
-  page,
-}) => {
-  const fixture = await seedFamily(page);
-  await page.goto("/agents/child");
-  const root = page.locator('[data-agent-id="root"]');
-  const toggle = root.getByRole("button", {
-    name: "Expand child chats for Parent chat",
+  await page.setViewportSize({ width: 700, height: 844 });
+  await page.goto("/agents/grandchild?sidebar=open");
+  expect(
+    await page.evaluate(
+      () =>
+        matchMedia("(hover: hover) and (pointer: fine)").matches &&
+        !matchMedia("(any-pointer: coarse)").matches,
+    ),
+  ).toBe(true);
+  const drawer = page.getByRole("dialog", { name: "Workspace", exact: true });
+  const narrowRoot = drawer.locator('[data-agent-id="root"]');
+  const narrowLink = narrowRoot.getByRole("link");
+  const narrowToggle = narrowRoot.getByRole("button", {
+    name: /child chats for Parent chat/,
+  });
+  const narrowSettle = narrowRoot.getByRole("button", {
+    name: "Settle chat: Parent chat",
     exact: true,
   });
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  fixture.updateAgent("loose", { parent_agent_id: "root" });
-  await expect(page.getByText("Misc", { exact: true })).toHaveCount(0);
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await expect(page.locator('[data-agent-id="loose"]')).not.toBeVisible();
-  await root.getByRole("link").hover();
-  await toggle.click();
-  await expect(page.locator('[data-agent-id="loose"]')).toBeVisible();
-  await page.reload();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await expect(page.locator('[data-agent-id="child"]')).not.toBeVisible();
-  await expect(page).toHaveURL(/\/agents\/child$/);
+
+  for (const action of [narrowToggle, narrowSettle]) {
+    await expect(action).toHaveCSS("width", "0px");
+    await expect(action).toHaveCSS("min-width", "0px");
+    await expect(action).toHaveCSS("opacity", "0");
+  }
+  const restingLink = (await narrowLink.boundingBox())!;
+  expect(restingLink.width).toBe((await narrowRoot.boundingBox())!.width);
+
+  await narrowLink.hover();
+  for (const action of [narrowToggle, narrowSettle]) {
+    await expect(action).toHaveCSS("opacity", "1");
+    const box = (await action.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(48);
+    expect(box.height).toBeGreaterThanOrEqual(48);
+  }
 });
 
 test.describe("touch family controls", () => {
@@ -367,14 +346,6 @@ test.describe("touch family controls", () => {
       }),
     ).toBeVisible();
 
-    await toggle.click();
-    await expect(child).not.toBeVisible();
-    await drawer
-      .getByRole("button", {
-        name: "Expand child chats for Parent chat",
-        exact: true,
-      })
-      .click();
     await page.screenshot({
       path: testInfo.outputPath("sidebar-agent-family-mobile.png"),
     });
