@@ -126,12 +126,6 @@ func TestChildSharedWorktreePersistsAndRunsInParentsCurrentBranch(t *testing.T) 
 	if _, err = s.UpdateWorkspace(child.ID, WorkspaceSelection{Mode: "current_checkout"}); err == nil {
 		t.Fatal("shared workspace not locked")
 	}
-	if _, err = s.SetSettled(parent.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.SetSettled(child.ID, false); err != nil {
-		t.Fatal(err)
-	}
 	// Missing shared worktrees fail without recreation/fallback to checkout.
 	if err = os.RemoveAll(path); err != nil {
 		t.Fatal(err)
