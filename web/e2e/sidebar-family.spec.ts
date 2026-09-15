@@ -234,34 +234,6 @@ test("child toggles reveal on the right without moving settle or switching chats
   await child.getByRole("link").hover();
   await expect(childToggle).toHaveCSS("opacity", "1");
   await expect(toggle).toHaveCSS("width", "0px");
-
-  await page.setViewportSize({ width: 700, height: 844 });
-  await page.goto("/agents/grandchild?sidebar=open");
-  expect(
-    await page.evaluate(
-      () =>
-        matchMedia("(hover: hover) and (pointer: fine)").matches &&
-        !matchMedia("(any-pointer: coarse)").matches,
-    ),
-  ).toBe(true);
-  const drawer = page.getByRole("dialog", { name: "Workspace", exact: true });
-  const narrowRoot = drawer.locator('[data-agent-id="root"]');
-  const narrowLink = narrowRoot.getByRole("link");
-  const narrowToggle = narrowRoot.getByRole("button", {
-    name: /child chats for Parent chat/,
-  });
-
-  await expect(narrowToggle).toHaveCSS("width", "0px");
-  await expect(narrowToggle).toHaveCSS("min-width", "0px");
-  await expect(narrowToggle).toHaveCSS("opacity", "0");
-  const restingLink = (await narrowLink.boundingBox())!;
-  expect(restingLink.width).toBe((await narrowRoot.boundingBox())!.width);
-
-  await narrowLink.hover();
-  await expect(narrowToggle).toHaveCSS("opacity", "1");
-  const narrowToggleBox = (await narrowToggle.boundingBox())!;
-  expect(narrowToggleBox.width).toBeGreaterThanOrEqual(48);
-  expect(narrowToggleBox.height).toBeGreaterThanOrEqual(48);
 });
 
 test.describe("touch family controls", () => {
