@@ -989,6 +989,60 @@ describe("sidebar branch refresh", () => {
       vi.useRealTimers();
     }
   });
+  it("refreshes a PR immediately after a workspace patch changes its branch source", async () => {
+    let pullRequestCalls = 0;
+    let current = agent("a", {
+      workspace: {
+        mode: "worktree",
+        locked: false,
+        status: "draft",
+        base_branch: "origin/main",
+      },
+    });
+    const fetcher = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path.endsWith("/pull-request")) {
+        pullRequestCalls++;
+        return Response.json(
+          current.workspace?.mode === "current_checkout"
+            ? { branch: "main", number: 61 }
+            : {},
+        );
+      }
+      if (path === "/v1/agents/a/workspace" && options?.method === "PATCH") {
+        current = {
+          ...current,
+          workspace: {
+            mode: "current_checkout",
+            locked: false,
+            status: "draft",
+          },
+        };
+        return Response.json(current);
+      }
+      if (path.startsWith("/v1/agents")) return Response.json([current]);
+      if (path === "/v1/projects")
+        return Response.json([{ ...projects[0], git_branch: "main" }]);
+      if (path === "/v1/models") return Response.json([]);
+      return Response.json({ ...projects[0], git_branch: "main" });
+    });
+    const client = prepare(fetcher);
+    try {
+      await client.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(pullRequestCalls).toBe(1);
+
+      await client.updateWorkspace("a", { mode: "current_checkout" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(pullRequestCalls).toBe(2);
+      expect(client.state.pullRequests.a).toEqual({
+        branch: "main",
+        number: 61,
+      });
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
   it("reruns a PR lookup immediately when its branch changes in flight", async () => {
     let resolveFirst!: (response: Response) => void;
     const first = new Promise<Response>((resolve) => {

@@ -606,6 +606,7 @@ export class ControlPlane {
       workspace,
     );
     this.mergeAgent(agent);
+    void this.refreshPullRequests([id]);
     return agent;
   };
   settle = (id: string, settled: boolean) =>
