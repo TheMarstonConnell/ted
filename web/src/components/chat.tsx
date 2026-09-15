@@ -133,52 +133,8 @@ const markdownComponents: Components = {
   ),
 };
 
-const BotMessage = memo(function BotMessage({
-  item,
-  source,
-}: {
-  item: TranscriptItem;
-  source?: string;
-}) {
-  const label = `Bot notification${source ? ` from ${source}` : ""}`;
-  const summary = item.text.replace(/\s+/g, " ").trim();
-  return (
-    <Collapsible className="min-w-0 rounded-lg border" data-bot-notification>
-      <CollapsibleTrigger
-        aria-label={`${label}: ${summary}`}
-        render={
-          <Button
-            variant="ghost"
-            className="group h-auto w-full justify-start px-4 py-2"
-          />
-        }
-      >
-        <ChevronRight
-          data-slot="bot-expand"
-          className="size-4 group-data-panel-open:rotate-90"
-          aria-hidden="true"
-        />
-        <Bot className="size-4" aria-hidden="true" />
-        <span className="min-w-0 truncate text-xs font-medium" title={label}>
-          {label}
-        </span>
-        <span className="min-w-0 truncate text-left text-xs text-muted-foreground">
-          {summary}
-        </span>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="border-t p-4 text-sm leading-6 whitespace-pre-wrap [overflow-wrap:anywhere]">
-          {source && (
-            <div className="mb-2 text-xs text-muted-foreground">
-              From {source}
-            </div>
-          )}
-          <div>{item.text}</div>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-});
+const botSourceLabel = (senderAgentId: string) =>
+  `chat ${senderAgentId} (caller-supplied)`;
 
 const Message = memo(function Message({
   item,
@@ -187,14 +143,24 @@ const Message = memo(function Message({
   item: TranscriptItem;
   source?: string;
 }) {
-  if (item.kind === "bot") return <BotMessage item={item} source={source} />;
-  if (item.kind === "tool" || item.kind === "tool_result") {
-    // An empty result is still a result. Do not infer success/failure from text.
+  if (
+    item.kind === "bot" ||
+    item.kind === "tool" ||
+    item.kind === "tool_result"
+  ) {
+    const bot = item.kind === "bot";
     const waiting = item.kind === "tool" && item.output === undefined;
+    const summary = item.text.replace(/\s+/g, " ").trim();
+    const label = `Bot notification${source ? ` from ${source}` : ""}`;
     return (
-      <Collapsible disabled={waiting} className="min-w-0 rounded-lg border">
+      <Collapsible
+        disabled={waiting}
+        className="min-w-0 rounded-lg border"
+        data-bot-notification={bot ? "" : undefined}
+      >
         <CollapsibleTrigger
           aria-busy={waiting}
+          aria-label={bot ? `${label}: ${summary}` : undefined}
           title={waiting ? "Waiting for tool output" : undefined}
           render={
             <Button
@@ -211,28 +177,54 @@ const Message = memo(function Message({
             />
           ) : (
             <ChevronRight
-              data-slot="tool-expand"
+              data-slot={bot ? "bot-expand" : "tool-expand"}
               className="size-4 group-data-panel-open:rotate-90"
               aria-hidden="true"
             />
           )}
-          <span
-            className="min-w-0 truncate font-mono text-xs font-normal"
-            title={item.kind === "tool" ? toolCommand(item.text) : undefined}
-          >
-            {item.kind === "tool"
-              ? toolCommand(item.text).replace(/\s+/g, " ").trim() ||
-                item.toolName ||
-                "Tool"
-              : `${item.toolName || "Tool"} output`}
-          </span>
+          {bot ? (
+            <>
+              <Bot className="size-4" aria-hidden="true" />
+              <span
+                className="min-w-0 truncate text-xs font-medium"
+                title={label}
+              >
+                {label}
+              </span>
+              <span className="min-w-0 truncate text-left text-xs text-muted-foreground">
+                {summary}
+              </span>
+            </>
+          ) : (
+            <span
+              className="min-w-0 truncate font-mono text-xs font-normal"
+              title={item.kind === "tool" ? toolCommand(item.text) : undefined}
+            >
+              {item.kind === "tool"
+                ? toolCommand(item.text).replace(/\s+/g, " ").trim() ||
+                  item.toolName ||
+                  "Tool"
+                : `${item.toolName || "Tool"} output`}
+            </span>
+          )}
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <pre className="overflow-x-auto whitespace-pre-wrap break-words border-t p-4 font-mono text-xs leading-5">
-            {item.kind === "tool"
-              ? item.output || "No output returned."
-              : item.text || "No output returned."}
-          </pre>
+          {bot ? (
+            <div className="border-t p-4 text-sm leading-6 whitespace-pre-wrap [overflow-wrap:anywhere]">
+              {source && (
+                <div className="mb-2 text-xs text-muted-foreground">
+                  From {source}
+                </div>
+              )}
+              <div>{item.text}</div>
+            </div>
+          ) : (
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words border-t p-4 font-mono text-xs leading-5">
+              {item.kind === "tool"
+                ? item.output || "No output returned."
+                : item.text || "No output returned."}
+            </pre>
+          )}
         </CollapsibleContent>
       </Collapsible>
     );
@@ -275,13 +267,11 @@ const Transcript = memo(function Transcript({
   ready,
   state,
   onScrollIntent,
-  agents,
 }: {
   items: TranscriptItem[];
   ready: boolean;
   state: Agent["state"];
   onScrollIntent: () => void;
-  agents: Record<string, Agent>;
 }) {
   return !ready ? (
     <Loading>Replaying chat history…</Loading>
@@ -328,9 +318,7 @@ const Transcript = memo(function Transcript({
                 item={item}
                 source={
                   item.senderAgentId
-                    ? agents[item.senderAgentId]
-                      ? agentTitle(agents[item.senderAgentId])
-                      : `chat ${item.senderAgentId}`
+                    ? botSourceLabel(item.senderAgentId)
                     : undefined
                 }
               />
@@ -715,7 +703,6 @@ function ChatWorkspace() {
           ready={!!ready}
           state={agent.state}
           onScrollIntent={onScrollIntent}
-          agents={agents}
         />
         <div className="workspace-scroll-gutter scrollbar-thin max-h-full shrink-0 overflow-y-auto">
           <div className="mx-auto w-full max-w-chat space-y-4 px-4 pb-4 pt-2 md:px-8">
@@ -778,13 +765,7 @@ function ChatWorkspace() {
                             {m.kind === "bot"
                               ? `Bot notification${
                                   m.sender_agent_id
-                                    ? ` from ${
-                                        agents[m.sender_agent_id]
-                                          ? agentTitle(
-                                              agents[m.sender_agent_id],
-                                            )
-                                          : `chat ${m.sender_agent_id}`
-                                      }`
+                                    ? ` from ${botSourceLabel(m.sender_agent_id)}`
                                     : ""
                                 }: ${m.text}`
                               : m.text}

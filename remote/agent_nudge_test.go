@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/TheMarstonConnell/ted/agent"
@@ -29,12 +30,11 @@ func TestBotQueuedEventRendering(t *testing.T) {
 	}, func(update Update) { updates = append(updates, update) }); err != nil {
 		t.Fatal(err)
 	}
-	if len(updates) != 1 || updates[0].Output == nil {
+	if len(updates) != 1 || updates[0].Bot == nil || updates[0].Output != nil {
 		t.Fatalf("updates: %+v", updates)
 	}
-	output := updates[0].Output
-	if output.ResponseType != "bot" || output.Content != "Bot notification from chat reviewer: checks passed" {
-		t.Fatalf("output: %+v", output)
+	if *updates[0].Bot != (agent.BotNotification{Text: "checks passed", SenderAgentID: "reviewer"}) {
+		t.Fatalf("bot notification: %+v", updates[0].Bot)
 	}
 
 	// Conversation checkpoints retain history but do not produce a second row.
@@ -57,5 +57,24 @@ func TestBotQueuedEventRendering(t *testing.T) {
 	}
 	if len(updates) != 1 || len(a.Messages()) != 1 || a.Messages()[0].Kind != "bot" {
 		t.Fatalf("notification duplicated or history lost: updates=%+v messages=%+v", updates, a.Messages())
+	}
+}
+
+func TestInFlightBotNotifications(t *testing.T) {
+	a := NewAgent(context.Background(), nil, Snapshot{
+		ID: "target",
+		Queue: []QueuedMessage{
+			{ID: "pending", Text: "first", Kind: "bot", SenderAgentID: "one", Status: "pending"},
+			{ID: "user", Text: "human", Status: "pending"},
+			{ID: "running", Text: "second", Kind: "bot", SenderAgentID: "two", Status: "running"},
+			{ID: "done", Text: "committed", Kind: "bot", Status: "completed"},
+		},
+	}, "", nil)
+	want := []agent.BotNotification{
+		{Text: "first", SenderAgentID: "one"},
+		{Text: "second", SenderAgentID: "two"},
+	}
+	if got := a.InFlightBotNotifications(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("notifications = %+v, want %+v", got, want)
 	}
 }

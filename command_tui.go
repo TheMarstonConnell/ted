@@ -110,6 +110,9 @@ func runRemoteTUISession(ctx context.Context, server, prompt, modelID, effort, r
 		if update.Output != nil {
 			p.Send(*update.Output)
 		}
+		if update.Bot != nil {
+			p.Send(*update.Bot)
+		}
 		if update.Busy != nil {
 			p.Send(remoteStateMsg(*update.Busy))
 		}

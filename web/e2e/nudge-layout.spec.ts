@@ -39,7 +39,7 @@ for (const width of [320, 390, 1440]) {
     expect(await contained()).toBe(true);
     await card.getByRole("button").click();
     await expect(
-      card.getByText(`From chat ${source}`, { exact: true }),
+      card.getByText(`From chat ${source} (caller-supplied)`, { exact: true }),
     ).toBeVisible();
     expect(await contained()).toBe(true);
     await page.reload();

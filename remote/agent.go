@@ -140,18 +140,24 @@ func (a *Agent) Continue() error {
 	return a.action("POST", "/continue", nil)
 }
 
-// Update carries completed outputs (including full tool results), not deltas.
+// Update keeps bot provenance structured until the terminal presentation boundary.
 type Update struct {
 	Output *agent.AgentResponse
+	Bot    *agent.BotNotification
 	Busy   *bool
 	Err    error
 }
 
-func formatBotNotification(text, senderAgentID string) string {
-	if senderAgentID == "" {
-		return "Bot notification: " + text
+func (a *Agent) InFlightBotNotifications() []agent.BotNotification {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	var notifications []agent.BotNotification
+	for _, q := range a.snapshot.Queue {
+		if q.Kind == "bot" && (q.Status == "pending" || q.Status == "running") {
+			notifications = append(notifications, agent.BotNotification{Text: q.Text, SenderAgentID: q.SenderAgentID})
+		}
 	}
-	return "Bot notification from chat " + senderAgentID + ": " + text
+	return notifications
 }
 
 func (a *Agent) consume(e Event, notify func(Update)) error {
@@ -161,6 +167,7 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 		return nil
 	}
 	var output *agent.AgentResponse
+	var bot *agent.BotNotification
 	var busy *bool
 	switch e.Type {
 	case "agent.updated":
@@ -196,12 +203,11 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 			return err
 		}
 		if q.Text != "" {
-			responseType, content := "user", q.Text
 			if q.Kind == "bot" {
-				responseType = "bot"
-				content = formatBotNotification(q.Text, q.SenderAgentID)
+				bot = &agent.BotNotification{Text: q.Text, SenderAgentID: q.SenderAgentID}
+			} else {
+				output = &agent.AgentResponse{ResponseType: "user", Content: q.Text}
 			}
-			output = &agent.AgentResponse{ResponseType: responseType, Content: content}
 		}
 
 	case "turn.failed", "turn.interrupted", "turn.cancelled":
@@ -215,8 +221,8 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 	}
 	a.cursor = e.Cursor
 	a.mu.Unlock()
-	if output != nil || busy != nil {
-		notify(Update{Output: output, Busy: busy})
+	if output != nil || bot != nil || busy != nil {
+		notify(Update{Output: output, Bot: bot, Busy: busy})
 	}
 	return nil
 }

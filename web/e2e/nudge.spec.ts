@@ -48,7 +48,7 @@ test("bot notifications are distinct while queued, live, and replayed", async ({
   emit("target", "message.queued", notification);
 
   const pending = page.getByText(
-    /^Bot notification from Review chat: Review is complete\./,
+    /^Bot notification from chat source \(caller-supplied\): Review is complete\./,
   );
   await expect(pending).toBeVisible();
   await expect(
@@ -70,7 +70,7 @@ test("bot notifications are distinct while queued, live, and replayed", async ({
   const card = page.locator("[data-bot-notification]");
   await expect(card).toHaveCount(1);
   const toggle = card.getByRole("button", {
-    name: /Bot notification from Review chat: Review is complete\./,
+    name: /Bot notification from chat source \(caller-supplied\): Review is complete\./,
   });
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByRole("article", { name: "Your message" })).toHaveCount(
@@ -83,6 +83,9 @@ test("bot notifications are distinct while queued, live, and replayed", async ({
     card
       .locator('[data-slot="collapsible-content"]')
       .getByText(text, { exact: true }),
+  ).toBeVisible();
+  await expect(
+    card.getByText("From chat source (caller-supplied)", { exact: true }),
   ).toBeVisible();
   if (process.env.TED_WEB_RECORD) await page.waitForTimeout(3000);
   const livePath = testInfo.outputPath("nudge-live.png");
@@ -106,7 +109,7 @@ test("bot notifications are distinct while queued, live, and replayed", async ({
   await expect(page.locator("[data-bot-notification]")).toHaveCount(1);
   await expect(
     page.getByRole("button", {
-      name: /Bot notification from Review chat: Review is complete\./,
+      name: /Bot notification from chat source \(caller-supplied\): Review is complete\./,
     }),
   ).toBeVisible();
   if (process.env.TED_WEB_RECORD) await page.waitForTimeout(2000);

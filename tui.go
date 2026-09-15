@@ -46,7 +46,6 @@ const (
 	userMessage
 	agentMessage
 	toolCallMessage
-	botMessage
 	commandMessage
 )
 
@@ -154,11 +153,11 @@ type tuiAgent interface {
 	Turn(string) error
 }
 
-func formatTUIBotNotification(text, senderAgentID string) string {
-	if senderAgentID == "" {
-		return "Bot notification: " + text
+func formatTUIBotNotification(notification agent.BotNotification) string {
+	if notification.SenderAgentID == "" {
+		return "Bot notification: " + notification.Text
 	}
-	return "Bot notification from chat " + senderAgentID + ": " + text
+	return "Bot notification from chat " + notification.SenderAgentID + ": " + notification.Text
 }
 
 func (m model) acceptsQueuedInput() bool {
@@ -166,7 +165,7 @@ func (m model) acceptsQueuedInput() bool {
 	return ok && client.AcceptsQueuedInput()
 }
 
-func initialModel(agent tuiAgent) model {
+func initialModel(client tuiAgent) model {
 	ta := textarea.New()
 	ta.Placeholder = "Send a message..."
 	ta.SetVirtualCursor(false)
@@ -203,9 +202,9 @@ func initialModel(agent tuiAgent) model {
 
 	markdown, err := newMarkdownRenderer(vp.Width())
 
-	directory := agent.WorkingDir()
+	directory := client.WorkingDir()
 	entries := []transcriptEntry{{kind: bannerMessage, content: "Ted Coding Agent"}}
-	for _, message := range agent.Messages() {
+	for _, message := range client.Messages() {
 		switch message.Role {
 		case "user":
 			text := message.Content.Text()
@@ -214,8 +213,8 @@ func initialModel(agent tuiAgent) model {
 			}
 			kind := userMessage
 			if message.Kind == "bot" {
-				kind = botMessage
-				text = formatTUIBotNotification(text, message.SenderAgentID)
+				kind = toolCallMessage
+				text = formatTUIBotNotification(agent.BotNotification{Text: text, SenderAgentID: message.SenderAgentID})
 			}
 			entries = append(entries, transcriptEntry{kind: kind, content: text})
 		case "tool":
@@ -237,6 +236,13 @@ func initialModel(agent tuiAgent) model {
 			}
 		}
 	}
+	if queued, ok := client.(interface {
+		InFlightBotNotifications() []agent.BotNotification
+	}); ok {
+		for _, notification := range queued.InFlightBotNotifications() {
+			entries = append(entries, transcriptEntry{kind: toolCallMessage, content: formatTUIBotNotification(notification)})
+		}
+	}
 
 	return model{
 		textarea:      ta,
@@ -253,8 +259,8 @@ func initialModel(agent tuiAgent) model {
 		agentStyle:    lipgloss.NewStyle(),
 		toolCallStyle: lipgloss.NewStyle().Faint(true),
 		err:           err,
-		agent:         agent,
-		commands:      commands.New(agent),
+		agent:         client,
+		commands:      commands.New(client),
 	}
 }
 
@@ -383,7 +389,7 @@ func (m model) styleFor(kind messageKind) lipgloss.Style {
 		return m.bannerStyle
 	case userMessage:
 		return m.senderStyle
-	case toolCallMessage, botMessage, commandMessage:
+	case toolCallMessage, commandMessage:
 		return m.toolCallStyle
 	default:
 		return m.agentStyle
@@ -395,7 +401,7 @@ func (m model) styleFor(kind messageKind) lipgloss.Style {
 // with terminal styling; if the markdown renderer is unavailable or fails,
 // the raw text is shown instead.
 func (m *model) renderEntry(entry transcriptEntry, width int) string {
-	if entry.kind == toolCallMessage || entry.kind == botMessage {
+	if entry.kind == toolCallMessage {
 		// Keep the raw entry intact so resizing can reveal more of the content.
 		// Strip terminal escapes and collapse whitespace before measuring cells,
 		// not bytes, so wide Unicode characters cannot cause wrapping.
@@ -405,7 +411,7 @@ func (m *model) renderEntry(entry transcriptEntry, width int) string {
 			return ""
 		}
 		tail := "…"
-		if entry.kind == toolCallMessage && strings.HasSuffix(line, `"`) && limit >= 2 {
+		if strings.HasPrefix(line, "Ran shell command - ") && strings.HasSuffix(line, `"`) && limit >= 2 {
 			tail += `"`
 		}
 		return m.toolCallStyle.Render(ansi.Truncate(line, limit, tail))
@@ -534,11 +540,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.renderTranscript()
 		}
 		m.viewport.GotoBottom()
+	case agent.BotNotification:
+		m.appendMessage(toolCallMessage, formatTUIBotNotification(msg))
+		return m, nil
 	case agent.AgentResponse:
 		if msg.ResponseType == "user" {
 			m.appendMessage(userMessage, msg.Content)
 		} else if msg.ResponseType == "bot" {
-			m.appendMessage(botMessage, msg.Content)
+			m.appendMessage(toolCallMessage, msg.Content)
 		} else if msg.ResponseType == "usage" {
 			return m, nil // Usage changed; redraw the toolbar without transcript noise.
 		} else if msg.ResponseType == "status" {
