@@ -136,13 +136,10 @@ const markdownComponents: Components = {
 const botSourceLabel = (senderAgentId: string) =>
   `chat ${senderAgentId} (caller-supplied)`;
 
-const Message = memo(function Message({
-  item,
-  source,
-}: {
-  item: TranscriptItem;
-  source?: string;
-}) {
+const Message = memo(function Message({ item }: { item: TranscriptItem }) {
+  const source = item.senderAgentId
+    ? botSourceLabel(item.senderAgentId)
+    : undefined;
   if (
     item.kind === "bot" ||
     item.kind === "tool" ||
@@ -314,14 +311,7 @@ const Transcript = memo(function Transcript({
                 item.kind === "bot"
               }
             >
-              <Message
-                item={item}
-                source={
-                  item.senderAgentId
-                    ? botSourceLabel(item.senderAgentId)
-                    : undefined
-                }
-              />
+              <Message item={item} />
             </MessageScrollerItem>
           ))}
           {state !== "idle" && (

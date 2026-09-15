@@ -161,23 +161,6 @@ func formatTUIBotNotification(notification remote.QueuedMessage) string {
 	return "Bot notification from chat " + notification.SenderAgentID + ": " + notification.Text
 }
 
-func responseTranscriptEntry(response agent.AgentResponse) (transcriptEntry, bool) {
-	switch response.ResponseType {
-	case "user":
-		return transcriptEntry{kind: userMessage, content: response.Content}, true
-	case "bot":
-		return transcriptEntry{kind: toolCallMessage, content: response.Content}, true
-	case "usage", "tool_result":
-		return transcriptEntry{}, false
-	case "status":
-		return transcriptEntry{kind: commandMessage, content: response.Content}, true
-	case "tool":
-		return transcriptEntry{kind: toolCallMessage, content: response.Content}, true
-	default:
-		return transcriptEntry{kind: agentMessage, content: response.Content}, true
-	}
-}
-
 func (m model) acceptsQueuedInput() bool {
 	client, ok := m.agent.(interface{ AcceptsQueuedInput() bool })
 	return ok && client.AcceptsQueuedInput()
@@ -554,8 +537,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.appendMessage(toolCallMessage, formatTUIBotNotification(msg))
 		return m, nil
 	case agent.AgentResponse:
-		if entry, visible := responseTranscriptEntry(msg); visible {
-			m.appendMessage(entry.kind, entry.content)
+		switch msg.ResponseType {
+		case "user":
+			m.appendMessage(userMessage, msg.Content)
+		case "usage", "tool_result":
+			return m, nil
+		case "status":
+			m.appendMessage(commandMessage, msg.Content)
+		case "tool":
+			m.appendMessage(toolCallMessage, msg.Content)
+		default:
+			m.appendMessage(agentMessage, msg.Content)
 		}
 		return m, nil
 	case remoteDeletedMsg:
