@@ -28,20 +28,21 @@ type runningTurn struct {
 }
 
 type Service struct {
-	mu          sync.Mutex
-	dir         string
-	logger      *zap.Logger
-	providers   []agent.Provider
-	catalog     *agent.Agent
-	state       diskState
-	running     map[string]*runningTurn
-	instances   map[string]*agent.Agent
-	changed     chan struct{}
-	closing     bool
-	storageErr  error
-	workers     sync.WaitGroup
-	releaseLock func() error
-	save        func(string, diskState) error
+	mu           sync.Mutex
+	dir          string
+	logger       *zap.Logger
+	providers    []agent.Provider
+	catalog      *agent.Agent
+	state        diskState
+	running      map[string]*runningTurn
+	instances    map[string]*agent.Agent
+	changed      chan struct{}
+	closing      bool
+	storageErr   error
+	workers      sync.WaitGroup
+	releaseLock  func() error
+	save         func(string, diskState) error
+	pullRequests *pullRequestResolver
 }
 
 func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Service, error) {
@@ -64,7 +65,7 @@ func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Se
 		unlock()
 		return nil, err
 	}
-	s := &Service{dir: dir, logger: logger, providers: append([]agent.Provider(nil), providers...), catalog: agent.NewAgent(logger, providers), state: state, running: map[string]*runningTurn{}, instances: map[string]*agent.Agent{}, changed: make(chan struct{}), releaseLock: unlock, save: saveState}
+	s := &Service{dir: dir, logger: logger, providers: append([]agent.Provider(nil), providers...), catalog: agent.NewAgent(logger, providers), state: state, running: map[string]*runningTurn{}, instances: map[string]*agent.Agent{}, changed: make(chan struct{}), releaseLock: unlock, save: saveState, pullRequests: newPullRequestResolver()}
 	// A durable "running" record is evidence of interrupted work, never a
 	// request to repeat tools. Even graceful shutdown follows this recovery rule.
 	for _, a := range s.state.Agents {

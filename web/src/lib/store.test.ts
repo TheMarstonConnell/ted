@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlPlane, isUnread, reduceEvent, type State } from "./store";
 import {
   groupAgents,
+  branchPullRequest,
   projectName,
   type Agent,
   type Event,
@@ -27,6 +28,7 @@ const agent = (id = "a", overrides: Partial<Agent> = {}): Agent => ({
 const state = (): State => ({
   agents: { a: agent() },
   projects: [],
+  pullRequests: {},
   models: [],
   transcripts: {},
   cursors: {},
@@ -891,7 +893,9 @@ describe("sidebar branch refresh", () => {
         expect(client.state.projects).toEqual([]);
         expect(client.state.agents).toEqual({});
         expect(
-          fetcher.mock.calls.filter(([path]) => path.startsWith("/v1/agents")),
+          fetcher.mock.calls.filter(
+            ([path]) => path === "/v1/agents?include_settled=true",
+          ),
         ).toHaveLength(failReload ? 3 : 2);
         fetcher.mockClear();
         await vi.advanceTimersByTimeAsync(15000);
@@ -904,6 +908,249 @@ describe("sidebar branch refresh", () => {
       }
     },
   );
+  it("refreshes PRs for unselected and settled threads, clears misses, and tolerates unavailable GitHub metadata", async () => {
+    let association: { branch: string; number?: number } = {
+      branch: "ted/feature",
+      number: 42,
+    };
+    let unavailable = false;
+    const fetcher = vi.fn(async (path: string) => {
+      if (path.endsWith("/pull-request")) {
+        if (unavailable)
+          return Response.json(
+            { error: { message: "offline" } },
+            { status: 503 },
+          );
+        return Response.json(association);
+      }
+      if (path.startsWith("/v1/agents"))
+        return Response.json([agent(), agent("b", { settled: true })]);
+      if (path === "/v1/projects") return Response.json(projects);
+      if (path === "/v1/models") return Response.json([]);
+      return Response.json(projects[0]);
+    });
+    const client = prepare(fetcher);
+    try {
+      await client.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(client.state.pullRequests).toEqual({
+        a: association,
+        b: association,
+      });
+      association = { branch: "ted/feature" };
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(client.state.pullRequests.a.number).toBeUndefined();
+      association = { branch: "ted/feature", number: 43 };
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(client.state.pullRequests.b.number).toBe(43);
+      unavailable = true;
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(client.state.pullRequests).toEqual({ a: {}, b: {} });
+      expect(client.state.error).toBeNull();
+      client.stop();
+      const calls = fetcher.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(fetcher.mock.calls).toHaveLength(calls);
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
+  it("starts each periodic PR refresh 30 seconds after the previous one completes", async () => {
+    let requests = 0;
+    const worktree = agent("a", {
+      workspace: {
+        mode: "worktree",
+        locked: true,
+        status: "ready",
+        path: "/srv/worktree",
+        branch: "feature",
+      },
+    });
+    const fetcher = vi.fn(async (path: string) => {
+      if (path.endsWith("/pull-request")) {
+        requests++;
+        return new Promise<Response>((resolve) => {
+          setTimeout(
+            () =>
+              resolve(Response.json({ branch: "feature", number: requests })),
+            5000,
+          );
+        });
+      }
+      if (path.startsWith("/v1/agents")) return Response.json([worktree]);
+      if (path === "/v1/projects") return Response.json(projects);
+      if (path === "/v1/models") return Response.json([]);
+      return Response.json(projects[0]);
+    });
+    const client = prepare(fetcher);
+    try {
+      await client.start();
+      expect(requests).toBe(1);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(client.state.pullRequests.a.number).toBe(1);
+      await vi.advanceTimersByTimeAsync(29999);
+      expect(requests).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(requests).toBe(2);
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
+  it("deduplicates pending PR lookups and ignores results from a previous connection", async () => {
+    let resolveOld!: (response: Response) => void;
+    const old = new Promise<Response>((resolve) => {
+      resolveOld = resolve;
+    });
+    let requests = 0;
+    const fetcher = vi.fn(async (path: string) => {
+      if (path.endsWith("/pull-request"))
+        return ++requests === 1
+          ? old
+          : Response.json({ branch: "main", number: 43 });
+      if (path.startsWith("/v1/agents")) return Response.json([agent()]);
+      if (path === "/v1/projects") return Response.json(projects);
+      if (path === "/v1/models") return Response.json([]);
+      return Response.json(projects[0]);
+    });
+    const client = prepare(fetcher);
+    try {
+      await client.start();
+      client.select("a");
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(requests).toBe(1);
+      await client.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(client.state.pullRequests.a.number).toBe(43);
+      resolveOld(Response.json({ branch: "main", number: 42 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(client.state.pullRequests.a.number).toBe(43);
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
+  it("refreshes a PR immediately after a workspace patch changes its branch source", async () => {
+    let pullRequestCalls = 0;
+    let current = agent("a", {
+      workspace: {
+        mode: "worktree",
+        locked: false,
+        status: "draft",
+        base_branch: "origin/main",
+      },
+    });
+    const fetcher = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path.endsWith("/pull-request")) {
+        pullRequestCalls++;
+        return Response.json(
+          current.workspace?.mode === "current_checkout"
+            ? { branch: "main", number: 61 }
+            : {},
+        );
+      }
+      if (path === "/v1/agents/a/workspace" && options?.method === "PATCH") {
+        current = {
+          ...current,
+          workspace: {
+            mode: "current_checkout",
+            locked: false,
+            status: "draft",
+          },
+        };
+        return Response.json(current);
+      }
+      if (path.startsWith("/v1/agents")) return Response.json([current]);
+      if (path === "/v1/projects")
+        return Response.json([{ ...projects[0], git_branch: "main" }]);
+      if (path === "/v1/models") return Response.json([]);
+      return Response.json({ ...projects[0], git_branch: "main" });
+    });
+    const client = prepare(fetcher);
+    try {
+      await client.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(pullRequestCalls).toBe(1);
+
+      await client.updateWorkspace("a", { mode: "current_checkout" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(pullRequestCalls).toBe(2);
+      expect(client.state.pullRequests.a).toEqual({
+        branch: "main",
+        number: 61,
+      });
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
+  it("reruns a PR lookup immediately when its branch changes in flight", async () => {
+    let resolveFirst!: (response: Response) => void;
+    const first = new Promise<Response>((resolve) => {
+      resolveFirst = resolve;
+    });
+    let requests = 0;
+    const initial = agent("a", {
+      workspace: {
+        mode: "worktree",
+        locked: true,
+        status: "ready",
+        path: "/srv/worktree",
+        branch: "branch-a",
+      },
+    });
+    const fetcher = vi.fn(async (path: string) => {
+      if (path.endsWith("/pull-request")) {
+        requests++;
+        return requests === 1
+          ? first
+          : Response.json({ branch: "branch-b", number: 52 });
+      }
+      if (path.startsWith("/v1/agents")) return Response.json([initial]);
+      if (path === "/v1/projects") return Response.json(projects);
+      if (path === "/v1/models") return Response.json([]);
+      return Response.json(projects[0]);
+    });
+    const client = prepare(fetcher);
+    try {
+      await client.start();
+      expect(requests).toBe(1);
+      (WebSocket as any).instances[0].onmessage({
+        data: JSON.stringify({
+          type: "inventory",
+          agent: {
+            ...initial,
+            workspace: { ...initial.workspace, branch: "branch-b" },
+          },
+        }),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(client.state.agents.a.workspace?.branch).toBe("branch-b");
+      expect(requests).toBe(1);
+
+      resolveFirst(Response.json({ branch: "branch-a", number: 51 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(requests).toBe(2);
+      expect(client.state.pullRequests.a).toEqual({
+        branch: "branch-b",
+        number: 52,
+      });
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
+  it("never renders a PR for a missing, changed, or unavailable branch", () => {
+    const association = { branch: "ted/feature", number: 42 };
+    expect(branchPullRequest(association, "ted/feature")).toBe(42);
+    expect(branchPullRequest(association, "main")).toBeUndefined();
+    expect(branchPullRequest(association, undefined)).toBeUndefined();
+    expect(branchPullRequest(undefined, "ted/feature")).toBeUndefined();
+    expect(
+      branchPullRequest({ branch: "ted/feature" }, "ted/feature"),
+    ).toBeUndefined();
+  });
   it("refreshes all represented projects once, including unselected and settled chats, and clears removed branches", async () => {
     const branches: Record<string, string | undefined> = {
       p: "main",

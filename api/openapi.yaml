@@ -385,6 +385,31 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/PatchAgentRequest'
+  /v1/agents/{agent_id}/pull-request:
+    get:
+      operationId: GetAgentPullRequest
+      description: Resolve the GitHub pull request associated with the agent's current recorded branch. Lookup failures and misses return the branch without a number.
+      responses:
+        '200':
+          description: Branch association. Empty when the agent has no eligible branch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPullRequest'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
   /v1/agents/{agent_id}/workspace:
     patch:
       operationId: PatchAgentWorkspace
@@ -1083,6 +1108,16 @@ components:
       required:
       - role
       - content
+    AgentPullRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        branch:
+          type: string
+          minLength: 1
+        number:
+          type: integer
+          minimum: 1
     Agent:
       type: object
       additionalProperties: false

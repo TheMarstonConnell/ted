@@ -1,0 +1,497 @@
+package controlplane
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/TheMarstonConnell/ted/api"
+)
+
+func testPullRequestResolver(run pullRequestCommand) *pullRequestResolver {
+	resolver := newPullRequestResolver()
+	resolver.run = run
+	return resolver
+}
+
+func TestParseGitHubRepository(t *testing.T) {
+	cases := map[string]string{
+		"git@github.com:owner/repo.git":             "owner/repo",
+		"ssh://git@github.com/owner/repo.git":       "owner/repo",
+		"https://github.com/owner/repo":             "owner/repo",
+		"https://github.example.com/Owner/Repo.git": "github.example.com/Owner/Repo",
+		"git@github.example.com:team/project.git":   "github.example.com/team/project",
+	}
+	for remote, want := range cases {
+		got, ok := parseGitHubRepository(remote)
+		if !ok || got != want {
+			t.Errorf("parseGitHubRepository(%q) = %q, %v; want %q, true", remote, got, ok, want)
+		}
+	}
+	for _, remote := range []string{"", "/local/repo", "https://example.com/owner", "git@github.com:owner/repo/extra.git"} {
+		if got, ok := parseGitHubRepository(remote); ok {
+			t.Errorf("parseGitHubRepository(%q) = %q, true", remote, got)
+		}
+	}
+}
+
+func TestSelectPullRequestPrefersOpenThenLatestClosed(t *testing.T) {
+	data := `[
+		{"number":21,"headRefName":"feature","state":"MERGED","mergedAt":"2025-01-04T00:00:00Z","headRepository":{"nameWithOwner":"acme/app"}},
+		{"number":22,"headRefName":"feature","state":"CLOSED","closedAt":"2025-01-05T00:00:00Z","headRepository":{"name":"app"},"headRepositoryOwner":{"login":"acme"}},
+		{"number":7,"headRefName":"feature","state":"OPEN","updatedAt":"2024-01-01T00:00:00Z","headRepository":{"nameWithOwner":"acme/app"}},
+		{"number":99,"headRefName":"other","state":"OPEN","headRepository":{"nameWithOwner":"acme/app"}},
+		{"number":100,"headRefName":"feature","state":"OPEN","isCrossRepository":true,"headRepository":{"nameWithOwner":"fork/app"}},
+		{"number":101,"headRefName":"feature","state":"OPEN","headRepository":{"nameWithOwner":"other/app"}}
+	]`
+	number, err := selectPullRequest([]byte(data), "acme/app", "feature")
+	if err != nil || number != 7 {
+		t.Fatalf("open selection = %d, %v; want 7", number, err)
+	}
+
+	withoutOpen := strings.Replace(data, `"state":"OPEN","updatedAt":"2024-01-01T00:00:00Z"`, `"state":"CLOSED","updatedAt":"2024-01-01T00:00:00Z"`, 1)
+	number, err = selectPullRequest([]byte(withoutOpen), "acme/app", "feature")
+	if err != nil || number != 22 {
+		t.Fatalf("closed selection = %d, %v; want 22", number, err)
+	}
+}
+
+func TestPullRequestCommandKeepsSuccessfulStderrOutOfJSON(t *testing.T) {
+	output, err := runWorkspaceCommand(
+		context.Background(),
+		t.TempDir(),
+		"sh",
+		"-c",
+		`printf '%s' '[{"number":42,"headRefName":"feature","state":"OPEN"}]'; printf '%s' 'upgrade available' >&2`,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	number, err := selectPullRequest(output, "acme/app", "feature")
+	if err != nil || number != 42 {
+		t.Fatalf("selection from successful command = %d, %v; want 42", number, err)
+	}
+}
+
+func TestPullRequestLookupUsesExactBranchAndRepository(t *testing.T) {
+	var commands [][]string
+	resolver := testPullRequestResolver(func(_ context.Context, directory, name string, args ...string) ([]byte, error) {
+		commands = append(commands, append([]string{directory, name}, args...))
+		switch name {
+		case "git":
+			return []byte("git@github.com:acme/app.git\n"), nil
+		case "gh":
+			return []byte(`[{"number":42,"headRefName":"ted/exact","state":"OPEN","headRepository":{"nameWithOwner":"acme/app"}}]`), nil
+		default:
+			return nil, fmt.Errorf("unexpected command %q", name)
+		}
+	})
+
+	number := resolver.lookup(context.Background(), "/repo", "/repo/worktree", "ted/exact")
+	if number != 42 {
+		t.Fatalf("lookup = %d; want 42", number)
+	}
+	want := [][]string{
+		{"/repo", "git", "config", "--get", "remote.origin.url"},
+		{"/repo/worktree", "gh", "pr", "list", "--head", "ted/exact", "--state", "all", "--limit", "100", "--json", "number,headRefName,state,createdAt,updatedAt,closedAt,mergedAt,headRepository,headRepositoryOwner,isCrossRepository", "--repo", "acme/app"},
+	}
+	if !reflect.DeepEqual(commands, want) {
+		t.Fatalf("commands:\n got %#v\nwant %#v", commands, want)
+	}
+}
+
+func TestPullRequestLookupKeysCacheByResolvedRepository(t *testing.T) {
+	remotes := map[string]string{
+		"/clone-a": "https://github.com/acme/app.git",
+		"/clone-b": "git@github.com:acme/app.git",
+	}
+	var ghCalls atomic.Int32
+	resolver := testPullRequestResolver(func(_ context.Context, directory, name string, _ ...string) ([]byte, error) {
+		if name == "git" {
+			return []byte(remotes[directory]), nil
+		}
+		ghCalls.Add(1)
+		return []byte(`[{"number":42,"headRefName":"feature","state":"OPEN","headRepository":{"nameWithOwner":"acme/app"}}]`), nil
+	})
+	for _, root := range []string{"/clone-a", "/clone-b"} {
+		if number := resolver.lookup(context.Background(), root, root, "feature"); number != 42 {
+			t.Fatalf("lookup for %s = %d; want 42", root, number)
+		}
+	}
+	if calls := ghCalls.Load(); calls != 1 {
+		t.Fatalf("gh calls across equivalent clones = %d; want 1", calls)
+	}
+}
+
+func TestPullRequestLookupDoesNotReuseCacheAfterOriginChanges(t *testing.T) {
+	repository := "acme/first"
+	resolver := testPullRequestResolver(func(_ context.Context, _ string, name string, args ...string) ([]byte, error) {
+		if name == "git" {
+			return []byte("https://github.com/" + repository + ".git"), nil
+		}
+		want := "41"
+		if repository == "acme/second" {
+			want = "42"
+		}
+		if args[len(args)-1] != repository {
+			t.Fatalf("gh repository = %q; want %q", args[len(args)-1], repository)
+		}
+		return []byte(`[{"number":` + want + `,"headRefName":"feature","state":"OPEN","headRepository":{"nameWithOwner":"` + repository + `"}}]`), nil
+	})
+	if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 41 {
+		t.Fatalf("first repository lookup = %d; want 41", number)
+	}
+	repository = "acme/second"
+	if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 42 {
+		t.Fatalf("changed repository lookup = %d; want 42", number)
+	}
+}
+
+func TestPullRequestLookupCachesOriginFailures(t *testing.T) {
+	var gitCalls atomic.Int32
+	resolver := testPullRequestResolver(func(_ context.Context, _ string, name string, _ ...string) ([]byte, error) {
+		if name != "git" {
+			t.Fatalf("unexpected command %q after origin failure", name)
+		}
+		gitCalls.Add(1)
+		return nil, errors.New("origin unavailable")
+	})
+	clock := time.Unix(1000, 0)
+	resolver.now = func() time.Time { return clock }
+	for range 2 {
+		if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 0 {
+			t.Fatalf("origin failure = %d; want 0", number)
+		}
+	}
+	if calls := gitCalls.Load(); calls != 1 {
+		t.Fatalf("git calls for cached origin failure = %d; want 1", calls)
+	}
+	clock = clock.Add(pullRequestCacheTTL + time.Second)
+	resolver.lookup(context.Background(), "/repo", "/repo", "feature")
+	if calls := gitCalls.Load(); calls != 2 {
+		t.Fatalf("git calls after origin failure expiry = %d; want 2", calls)
+	}
+}
+
+func TestPullRequestLookupDeduplicatesAndCachesFailures(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var ghCalls atomic.Int32
+	resolver := testPullRequestResolver(func(_ context.Context, _ string, name string, _ ...string) ([]byte, error) {
+		if name == "git" {
+			return []byte("https://github.com/acme/app.git"), nil
+		}
+		call := ghCalls.Add(1)
+		if call == 1 {
+			close(started)
+			<-release
+			return nil, errors.New("gh unavailable")
+		}
+		return []byte(`[{"number":8,"headRefName":"feature","state":"MERGED","headRepository":{"nameWithOwner":"acme/app"}}]`), nil
+	})
+	clock := time.Unix(1000, 0)
+	resolver.now = func() time.Time { return clock }
+
+	const callers = 8
+	results := make(chan int, callers)
+	for range callers {
+		go func() {
+			results <- resolver.lookup(context.Background(), "/repo", "/repo", "feature")
+		}()
+	}
+	<-started
+	close(release)
+	for range callers {
+		if number := <-results; number != 0 {
+			t.Fatalf("failed lookup = %d; want 0", number)
+		}
+	}
+	if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 0 {
+		t.Fatalf("cached failure = %d; want 0", number)
+	}
+	if got := ghCalls.Load(); got != 1 {
+		t.Fatalf("gh calls during cache lifetime = %d; want 1", got)
+	}
+
+	clock = clock.Add(pullRequestCacheTTL + time.Second)
+	number := resolver.lookup(context.Background(), "/repo", "/repo", "feature")
+	if number != 8 {
+		t.Fatalf("lookup after expiry = %d; want 8", number)
+	}
+	if got := ghCalls.Load(); got != 2 {
+		t.Fatalf("gh calls after expiry = %d; want 2", got)
+	}
+}
+
+func TestPullRequestLookupCachesMisses(t *testing.T) {
+	var ghCalls atomic.Int32
+	resolver := testPullRequestResolver(func(_ context.Context, _ string, name string, _ ...string) ([]byte, error) {
+		if name == "git" {
+			return []byte("https://github.com/acme/app.git"), nil
+		}
+		ghCalls.Add(1)
+		return []byte(`[]`), nil
+	})
+	for range 2 {
+		if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 0 {
+			t.Fatalf("miss = %d", number)
+		}
+	}
+	if got := ghCalls.Load(); got != 1 {
+		t.Fatalf("gh calls for cached miss = %d; want 1", got)
+	}
+}
+
+func TestPullRequestLookupBoundsConcurrency(t *testing.T) {
+	started := make(chan struct{}, pullRequestConcurrency+1)
+	release := make(chan struct{})
+	resolver := testPullRequestResolver(func(_ context.Context, _ string, name string, _ ...string) ([]byte, error) {
+		if name == "git" {
+			return []byte("https://github.com/acme/app.git"), nil
+		}
+		started <- struct{}{}
+		<-release
+		return []byte(`[]`), nil
+	})
+
+	const lookups = pullRequestConcurrency + 4
+	done := make(chan int, lookups)
+	for i := range lookups {
+		go func() {
+			done <- resolver.lookup(context.Background(), "/repo", "/repo", fmt.Sprintf("feature-%d", i))
+		}()
+	}
+	for range pullRequestConcurrency {
+		<-started
+	}
+	select {
+	case <-started:
+		t.Fatalf("more than %d gh commands ran concurrently", pullRequestConcurrency)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	for range lookups {
+		if number := <-done; number != 0 {
+			t.Fatalf("lookup = %d; want miss", number)
+		}
+	}
+}
+
+func TestPullRequestLookupCancelsWithRequestAndCachesFailure(t *testing.T) {
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	var ghCalls atomic.Int32
+	resolver := testPullRequestResolver(func(ctx context.Context, _ string, name string, _ ...string) ([]byte, error) {
+		if name == "git" {
+			return []byte("https://github.com/acme/app.git"), nil
+		}
+		ghCalls.Add(1)
+		close(started)
+		<-ctx.Done()
+		close(stopped)
+		return nil, ctx.Err()
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() {
+		done <- resolver.lookup(ctx, "/repo", "/repo", "feature")
+	}()
+	<-started
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("command did not stop with its request")
+	}
+	if number := <-done; number != 0 {
+		t.Fatalf("cancelled lookup = %d; want 0", number)
+	}
+	if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 0 {
+		t.Fatalf("cached failure = %d; want 0", number)
+	}
+	if calls := ghCalls.Load(); calls != 1 {
+		t.Fatalf("gh calls = %d; want 1", calls)
+	}
+}
+
+func TestPullRequestLookupCommandTimeout(t *testing.T) {
+	resolver := testPullRequestResolver(func(ctx context.Context, _ string, name string, _ ...string) ([]byte, error) {
+		if name == "git" {
+			return []byte("https://github.com/acme/app.git"), nil
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	resolver.timeout = 20 * time.Millisecond
+	started := time.Now()
+	if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 0 {
+		t.Fatalf("timed out lookup = %d; want 0", number)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("bounded lookup took %v", elapsed)
+	}
+}
+
+func TestAgentPullRequestBranchSourceAndFailureBehavior(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	project := f.project()
+	a := f.agent(project)
+
+	var symbolicCalls atomic.Int32
+	resolver := testPullRequestResolver(func(_ context.Context, directory, name string, args ...string) ([]byte, error) {
+		if name == "git" && len(args) > 0 && args[0] == "symbolic-ref" {
+			symbolicCalls.Add(1)
+			if directory != project.Root {
+				t.Fatalf("symbolic-ref directory = %q; want project root %q", directory, project.Root)
+			}
+			return []byte("live-project-branch\n"), nil
+		}
+		if name == "git" {
+			return []byte("https://github.com/acme/app.git"), nil
+		}
+		return nil, errors.New("gh unavailable")
+	})
+	f.s.pullRequests = resolver
+
+	got, err := f.s.AgentPullRequest(context.Background(), a.ID)
+	if err != nil || got != (AgentPullRequest{Branch: "live-project-branch"}) {
+		t.Fatalf("local result = %+v, %v", got, err)
+	}
+
+	f.s.mu.Lock()
+	record := f.s.state.Agents[a.ID]
+	record.Agent.Workspace = Workspace{WorkspaceSelection: WorkspaceSelection{Mode: "worktree"}, Status: "draft", Branch: "recorded", Path: "/worktree"}
+	f.s.mu.Unlock()
+	got, err = f.s.AgentPullRequest(context.Background(), a.ID)
+	if err != nil || got != (AgentPullRequest{}) {
+		t.Fatalf("draft worktree result = %+v, %v", got, err)
+	}
+
+	f.s.mu.Lock()
+	record.Agent.Workspace.Status = "ready"
+	record.Agent.Workspace.Shared = true
+	record.Agent.Settled = true
+	f.s.mu.Unlock()
+	got, err = f.s.AgentPullRequest(context.Background(), a.ID)
+	if err != nil || got != (AgentPullRequest{Branch: "recorded"}) {
+		t.Fatalf("settled inherited worktree result = %+v, %v", got, err)
+	}
+	if calls := symbolicCalls.Load(); calls != 1 {
+		t.Fatalf("symbolic-ref calls = %d; worktree must only use its recorded branch", calls)
+	}
+}
+
+func TestAgentPullRequestDoesNotHoldServiceLockDuringLookup(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	project := f.project()
+	a := f.agent(project)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	f.s.pullRequests = testPullRequestResolver(func(_ context.Context, _ string, name string, args ...string) ([]byte, error) {
+		if name == "git" && len(args) > 0 && args[0] == "symbolic-ref" {
+			return []byte("feature"), nil
+		}
+		if name == "git" {
+			return []byte("https://github.com/acme/app.git"), nil
+		}
+		once.Do(func() { close(started) })
+		<-release
+		return []byte(`[]`), nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = f.s.AgentPullRequest(context.Background(), a.ID)
+		close(done)
+	}()
+	<-started
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := f.s.GetAgent(a.ID)
+		readDone <- err
+	}()
+	select {
+	case err := <-readDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("GetAgent blocked behind pull request lookup")
+	}
+	close(release)
+	<-done
+}
+
+func TestHTTPGetAgentPullRequest(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	project := f.project()
+	a := f.agent(project)
+	f.s.pullRequests = testPullRequestResolver(func(_ context.Context, _ string, name string, args ...string) ([]byte, error) {
+		if name == "git" && len(args) > 0 && args[0] == "symbolic-ref" {
+			return []byte("feature"), nil
+		}
+		if name == "git" {
+			return []byte("https://github.com/acme/app.git"), nil
+		}
+		return []byte(`[{"number":33,"headRefName":"feature","state":"OPEN","headRepository":{"nameWithOwner":"acme/app"}}]`), nil
+	})
+
+	path := "/v1/agents/" + a.ID + "/pull-request"
+	got := decodeHTTP[api.AgentPullRequest](t, f.request("GET", path, "", "", 200))
+	if value(got.Branch) != "feature" || value(got.Number) != 33 {
+		t.Fatalf("pull request response = %+v", got)
+	}
+	f.s.mu.Lock()
+	f.s.state.Agents[a.ID].Agent.Workspace = Workspace{WorkspaceSelection: WorkspaceSelection{Mode: "worktree"}, Status: "draft"}
+	f.s.mu.Unlock()
+	if body := string(f.request("GET", path, "", "", 200)); body != "{}\n" {
+		t.Fatalf("draft worktree response = %q; want empty object", body)
+	}
+	f.request("GET", "/v1/agents/missing/pull-request", "", "", 404)
+}
+
+func TestAgentPullRequestSkipsMissingProjectAndUsesSharedDraftBranch(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	project := f.project()
+	a := f.agent(project)
+	var commands atomic.Int32
+	f.s.pullRequests = testPullRequestResolver(func(_ context.Context, _ string, name string, args ...string) ([]byte, error) {
+		commands.Add(1)
+		if name == "git" {
+			if args[0] == "symbolic-ref" {
+				t.Error("inherited worktree must not use the live project branch")
+			}
+			return []byte("https://github.com/acme/app.git"), nil
+		}
+		return []byte(`[{"number":42,"headRefName":"inherited","state":"OPEN","headRepository":{"nameWithOwner":"acme/app"}}]`), nil
+	})
+	f.s.mu.Lock()
+	record := f.s.state.Agents[a.ID]
+	record.Agent.Workspace = Workspace{WorkspaceSelection: WorkspaceSelection{Mode: "worktree"}, Shared: true, Status: "draft", Branch: "inherited", Path: "/worktree"}
+	f.s.mu.Unlock()
+	got, err := f.s.AgentPullRequest(context.Background(), a.ID)
+	if err != nil || got != (AgentPullRequest{Branch: "inherited", Number: 42}) {
+		t.Fatalf("shared draft result = %+v, %v", got, err)
+	}
+	before := commands.Load()
+	for _, projectID := range []string{"", "missing-project"} {
+		f.s.mu.Lock()
+		record.Agent.ProjectID = projectID
+		record.Agent.Workspace = Workspace{WorkspaceSelection: WorkspaceSelection{Mode: "current_checkout"}}
+		f.s.mu.Unlock()
+		got, err = f.s.AgentPullRequest(context.Background(), a.ID)
+		if err != nil || got != (AgentPullRequest{}) {
+			t.Fatalf("missing project result = %+v, %v", got, err)
+		}
+	}
+	if commands.Load() != before {
+		t.Fatal("missing-project agents must not execute git or gh")
+	}
+}

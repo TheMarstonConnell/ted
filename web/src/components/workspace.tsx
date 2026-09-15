@@ -59,6 +59,7 @@ export function WorkspaceFields({
   disabled = false,
   compact = false,
   gitBranch,
+  prNumber,
 }: {
   projectId?: string;
   value: WorkspaceSelection;
@@ -66,6 +67,7 @@ export function WorkspaceFields({
   disabled?: boolean;
   compact?: boolean;
   gitBranch?: string;
+  prNumber?: number;
 }) {
   const locationId = useId();
   const branchId = useId();
@@ -157,8 +159,8 @@ export function WorkspaceFields({
           </Select>
         </div>
       </div>
-      {compact && value.mode === "current_checkout" && gitBranch && (
-        <WorkspaceBranch branch={gitBranch} />
+      {compact && gitBranch && (
+        <WorkspaceBranch branch={gitBranch} prNumber={prNumber} />
       )}
       {value.mode === "worktree" && (
         <div
@@ -329,10 +331,30 @@ export function FooterSeparator({ className }: { className?: string }) {
   );
 }
 
-export function WorkspaceBranch({ branch }: { branch: string }) {
+export function PullRequestNumber({ number }: { number: number }) {
+  return (
+    <span
+      className="shrink-0 font-mono text-xs"
+      role="group"
+      title={`GitHub pull request #${number}`}
+      aria-label={`Pull request #${number}`}
+    >
+      #{number}
+    </span>
+  );
+}
+
+export function WorkspaceBranch({
+  branch,
+  prNumber,
+}: {
+  branch: string;
+  prNumber?: number;
+}) {
   return (
     <div className="flex min-w-16 max-w-full flex-1 items-center gap-2">
       <FooterSeparator />
+      {prNumber && <PullRequestNumber number={prNumber} />}
       <span
         role="group"
         aria-label="Git branch"

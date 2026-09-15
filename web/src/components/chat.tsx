@@ -55,6 +55,7 @@ import { cn, toolCommand } from "@/lib/utils";
 import {
   agentTitle,
   agentWorkspace,
+  branchPullRequest,
   projectWorkspaceDefaults,
   requestKey,
   type Agent,
@@ -370,6 +371,7 @@ function ChatWorkspace() {
     ready: replayed,
     loaded,
     status,
+    pullRequests,
   } = useControl();
   const outgoingViewport = useRef<HTMLElement>(null);
   const newestOutgoing = outgoing[agentId]?.at(-1)?.key;
@@ -442,6 +444,7 @@ function ChatWorkspace() {
     workspaceSelection.mode === "worktree"
       ? workspace?.branch
       : project?.git_branch;
+  const prNumber = branchPullRequest(pullRequests[agentId], gitBranch);
   const context = agent?.context_usage;
   const contextPercent =
     context && context.context_window > 0
@@ -847,12 +850,18 @@ function ChatWorkspace() {
                         }
                         fallbackPath={project.root}
                       />
-                      {gitBranch && <WorkspaceBranch branch={gitBranch} />}
+                      {gitBranch && (
+                        <WorkspaceBranch
+                          branch={gitBranch}
+                          prNumber={prNumber}
+                        />
+                      )}
                     </>
                   ) : (
                     <WorkspaceFields
                       compact
-                      gitBranch={project.git_branch}
+                      gitBranch={gitBranch}
+                      prNumber={prNumber}
                       projectId={project.id}
                       value={workspaceSelection}
                       disabled={busy || !ready || status !== "live"}

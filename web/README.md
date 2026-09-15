@@ -88,7 +88,10 @@ Worktree uses the thread’s recorded branch. Before worktree setup, the startin
 branch picker occupies that branch slot instead. Thin, muted vertical dividers
 separate workspace, branch, context, and mobile navigation; absent items do not
 leave extra dividers. Long branches truncate with their full value in a tooltip,
-and the draft controls can wrap on very narrow screens. The path remains available
+and the draft controls can wrap on very narrow screens. When GitHub has a matching
+pull request, its `#XX` number appears immediately before the branch, both here
+and on the sidebar’s second line. PR numbers stay visible while long branches
+truncate; they are read-only metadata, not extra navigation targets. The path remains available
 as a tooltip; the sidebar also retains the generated worktree branch. This applies to desktop and mobile, with
 context and the mobile navigation button retained on the right. Project-default
 forms keep their normal labeled controls.
@@ -259,6 +262,15 @@ per project, and stale responses from earlier connections are ignored. Agents
 sharing a project show the same branch of that project’s working directory; this
 is not a per-turn branch snapshot. Missing branches are shown as unavailable,
 and agents without a project show “No project.”
+
+GitHub PR associations refresh separately every 30 seconds, on chat selection,
+and when branch metadata changes. The server uses its authenticated `gh` CLI
+and caches lookups; there are no browser-side GitHub credentials. Open PRs take
+precedence over closed/merged PRs for the same branch. Worktree chats use their
+recorded branch (including inherited worktrees), while Local chats use the live
+checkout branch. Missing PRs, unavailable GitHub access, and unstarted worktrees
+show no PR number. Responses for a different branch or an earlier connection
+cannot label the currently displayed branch.
 
 This first implementation retains transcripts for observed agents in memory and
 replays all existing agents, including settled history, on page load. Very large

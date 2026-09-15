@@ -13,6 +13,7 @@ import {
   type QueueMessage,
   type Schema,
   type WorkspaceSelection,
+  type AgentPullRequest,
 } from "./api";
 
 export type TranscriptItem = {
@@ -32,6 +33,7 @@ type OutgoingMessage = {
 export type State = {
   agents: Record<string, Agent>;
   projects: Project[];
+  pullRequests: Record<string, AgentPullRequest>;
   models: Model[];
   transcripts: Record<string, TranscriptItem[]>;
   cursors: Record<string, number>;
@@ -45,6 +47,7 @@ export type State = {
 const initial = (): State => ({
   agents: {},
   projects: [],
+  pullRequests: {},
   models: [],
   transcripts: {},
   cursors: {},
@@ -205,6 +208,12 @@ export class ControlPlane {
   private selected?: string;
   private retry?: ReturnType<typeof setTimeout>;
   private poll?: ReturnType<typeof setInterval>;
+  private pullRequestPoll?: ReturnType<typeof setTimeout>;
+  private pullRequestRequests = new Map<
+    string,
+    { generation: number; completion: Promise<void> }
+  >();
+  private pullRequestReruns = new Map<string, number>();
   private branchPoll?: ReturnType<typeof setInterval>;
   private branchRequests = new Map<string, number>();
   private failures = 0;
@@ -249,6 +258,10 @@ export class ControlPlane {
         loaded: true,
       });
       this.connect();
+      void this.refreshPullRequests().then(() => {
+        if (!this.stopped && this.generation === generation)
+          this.schedulePullRequestPoll(generation);
+      });
       void this.refreshAgentProjects().catch(() => {});
       this.branchPoll = setInterval(() => {
         void this.refreshAgentProjects().catch(() => {});
@@ -273,11 +286,13 @@ export class ControlPlane {
     clearTimeout(this.retry);
     clearInterval(this.poll);
     clearInterval(this.branchPoll);
+    clearTimeout(this.pullRequestPoll);
     this.socket?.close();
     this.socket = undefined;
   };
   select = (id?: string) => {
     this.selected = id;
+    if (id) void this.refreshPullRequests([id]);
     this.sendSubscription();
     void this.refreshAgentProjects().catch(() => {});
   };
@@ -344,6 +359,14 @@ export class ControlPlane {
                     frame.agent.cursor,
               },
             });
+            if (
+              !previous ||
+              previous.project_id !== frame.agent.project_id ||
+              previous.workspace?.status !== frame.agent.workspace?.status ||
+              previous.workspace?.mode !== frame.agent.workspace?.mode ||
+              previous.workspace?.branch !== frame.agent.workspace?.branch
+            )
+              void this.refreshPullRequests([frame.agent.id]);
             if (
               frame.agent.project_id &&
               !this.state.projects.some((p) => p.id === frame.agent.project_id)
@@ -428,16 +451,98 @@ export class ControlPlane {
               `/v1/projects/${encodeURIComponent(id)}`,
             );
             if (this.stopped || this.generation !== generation) return;
+            const branchChanged =
+              this.state.projects.find((p) => p.id === id)?.git_branch !==
+              project.git_branch;
             this.set({
               projects: this.state.projects.map((p) =>
                 p.id === id ? { ...p, git_branch: project.git_branch } : p,
               ),
             });
+            if (branchChanged)
+              void this.refreshPullRequests(
+                Object.values(this.state.agents)
+                  .filter(
+                    (a) =>
+                      a.project_id === id && a.workspace?.mode !== "worktree",
+                  )
+                  .map((a) => a.id),
+              );
           } finally {
             if (this.branchRequests.get(id) === generation)
               this.branchRequests.delete(id);
           }
         }),
+    );
+  };
+  private schedulePullRequestPoll(generation: number) {
+    this.pullRequestPoll = setTimeout(() => {
+      void this.refreshPullRequests().then(() => {
+        if (!this.stopped && this.generation === generation)
+          this.schedulePullRequestPoll(generation);
+      });
+    }, 30000);
+  }
+  private refreshPullRequests = async (
+    ids = Object.keys(this.state.agents),
+  ) => {
+    if (this.stopped) return;
+    const generation = this.generation;
+    await Promise.allSettled(
+      ids.map(async (id) => {
+        if (!this.state.agents[id]?.project_id) return;
+        const active = this.pullRequestRequests.get(id);
+        if (active?.generation === generation) {
+          this.pullRequestReruns.set(id, generation);
+          await active.completion;
+          return;
+        }
+        let complete!: () => void;
+        const request = {
+          generation,
+          completion: new Promise<void>((resolve) => {
+            complete = resolve;
+          }),
+        };
+        this.pullRequestRequests.set(id, request);
+        try {
+          do {
+            if (this.pullRequestReruns.get(id) === generation)
+              this.pullRequestReruns.delete(id);
+            try {
+              const pullRequest = await api<AgentPullRequest>(
+                `${agentPath(id)}/pull-request`,
+              );
+              if (
+                this.stopped ||
+                this.generation !== generation ||
+                !this.state.agents[id]
+              )
+                return;
+              this.set({
+                pullRequests: { ...this.state.pullRequests, [id]: pullRequest },
+              });
+            } catch {
+              // Optional GitHub metadata must not interrupt chat or event replay.
+              if (!this.stopped && this.generation === generation)
+                this.set({
+                  pullRequests: { ...this.state.pullRequests, [id]: {} },
+                });
+            }
+          } while (
+            !this.stopped &&
+            this.generation === generation &&
+            this.state.agents[id]?.project_id &&
+            this.pullRequestReruns.get(id) === generation
+          );
+        } finally {
+          if (this.pullRequestRequests.get(id) === request)
+            this.pullRequestRequests.delete(id);
+          if (this.pullRequestReruns.get(id) === generation)
+            this.pullRequestReruns.delete(id);
+          complete();
+        }
+      }),
     );
   };
   // HTTP is used for mutations: it supports large messages and durable retry keys.
@@ -522,6 +627,7 @@ export class ControlPlane {
       workspace,
     );
     this.mergeAgent(agent);
+    void this.refreshPullRequests([id]);
     return agent;
   };
   settle = (id: string, settled: boolean) =>

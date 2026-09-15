@@ -110,6 +110,8 @@ export async function workspace(page: Page) {
         inventory(id);
         result = agents[id];
       } else result = Object.values(agents);
+    } else if (url.pathname.endsWith("/pull-request")) {
+      result = {};
     } else {
       const [, , , id, operation] = url.pathname.split("/");
       if (method === "PATCH" && !operation) {

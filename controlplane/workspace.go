@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,22 +17,35 @@ import (
 func workspaceGit(ctx context.Context, root string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
+	output, err := runWorkspaceCommand(ctx, root, "git", args...)
+	return strings.TrimSpace(string(output)), err
+}
+
+func runWorkspaceCommand(ctx context.Context, root, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GH_PROMPT_DISABLED=1")
 	cmd.WaitDelay = time.Second
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		detail := strings.TrimSpace(string(output))
-		if len(detail) > 2000 {
-			detail = detail[:2000]
-		}
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-		return "", fmt.Errorf("git %s: %w: %s", args[0], err, detail)
+	output, err := cmd.Output()
+	if err == nil {
+		return output, nil
 	}
-	return strings.TrimSpace(string(output)), nil
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	detail := string(output)
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) {
+		detail += "\n" + string(exitError.Stderr)
+	}
+	detail = strings.TrimSpace(detail)
+	if len(detail) > 2000 {
+		detail = detail[:2000]
+	}
+	if detail == "" {
+		return nil, fmt.Errorf("%s %s: %w", name, args[0], err)
+	}
+	return nil, fmt.Errorf("%s %s: %w: %s", name, args[0], err, detail)
 }
 
 func projectBranches(root string) (ProjectBranches, error) {

@@ -23,7 +23,13 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { groupAgents, agentTitle, agentWorkspace, type Agent } from "@/lib/api";
+import {
+  groupAgents,
+  agentTitle,
+  agentWorkspace,
+  branchPullRequest,
+  type Agent,
+} from "@/lib/api";
 import {
   control,
   isUnread,
@@ -32,6 +38,7 @@ import {
 } from "@/lib/store";
 import { useChatForeground } from "@/lib/use-chat-read";
 import { usePanel } from "@/lib/navigation";
+import { PullRequestNumber } from "@/components/workspace";
 import { ErrorNotice } from "@/components/common";
 
 // Projects and chats share the same reveal behavior. Each group wraps only its
@@ -49,12 +56,14 @@ export function AgentLink({
   childrenByParent?: ReadonlyMap<string, Agent[]>;
 }) {
   const { agentId } = useParams();
-  const { projects, status, readPending, ready, transcripts } = useControl();
+  const { projects, pullRequests, status, readPending, ready, transcripts } =
+    useControl();
   const foreground = useChatForeground();
   const project = projects.find((p) => p.id === agent.project_id);
   const workspace = agentWorkspace(agent);
   const isWorktree = workspace?.mode === "worktree";
   const branch = isWorktree ? workspace.branch : project?.git_branch;
+  const prNumber = branchPullRequest(pullRequests[agent.id], branch);
   const branchLabel = branch
     ? branch
     : isWorktree
@@ -156,6 +165,7 @@ export function AgentLink({
                 className={`flex min-w-0 items-center gap-2 text-xs ${selected ? "text-foreground" : "text-muted-foreground"}`}
                 title={branchLabel}
               >
+                {prNumber && <PullRequestNumber number={prNumber} />}
                 {branch && (
                   <GitBranch className="size-3 shrink-0" aria-hidden="true" />
                 )}

@@ -321,6 +321,10 @@ func (h *httpAPI) GetAgent(w http.ResponseWriter, r *http.Request, id string) {
 	a, err := h.service.GetAgent(id)
 	agentResult(w, 200, a, err)
 }
+func (h *httpAPI) GetAgentPullRequest(w http.ResponseWriter, r *http.Request, id string) {
+	pullRequest, err := h.service.AgentPullRequest(r.Context(), id)
+	respond(w, 200, pullRequest, err)
+}
 func (h *httpAPI) PatchAgent(w http.ResponseWriter, r *http.Request, id string) {
 	b, ok := decodeBody[api.PatchAgentJSONRequestBody](w, r)
 	if !ok {
