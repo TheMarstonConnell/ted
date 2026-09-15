@@ -956,6 +956,48 @@ describe("sidebar branch refresh", () => {
       vi.useRealTimers();
     }
   });
+  it("starts each periodic PR refresh 30 seconds after the previous one completes", async () => {
+    let requests = 0;
+    const worktree = agent("a", {
+      workspace: {
+        mode: "worktree",
+        locked: true,
+        status: "ready",
+        path: "/srv/worktree",
+        branch: "feature",
+      },
+    });
+    const fetcher = vi.fn(async (path: string) => {
+      if (path.endsWith("/pull-request")) {
+        requests++;
+        return new Promise<Response>((resolve) => {
+          setTimeout(
+            () =>
+              resolve(Response.json({ branch: "feature", number: requests })),
+            5000,
+          );
+        });
+      }
+      if (path.startsWith("/v1/agents")) return Response.json([worktree]);
+      if (path === "/v1/projects") return Response.json(projects);
+      if (path === "/v1/models") return Response.json([]);
+      return Response.json(projects[0]);
+    });
+    const client = prepare(fetcher);
+    try {
+      await client.start();
+      expect(requests).toBe(1);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(client.state.pullRequests.a.number).toBe(1);
+      await vi.advanceTimersByTimeAsync(29999);
+      expect(requests).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(requests).toBe(2);
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
   it("deduplicates pending PR lookups and ignores results from a previous connection", async () => {
     let resolveOld!: (response: Response) => void;
     const old = new Promise<Response>((resolve) => {

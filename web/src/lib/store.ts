@@ -208,8 +208,11 @@ export class ControlPlane {
   private selected?: string;
   private retry?: ReturnType<typeof setTimeout>;
   private poll?: ReturnType<typeof setInterval>;
-  private pullRequestPoll?: ReturnType<typeof setInterval>;
-  private pullRequestRequests = new Map<string, number>();
+  private pullRequestPoll?: ReturnType<typeof setTimeout>;
+  private pullRequestRequests = new Map<
+    string,
+    { generation: number; completion: Promise<void> }
+  >();
   private pullRequestReruns = new Map<string, number>();
   private branchPoll?: ReturnType<typeof setInterval>;
   private branchRequests = new Map<string, number>();
@@ -255,10 +258,10 @@ export class ControlPlane {
         loaded: true,
       });
       this.connect();
-      void this.refreshPullRequests();
-      this.pullRequestPoll = setInterval(() => {
-        void this.refreshPullRequests();
-      }, 30000);
+      void this.refreshPullRequests().then(() => {
+        if (!this.stopped && this.generation === generation)
+          this.schedulePullRequestPoll(generation);
+      });
       void this.refreshAgentProjects().catch(() => {});
       this.branchPoll = setInterval(() => {
         void this.refreshAgentProjects().catch(() => {});
@@ -283,7 +286,7 @@ export class ControlPlane {
     clearTimeout(this.retry);
     clearInterval(this.poll);
     clearInterval(this.branchPoll);
-    clearInterval(this.pullRequestPoll);
+    clearTimeout(this.pullRequestPoll);
     this.socket?.close();
     this.socket = undefined;
   };
@@ -472,6 +475,14 @@ export class ControlPlane {
         }),
     );
   };
+  private schedulePullRequestPoll(generation: number) {
+    this.pullRequestPoll = setTimeout(() => {
+      void this.refreshPullRequests().then(() => {
+        if (!this.stopped && this.generation === generation)
+          this.schedulePullRequestPoll(generation);
+      });
+    }, 30000);
+  }
   private refreshPullRequests = async (
     ids = Object.keys(this.state.agents),
   ) => {
@@ -480,11 +491,20 @@ export class ControlPlane {
     await Promise.allSettled(
       ids.map(async (id) => {
         if (!this.state.agents[id]?.project_id) return;
-        if (this.pullRequestRequests.get(id) === generation) {
+        const active = this.pullRequestRequests.get(id);
+        if (active?.generation === generation) {
           this.pullRequestReruns.set(id, generation);
+          await active.completion;
           return;
         }
-        this.pullRequestRequests.set(id, generation);
+        let complete!: () => void;
+        const request = {
+          generation,
+          completion: new Promise<void>((resolve) => {
+            complete = resolve;
+          }),
+        };
+        this.pullRequestRequests.set(id, request);
         try {
           do {
             if (this.pullRequestReruns.get(id) === generation)
@@ -516,10 +536,11 @@ export class ControlPlane {
             this.pullRequestReruns.get(id) === generation
           );
         } finally {
-          if (this.pullRequestRequests.get(id) === generation)
+          if (this.pullRequestRequests.get(id) === request)
             this.pullRequestRequests.delete(id);
           if (this.pullRequestReruns.get(id) === generation)
             this.pullRequestReruns.delete(id);
+          complete();
         }
       }),
     );
