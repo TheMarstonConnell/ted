@@ -109,25 +109,6 @@ export function AgentLink({
         className={`space-y-2 ${agent.settled && !selected ? "opacity-60 hover:opacity-100 focus-within:opacity-100" : ""}`}
       >
         <div className={sidebarRowClass}>
-          {hasChildren && (
-            <CollapsibleTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  className="shrink-0"
-                  aria-label={`${childrenOpen ? "Collapse" : "Expand"} child chats for ${title}`}
-                  title={`${childrenOpen ? "Collapse" : "Expand"} child chats`}
-                />
-              }
-            >
-              <ChevronRight
-                className={`size-4 transition-transform ${childrenOpen ? "rotate-90" : ""}`}
-                aria-hidden="true"
-              />
-            </CollapsibleTrigger>
-          )}
           <Button
             variant="ghost"
             className={`relative h-auto min-w-0 flex-1 justify-start py-2 font-normal text-foreground ${selected ? "shadow-sm bg-sidebar-selected hover:bg-sidebar-selected dark:hover:bg-sidebar-selected" : ""} ${running ? "agent-running" : ""}`}
@@ -185,6 +166,25 @@ export function AgentLink({
               </span>
             </span>
           </Button>
+          {hasChildren && (
+            <CollapsibleTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={sidebarActionClass}
+                  aria-label={`${childrenOpen ? "Collapse" : "Expand"} child chats for ${title}`}
+                  title={`${childrenOpen ? "Collapse" : "Expand"} child chats`}
+                />
+              }
+            >
+              <ChevronRight
+                className={`size-4 transition-transform ${childrenOpen ? "rotate-90" : ""}`}
+                aria-hidden="true"
+              />
+            </CollapsibleTrigger>
+          )}
           <Button
             type="button"
             variant="ghost"

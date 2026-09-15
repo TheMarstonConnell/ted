@@ -95,6 +95,7 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
   await expect(page.locator("a button, button a")).toHaveCount(0);
   if (process.env.TED_WEB_RECORD) await page.waitForTimeout(1000);
 
+  await root.getByRole("link").hover();
   await page
     .getByRole("button", {
       name: "Collapse child chats for Parent chat",
@@ -151,41 +152,169 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
   ).toBeAttached();
 });
 
-test("agent family controls and navigation fit the mobile drawer", async ({
+test("child toggles reveal on the right without moving settle or switching chats", async ({
   page,
 }, testInfo) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await seedFamily(page);
-  await page.goto("/agents/root?sidebar=open");
-
-  const drawer = page.getByRole("dialog", { name: "Workspace", exact: true });
-  const child = drawer.locator('[data-agent-id="child"]');
-  const toggle = drawer.getByRole("button", {
-    name: "Collapse child chats for Parent chat",
+  const fixture = await seedFamily(page);
+  await page.goto("/agents/grandchild");
+  const draft = page.getByRole("textbox", { name: "Message", exact: true });
+  await draft.fill("Keep this draft");
+  await draft.hover();
+  const root = page.locator('[data-agent-id="root"]');
+  const child = page.locator('[data-agent-id="child"]');
+  const link = root.getByRole("link");
+  const toggle = root.getByRole("button", {
+    name: /child chats for Parent chat/,
+  });
+  const settleButton = root.getByRole("button", {
+    name: "Settle chat: Parent chat",
     exact: true,
   });
-  await expect(toggle).toBeVisible();
-  await expect(child).toBeVisible();
-  const bounds = (await child.boundingBox())!;
-  expect(bounds.x).toBeGreaterThanOrEqual(0);
-  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
-  await expect(
-    child.getByRole("button", { name: "Settle chat: Child chat", exact: true }),
-  ).toBeVisible();
-
-  await toggle.click();
-  await expect(child).not.toBeVisible();
-  await drawer
-    .getByRole("button", {
-      name: "Expand child chats for Parent chat",
-      exact: true,
-    })
-    .click();
-  await page.screenshot({
-    path: testInfo.outputPath("sidebar-agent-family-mobile.png"),
+  const childToggle = child.getByRole("button", {
+    name: /child chats for Child chat/,
   });
-  await child.getByRole("link").click();
-  await expect(drawer).toHaveCount(0);
-  await expect(page).toHaveURL(/\/agents\/child$/);
-  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(1500);
+  for (const action of [toggle, settleButton, childToggle]) {
+    await expect(action).toHaveCSS("width", "0px");
+    await expect(action).toHaveCSS("opacity", "0");
+  }
+  const before = (await link.boundingBox())!;
+  expect(before.width).toBe((await root.boundingBox())!.width);
+  await page.screenshot({
+    path: testInfo.outputPath("family-actions-at-rest.png"),
+  });
+  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(750);
+
+  await link.hover();
+  for (const action of [toggle, settleButton]) {
+    await expect(action).toHaveCSS("width", "32px");
+    await expect(action).toHaveCSS("opacity", "1");
+  }
+  await expect(childToggle).toHaveCSS("width", "0px");
+  await expect
+    .poll(async () => (await link.boundingBox())!.width)
+    .toBeCloseTo(before.width - 80, 0);
+  const after = (await link.boundingBox())!;
+  const toggleBox = (await toggle.boundingBox())!;
+  const settleBox = (await settleButton.boundingBox())!;
+  expect(after.x).toBe(before.x);
+  expect(after.y).toBe(before.y);
+  expect(after.height).toBe(before.height);
+  expect(toggleBox.x).toBe(after.x + after.width + 8);
+  expect(settleBox.x).toBe(toggleBox.x + toggleBox.width + 8);
+  expect(settleBox.x + settleBox.width).toBe(before.x + before.width);
+  await toggle.hover();
+  await expect(toggle).toHaveCSS("opacity", "1");
+  await page.screenshot({
+    path: testInfo.outputPath("family-actions-hover.png"),
+  });
+  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(750);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(child).not.toBeVisible();
+  await expect(page).toHaveURL(/\/agents\/grandchild$/);
+  await expect(draft).toHaveValue("Keep this draft");
+  expect(fixture.agents.root.settled).toBe(false);
+  await page.screenshot({
+    path: testInfo.outputPath("family-actions-collapsed.png"),
+  });
+  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(750);
+
+  await draft.focus();
+  await draft.hover();
+  await expect(toggle).toHaveCSS("width", "0px");
+  await link.focus();
+  await page.keyboard.press("Tab");
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(child).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(settleButton).toBeFocused();
+  await page.keyboard.press("Enter");
+  const restore = root.getByRole("button", {
+    name: "Restore chat: Parent chat",
+    exact: true,
+  });
+  await expect(restore).toBeEnabled();
+  await expect(child).toBeVisible();
+  expect(fixture.agents.child.settled).toBe(false);
+  await expect(page).toHaveURL(/\/agents\/grandchild$/);
+  await expect(draft).toHaveValue("Keep this draft");
+
+  await child.getByRole("link").focus();
+  await child.getByRole("link").hover();
+  await expect(childToggle).toHaveCSS("opacity", "1");
+  await expect(toggle).toHaveCSS("width", "0px");
+  await expect(restore).toHaveCSS("width", "0px");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await link.focus();
+  await expect(toggle).toHaveCSS("width", "32px");
+  expect(
+    await toggle.evaluate((el) =>
+      parseFloat(getComputedStyle(el).transitionDuration),
+    ),
+  ).toBeLessThan(0.001);
+});
+
+test.describe("touch family controls", () => {
+  test.use({ hasTouch: true });
+
+  test("agent family controls and navigation fit the mobile drawer", async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await seedFamily(page);
+    await page.goto("/agents/root?sidebar=open");
+
+    const drawer = page.getByRole("dialog", { name: "Workspace", exact: true });
+    const child = drawer.locator('[data-agent-id="child"]');
+    const toggle = drawer.getByRole("button", {
+      name: "Collapse child chats for Parent chat",
+      exact: true,
+    });
+    await expect(toggle).toBeVisible();
+    const root = drawer.locator('[data-agent-id="root"]');
+    const settleButton = root.getByRole("button", {
+      name: "Settle chat: Parent chat",
+      exact: true,
+    });
+    for (const action of [toggle, settleButton]) {
+      await expect(action).toHaveCSS("opacity", "1");
+      const box = (await action.boundingBox())!;
+      expect(box.width).toBeGreaterThanOrEqual(48);
+      expect(box.height).toBeGreaterThanOrEqual(48);
+    }
+    const linkBox = (await root.getByRole("link").boundingBox())!;
+    const toggleBox = (await toggle.boundingBox())!;
+    const settleBox = (await settleButton.boundingBox())!;
+    expect(toggleBox.x).toBeGreaterThanOrEqual(linkBox.x + linkBox.width);
+    expect(settleBox.x).toBeGreaterThanOrEqual(toggleBox.x + toggleBox.width);
+    await expect(child).toBeVisible();
+    const bounds = (await child.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+    await expect(
+      child.getByRole("button", {
+        name: "Settle chat: Child chat",
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await toggle.click();
+    await expect(child).not.toBeVisible();
+    await drawer
+      .getByRole("button", {
+        name: "Expand child chats for Parent chat",
+        exact: true,
+      })
+      .click();
+    await page.screenshot({
+      path: testInfo.outputPath("sidebar-agent-family-mobile.png"),
+    });
+    await child.getByRole("link").click();
+    await expect(drawer).toHaveCount(0);
+    await expect(page).toHaveURL(/\/agents\/child$/);
+    if (process.env.TED_WEB_RECORD) await page.waitForTimeout(1500);
+  });
 });
