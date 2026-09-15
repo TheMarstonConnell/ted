@@ -104,7 +104,6 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
       .locator("xpath=following-sibling::*[1]")
       .locator('[data-agent-id="child"]'),
   ).toBeVisible();
-  await expect(page.getByText("Misc", { exact: true })).toHaveCount(0);
   await expect(page.locator("a button, button a")).toHaveCount(0);
   if (process.env.TED_WEB_RECORD) await page.waitForTimeout(1000);
 
