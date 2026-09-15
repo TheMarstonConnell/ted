@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -122,23 +123,17 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 			if input.err != nil {
 				return
 			}
-			kind, requestID, err := h.validateWS(input.data)
+			command, err := h.validateWS(input.data)
 			if err != nil {
-				if writeWSError(c, requestID, err) != nil {
+				if writeWSError(c, command.requestID, err) != nil {
 					return
 				}
 				continue
 			}
-			switch kind {
+			requestID := command.requestID
+			switch command.kind {
 			case "subscribe":
-				var command api.WSSubscribe
-				if err = json.Unmarshal(input.data, &command); err != nil {
-					if writeWSError(c, requestID, problem(400, "invalid", err.Error())) != nil {
-						return
-					}
-					continue
-				}
-				candidate, err := newWSSubscription(command)
+				candidate, err := newWSSubscription(*command.subscribe)
 				if err != nil {
 					if writeWSError(c, requestID, err) != nil {
 						return
@@ -161,21 +156,15 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			case "submit":
-				var command api.WSSubmit
-				if err = json.Unmarshal(input.data, &command); err != nil {
-					if writeWSError(c, requestID, problem(400, "invalid", err.Error())) != nil {
-						return
-					}
-					continue
-				}
-				m, err := h.service.Submit(command.AgentId, command.Text, command.IdempotencyKey)
+				submit := command.submit
+				m, err := h.service.Submit(submit.AgentId, submit.Text, submit.IdempotencyKey)
 				if err != nil {
 					if writeWSError(c, requestID, err) != nil {
 						return
 					}
 					continue
 				}
-				if err = writeWS(c, api.WSAck{Type: api.Ack, RequestId: requestID, AgentId: command.AgentId, MessageId: m.ID, Status: m.Status}); err != nil {
+				if err = writeWS(c, api.WSAck{Type: api.Ack, RequestId: requestID, AgentId: submit.AgentId, MessageId: m.ID, Status: m.Status}); err != nil {
 					return
 				}
 			}
@@ -184,29 +173,90 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 // Both transports validate requests against shared, generated-spec schemas.
-func (h *httpAPI) validateWS(data []byte) (kind, requestID string, err error) {
+type wsCommand struct {
+	kind      string
+	requestID string
+	subscribe *api.WSSubscribe
+	submit    *api.WSSubmit
+}
+
+func (h *httpAPI) validateWS(data []byte) (command wsCommand, err error) {
 	var raw map[string]any
-	if e := json.Unmarshal(data, &raw); e != nil {
-		return "", "", problem(400, "invalid", "expected a JSON object")
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if e := decoder.Decode(&raw); e != nil {
+		return command, problem(400, "invalid", "expected a JSON object")
 	}
-	kind, _ = raw["type"].(string)
-	requestID, _ = raw["request_id"].(string)
-	if len(requestID) > 256 {
-		requestID = ""
+	// Decoder.Decode accepts a valid value followed by another value. Reject any
+	// non-whitespace after that value to preserve json.Unmarshal's contract.
+	if !onlyJSONWhitespace(data[decoder.InputOffset():]) {
+		return command, problem(400, "invalid", "expected a JSON object")
+	}
+	command.kind, _ = raw["type"].(string)
+	command.requestID, _ = raw["request_id"].(string)
+	if len(command.requestID) > 256 {
+		command.requestID = ""
 	}
 	name := ""
-	switch kind {
+	switch command.kind {
 	case "subscribe":
 		name = "WSSubscribe"
 	case "submit":
 		name = "WSSubmit"
 	default:
-		return kind, requestID, problem(400, "invalid", "unknown WebSocket command type")
+		return command, problem(400, "invalid", "unknown WebSocket command type")
 	}
 	if e := h.spec.Components.Schemas[name].Value.VisitJSON(raw); e != nil {
-		return kind, requestID, problem(400, "invalid", e.Error())
+		return command, problem(400, "invalid", e.Error())
 	}
-	return
+	if command.kind == "subscribe" {
+		command.subscribe, err = wsSubscribeFromJSON(raw)
+	} else {
+		command.submit = &api.WSSubmit{
+			Type: api.WSSubmitType(command.kind), RequestId: command.requestID,
+			AgentId: raw["agent_id"].(string), Text: raw["text"].(string),
+			IdempotencyKey: raw["idempotency_key"].(string),
+		}
+	}
+	return command, err
+}
+
+func onlyJSONWhitespace(data []byte) bool {
+	for _, c := range data {
+		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+			return false
+		}
+	}
+	return true
+}
+
+func wsSubscribeFromJSON(raw map[string]any) (*api.WSSubscribe, error) {
+	command := &api.WSSubscribe{Type: api.WSSubscribeType(raw["type"].(string)), RequestId: raw["request_id"].(string)}
+	if value, ok := raw["subscribe_all"]; ok {
+		v := value.(bool)
+		command.SubscribeAll = &v
+	}
+	if value, ok := raw["agent_ids"]; ok {
+		values := value.([]any)
+		ids := make([]string, len(values))
+		for i := range values {
+			ids[i] = values[i].(string)
+		}
+		command.AgentIds = &ids
+	}
+	if value, ok := raw["cursors"]; ok {
+		values := value.(map[string]any)
+		cursors := make(map[string]int64, len(values))
+		for id, value := range values {
+			cursor, parseErr := strconv.ParseInt(value.(json.Number).String(), 10, 64)
+			if parseErr != nil {
+				return nil, problem(400, "invalid", "cursor must be an int64: "+id)
+			}
+			cursors[id] = cursor
+		}
+		command.Cursors = &cursors
+	}
+	return command, nil
 }
 
 func newWSSubscription(command api.WSSubscribe) (*wsSubscription, error) {
@@ -239,22 +289,90 @@ func (h *httpAPI) snapshotWS(s *wsSubscription) ([]Agent, []Event, <-chan struct
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	return h.service.SnapshotEvents(s.cursors, s.all, ids)
+	return h.service.snapshotEvents(s.cursors, s.all, ids, true)
 }
 
 func summaryWS(a Agent) (api.AgentSummary, error) {
-	// Runtime data stays detached. The generated wire type intentionally excludes
-	// conversation/queue history so inventory notifications remain bounded.
-	wire := wireAgent(a)
-	wire.Messages = nil
-	wire.Queue = nil
-	data, err := json.Marshal(wire)
+	// Runtime data stays detached. Build the bounded generated wire type directly;
+	// converting through JSON needlessly encoded the full Agent only to discard its
+	// conversation and queue.
+	cursor, err := wsCursor(a.Cursor)
 	if err != nil {
 		return api.AgentSummary{}, err
 	}
-	var summary api.AgentSummary
-	err = json.Unmarshal(data, &summary)
-	return summary, err
+	summary := api.AgentSummary{
+		Id:        a.ID,
+		ProjectId: a.ProjectID,
+		Title:     a.Title,
+		Settings:  api.Settings{Model: a.Settings.Model, Effort: a.Settings.Effort},
+		Settled:   a.Settled,
+		State:     api.AgentSummaryState(a.State),
+		Held:      a.Held,
+		Cursor:    cursor,
+		CreatedAt: a.CreatedAt,
+		UpdatedAt: a.UpdatedAt,
+	}
+	if a.ParentAgentID != "" {
+		summary.ParentAgentId = stringPointer(a.ParentAgentID)
+	}
+	if a.ActiveSettings != nil {
+		summary.ActiveSettings = &api.Settings{Model: a.ActiveSettings.Model, Effort: a.ActiveSettings.Effort}
+	}
+	last, err := wsCursor(a.LastResponseCursor)
+	if err != nil {
+		return api.AgentSummary{}, err
+	}
+	summary.LastResponseCursor = &last
+	read, err := wsCursor(a.ReadCursor)
+	if err != nil {
+		return api.AgentSummary{}, err
+	}
+	summary.ReadCursor = &read
+	summary.Workspace = wireWorkspace(a.Workspace)
+	u := a.ContextUsage
+	summary.ContextUsage = &api.ContextUsage{
+		Model: u.Model, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+		EstimatedTokens: u.EstimatedTokens, ContextWindow: u.ContextWindow,
+		Known: u.Known, Estimated: u.Estimated,
+	}
+	return summary, nil
+}
+
+func wsCursor(cursor uint64) (int64, error) {
+	if cursor > math.MaxInt64 {
+		return 0, fmt.Errorf("WebSocket cursor exceeds int64: %d", cursor)
+	}
+	return int64(cursor), nil
+}
+
+func stringPointer(v string) *string { return &v }
+
+func wireWorkspace(w Workspace) *api.Workspace {
+	result := &api.Workspace{
+		Locked: w.Locked,
+		Mode:   api.WorkspaceMode(w.Mode),
+		Status: api.WorkspaceStatus(w.Status),
+	}
+	if w.BaseBranch != "" {
+		result.BaseBranch = stringPointer(w.BaseBranch)
+	}
+	if w.BaseCommit != "" {
+		result.BaseCommit = stringPointer(w.BaseCommit)
+	}
+	if w.Branch != "" {
+		result.Branch = stringPointer(w.Branch)
+	}
+	if w.Error != "" {
+		result.Error = stringPointer(w.Error)
+	}
+	if w.Path != "" {
+		result.Path = stringPointer(w.Path)
+	}
+	if w.Shared {
+		shared := true
+		result.Shared = &shared
+	}
+	return result
 }
 
 func (h *httpAPI) deliverWS(c *websocket.Conn, s *wsSubscription, agents []Agent, events []Event) error {

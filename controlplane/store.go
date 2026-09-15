@@ -33,17 +33,6 @@ type diskState struct {
 func emptyState() diskState {
 	return diskState{storeVersion, make(map[string]Project), make(map[string]*storedAgent), make(map[string]receipt)}
 }
-func copyJSON[T any](v T) T {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	var out T
-	if err = json.Unmarshal(b, &out); err != nil {
-		panic(err)
-	}
-	return out
-}
 func loadState(dir string) (diskState, error) {
 	state := emptyState()
 	b, err := os.ReadFile(filepath.Join(dir, "state.json"))

@@ -364,7 +364,7 @@ func (a *Agent) Messages() []Message {
 func cloneMessages(messages []Message) []Message {
 	result := append([]Message(nil), messages...)
 	for i := range result {
-		result[i].Content.raw = append(json.RawMessage(nil), messages[i].Content.raw...)
+		result[i].Content = messages[i].Content.Clone()
 		result[i].ToolCalls = append([]ToolCall(nil), messages[i].ToolCalls...)
 		result[i].ReasoningDetails = nil
 		for _, raw := range messages[i].ReasoningDetails {

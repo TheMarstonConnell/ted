@@ -2,7 +2,6 @@ package controlplane
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/TheMarstonConnell/ted/api"
 	"github.com/getkin/kin-openapi/openapi3"
@@ -36,42 +36,107 @@ var _ api.ServerInterface = (*httpAPI)(nil)
 // NewHandler exposes the versioned, spec-validated HTTP and WebSocket API.
 // Authentication/TLS, if needed, belong at the caller's trusted reverse proxy.
 func NewHandler(s *Service) http.Handler {
-	spec, err := api.GetSwagger()
-	if err != nil {
-		panic(fmt.Errorf("load embedded API spec: %w", err))
-	}
-	if err = spec.Validate(context.Background()); err != nil {
-		panic(fmt.Errorf("invalid API spec: %w", err))
-	}
-	router, err := legacy.NewRouter(spec)
+	spec, router, metadata, err := sharedHTTPDefinition()
 	if err != nil {
 		panic(err)
 	}
 	h := &httpAPI{service: s, spec: spec}
 	generated := api.HandlerWithOptions(h, api.StdHTTPServerOptions{ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) { writeProblem(w, 400, "invalid", err.Error()) }})
-	return validateHTTP(router, generated)
+	return validateHTTP(router, generated, metadata)
+}
+
+type httpRouteMetadata struct {
+	query map[string]struct{}
+	allow string
+}
+type httpValidationMetadata struct {
+	routes  map[*openapi3.Operation]httpRouteMetadata
+	methods []string
+}
+
+var (
+	httpDefinitionOnce     sync.Once
+	httpDefinitionSpec     *openapi3.T
+	httpDefinitionRouter   routers.Router
+	httpDefinitionMetadata *httpValidationMetadata
+	httpDefinitionErr      error
+	emptyQuery             = url.Values{}
+	requestValidationOpts  = &openapi3filter.Options{SkipSettingDefaults: true}
+)
+
+// The generated OpenAPI document and legacy router are immutable after setup.
+// Sharing them avoids parsing and validating the same embedded schema for every
+// server or test fixture.
+func sharedHTTPDefinition() (*openapi3.T, routers.Router, *httpValidationMetadata, error) {
+	httpDefinitionOnce.Do(func() {
+		httpDefinitionSpec, httpDefinitionErr = api.GetSwagger()
+		if httpDefinitionErr != nil {
+			httpDefinitionErr = fmt.Errorf("load embedded API spec: %w", httpDefinitionErr)
+			return
+		}
+		// NewRouter validates the complete document before constructing routes.
+		httpDefinitionRouter, httpDefinitionErr = legacy.NewRouter(httpDefinitionSpec)
+		if httpDefinitionErr != nil {
+			httpDefinitionErr = fmt.Errorf("invalid API spec: %w", httpDefinitionErr)
+			return
+		}
+		httpDefinitionMetadata = newHTTPValidationMetadata(httpDefinitionSpec)
+	})
+	return httpDefinitionSpec, httpDefinitionRouter, httpDefinitionMetadata, httpDefinitionErr
+}
+
+func newHTTPValidationMetadata(spec *openapi3.T) *httpValidationMetadata {
+	metadata := &httpValidationMetadata{routes: make(map[*openapi3.Operation]httpRouteMetadata)}
+	methodSet := make(map[string]struct{})
+	for _, pathItem := range spec.Paths.Map() {
+		operations := pathItem.Operations()
+		allow := make([]string, 0, len(operations))
+		for method := range operations {
+			allow = append(allow, method)
+			methodSet[strings.ToUpper(method)] = struct{}{}
+		}
+		sort.Strings(allow)
+		allowHeader := strings.Join(allow, ", ")
+		for _, operation := range operations {
+			var query map[string]struct{}
+			for _, parameters := range []openapi3.Parameters{pathItem.Parameters, operation.Parameters} {
+				for _, parameter := range parameters {
+					if parameter.Value.In == openapi3.ParameterInQuery {
+						if query == nil {
+							query = make(map[string]struct{})
+						}
+						query[parameter.Value.Name] = struct{}{}
+					}
+				}
+			}
+			metadata.routes[operation] = httpRouteMetadata{query: query, allow: allowHeader}
+		}
+	}
+	// Preserve the historical probe preference while dropping methods absent
+	// from this document.
+	for _, method := range []string{"GET", "POST", "PATCH", "DELETE", "PUT", "HEAD", "OPTIONS"} {
+		if _, ok := methodSet[method]; ok {
+			metadata.methods = append(metadata.methods, method)
+		}
+	}
+	return metadata
 }
 
 // Validate against the same embedded document used to generate server types.
 // In addition to schema validation, reject duplicate/unknown query parameters,
 // unexpected bodies, trailing JSON, and oversized bodies before runtime mutation.
-func validateHTTP(router routers.Router, next http.Handler) http.Handler {
+func validateHTTP(router routers.Router, next http.Handler, metadata *httpValidationMetadata) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		route, pathParams, err := router.FindRoute(r)
 		if err != nil {
-			// legacy.Router creates fresh RouteError values and cannot identify
-			// method mismatches on templated paths by errors.Is alone.
-			for _, method := range []string{"GET", "POST", "PATCH", "DELETE", "PUT", "HEAD", "OPTIONS"} {
+			// legacy.Router reports method mismatches on templated paths as path
+			// misses. Probe only methods that actually occur in the document.
+			for _, method := range metadata.methods {
 				probe := new(http.Request)
 				*probe = *r
 				probe.Method = method
 				if matched, _, probeErr := router.FindRoute(probe); probeErr == nil {
-					methods := []string{}
-					for m := range matched.PathItem.Operations() {
-						methods = append(methods, m)
-					}
-					sort.Strings(methods)
-					w.Header().Set("Allow", strings.Join(methods, ", "))
+					w.Header().Set("Allow", metadata.routes[matched.Operation].allow)
 					writeProblem(w, 405, "method_not_allowed", "method not allowed")
 					return
 				}
@@ -79,40 +144,43 @@ func validateHTTP(router routers.Router, next http.Handler) http.Handler {
 			writeProblem(w, 404, "not_found", "route not found")
 			return
 		}
-		allowed := map[string]bool{}
-		for _, p := range append(append(openapi3.Parameters{}, route.PathItem.Parameters...), route.Operation.Parameters...) {
-			if p.Value.In == "query" {
-				allowed[p.Value.Name] = true
-			}
-		}
-		query, err := parseQuery(r)
-		if err != nil {
-			writeProblem(w, 400, "invalid", err.Error())
-			return
-		}
-		for key, values := range query {
-			if !allowed[key] || len(values) != 1 {
-				writeProblem(w, 400, "invalid", "unknown or repeated query parameter: "+key)
+
+		routeMetadata := metadata.routes[route.Operation]
+		query := emptyQuery
+		if r.URL.RawQuery != "" {
+			query, err = parseQuery(r)
+			if err != nil {
+				writeProblem(w, 400, "invalid", err.Error())
 				return
+			}
+			for key, values := range query {
+				if _, allowed := routeMetadata.query[key]; !allowed || len(values) != 1 {
+					writeProblem(w, 400, "invalid", "unknown or repeated query parameter: "+key)
+					return
+				}
 			}
 		}
 		if len(r.Header.Values("Idempotency-Key")) > 1 {
 			writeProblem(w, 400, "invalid", "repeated Idempotency-Key header")
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxHTTPBody)
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			var large *http.MaxBytesError
-			if errors.As(err, &large) {
-				writeProblem(w, 413, "too_large", "request body exceeds 2 MiB")
-			} else {
-				writeProblem(w, 400, "invalid", "cannot read request body")
+
+		var body []byte
+		if r.Body != nil && r.Body != http.NoBody {
+			r.Body = http.MaxBytesReader(w, r.Body, maxHTTPBody)
+			body, err = io.ReadAll(r.Body)
+			if err != nil {
+				var large *http.MaxBytesError
+				if errors.As(err, &large) {
+					writeProblem(w, 413, "too_large", "request body exceeds 2 MiB")
+				} else {
+					writeProblem(w, 400, "invalid", "cannot read request body")
+				}
+				return
 			}
-			return
+			r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(body))
 		}
-		r.Body.Close()
-		r.Body = io.NopCloser(bytes.NewReader(body))
 		if route.Operation.RequestBody == nil && len(body) > 0 {
 			writeProblem(w, 400, "invalid", "request body not allowed")
 			return
@@ -128,7 +196,10 @@ func validateHTTP(router routers.Router, next http.Handler) http.Handler {
 				return
 			}
 		}
-		input := &openapi3filter.RequestValidationInput{Request: r, PathParams: pathParams, Route: route, Options: &openapi3filter.Options{SkipSettingDefaults: true}}
+		input := &openapi3filter.RequestValidationInput{
+			Request: r, PathParams: pathParams, QueryParams: query, Route: route,
+			Options: requestValidationOpts,
+		}
 		if err := openapi3filter.ValidateRequest(r.Context(), input); err != nil {
 			writeProblem(w, 400, "invalid", err.Error())
 			return
@@ -355,8 +426,8 @@ func (h *httpAPI) PatchAgentWorkspace(w http.ResponseWriter, r *http.Request, id
 	agentResult(w, 200, a, err)
 }
 func (h *httpAPI) ListMessages(w http.ResponseWriter, r *http.Request, id string) {
-	a, err := h.service.GetAgent(id)
-	respond(w, 200, nonnil(a.Queue), err)
+	queue, err := h.service.QueuedMessages(id)
+	respond(w, 200, nonnil(queue), err)
 }
 func (h *httpAPI) SubmitMessage(w http.ResponseWriter, r *http.Request, id string, p api.SubmitMessageParams) {
 	b, ok := decodeBody[api.SubmitMessageJSONRequestBody](w, r)
@@ -415,20 +486,15 @@ func (h *httpAPI) GetEvent(w http.ResponseWriter, r *http.Request, id string, cu
 }
 func (h *httpAPI) GetHistory(w http.ResponseWriter, r *http.Request, id string, p api.GetHistoryParams) {
 	after, limit := pagination(p.After, p.Limit)
-	a, err := h.service.GetAgent(id)
+	messages, end, err := h.service.History(id, after, limit)
 	if err != nil {
 		writeRuntimeError(w, err)
 		return
 	}
-	if after > uint64(len(a.Messages)) {
-		writeProblem(w, 410, "cursor_invalid", "history cursor is ahead of conversation")
-		return
-	}
-	end := min(len(a.Messages), int(after)+limit)
 	writeJSON(w, 200, struct {
 		Messages any `json:"messages"`
 		Next     int `json:"next_cursor"`
-	}{nonnil(a.Messages[int(after):end]), end})
+	}{nonnil(messages), end})
 }
 func (h *httpAPI) ListModels(w http.ResponseWriter, r *http.Request) {
 	models := []api.Model{}

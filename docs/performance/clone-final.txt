@@ -1,0 +1,46 @@
+goos: linux
+goarch: amd64
+pkg: github.com/TheMarstonConnell/ted/controlplane
+cpu: AMD Ryzen 7 5700G with Radeon Graphics         
+BenchmarkCloneDiskState/typed-2         	     218	   1069695 ns/op	  450380 B/op	    5169 allocs/op
+BenchmarkCloneDiskState/typed-2         	     231	   1077823 ns/op	  450379 B/op	    5169 allocs/op
+BenchmarkCloneDiskState/typed-2         	     223	   1113001 ns/op	  450375 B/op	    5169 allocs/op
+BenchmarkCloneDiskState/typed-2         	     222	   1066131 ns/op	  450383 B/op	    5169 allocs/op
+BenchmarkCloneDiskState/typed-2         	     225	   1088271 ns/op	  450373 B/op	    5169 allocs/op
+BenchmarkCloneDiskState/json-2          	      44	   5479680 ns/op	 1508590 B/op	   11647 allocs/op
+BenchmarkCloneDiskState/json-2          	      40	   5708591 ns/op	 1691390 B/op	   11634 allocs/op
+BenchmarkCloneDiskState/json-2          	      45	   5438098 ns/op	 1495194 B/op	   11628 allocs/op
+BenchmarkCloneDiskState/json-2          	      38	   5474052 ns/op	 1722281 B/op	   11634 allocs/op
+BenchmarkCloneDiskState/json-2          	      44	   5382540 ns/op	 1513288 B/op	   11628 allocs/op
+BenchmarkCloneAgent/typed-2             	    3318	     63478 ns/op	   29354 B/op	     387 allocs/op
+BenchmarkCloneAgent/typed-2             	    3879	     63138 ns/op	   29354 B/op	     387 allocs/op
+BenchmarkCloneAgent/typed-2             	    3553	     61647 ns/op	   29354 B/op	     387 allocs/op
+BenchmarkCloneAgent/typed-2             	    3403	     62262 ns/op	   29354 B/op	     387 allocs/op
+BenchmarkCloneAgent/typed-2             	    3730	     61234 ns/op	   29354 B/op	     387 allocs/op
+BenchmarkCloneAgent/json-2              	     764	    324087 ns/op	   88438 B/op	     899 allocs/op
+BenchmarkCloneAgent/json-2              	     736	    314347 ns/op	   88264 B/op	     899 allocs/op
+BenchmarkCloneAgent/json-2              	     661	    333406 ns/op	   88610 B/op	     899 allocs/op
+BenchmarkCloneAgent/json-2              	     690	    341212 ns/op	   88662 B/op	     899 allocs/op
+BenchmarkCloneAgent/json-2              	     620	    331100 ns/op	   88327 B/op	     899 allocs/op
+BenchmarkCloneMessages/typed-2          	    3874	     64147 ns/op	   28170 B/op	     385 allocs/op
+BenchmarkCloneMessages/typed-2          	    3632	     62798 ns/op	   28170 B/op	     385 allocs/op
+BenchmarkCloneMessages/typed-2          	    3538	     62962 ns/op	   28169 B/op	     385 allocs/op
+BenchmarkCloneMessages/typed-2          	    3602	     63922 ns/op	   28170 B/op	     385 allocs/op
+BenchmarkCloneMessages/typed-2          	    4070	     61858 ns/op	   28170 B/op	     385 allocs/op
+BenchmarkCloneMessages/json-2           	     806	    285792 ns/op	   80338 B/op	     835 allocs/op
+BenchmarkCloneMessages/json-2           	     822	    285747 ns/op	   80276 B/op	     835 allocs/op
+BenchmarkCloneMessages/json-2           	     826	    283895 ns/op	   79956 B/op	     835 allocs/op
+BenchmarkCloneMessages/json-2           	     841	    293007 ns/op	   80517 B/op	     835 allocs/op
+BenchmarkCloneMessages/json-2           	     834	    284272 ns/op	   80356 B/op	     835 allocs/op
+BenchmarkCloneEvents/typed-2            	    3415	     76601 ns/op	   25605 B/op	     257 allocs/op
+BenchmarkCloneEvents/typed-2            	    3223	     73442 ns/op	   25605 B/op	     257 allocs/op
+BenchmarkCloneEvents/typed-2            	    3626	     67801 ns/op	   25605 B/op	     257 allocs/op
+BenchmarkCloneEvents/typed-2            	    3279	     68206 ns/op	   25605 B/op	     257 allocs/op
+BenchmarkCloneEvents/typed-2            	    3818	     70968 ns/op	   25605 B/op	     257 allocs/op
+BenchmarkCloneEvents/json-2             	     733	    328244 ns/op	   65450 B/op	     529 allocs/op
+BenchmarkCloneEvents/json-2             	     718	    325940 ns/op	   65850 B/op	     529 allocs/op
+BenchmarkCloneEvents/json-2             	     717	    324096 ns/op	   65964 B/op	     529 allocs/op
+BenchmarkCloneEvents/json-2             	     752	    323011 ns/op	   66025 B/op	     529 allocs/op
+BenchmarkCloneEvents/json-2             	     741	    329815 ns/op	   65931 B/op	     529 allocs/op
+PASS
+ok  	github.com/TheMarstonConnell/ted/controlplane	9.451s
