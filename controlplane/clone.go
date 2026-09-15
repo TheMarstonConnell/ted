@@ -2,18 +2,15 @@ package controlplane
 
 import (
 	"encoding/json"
+	"maps"
+	"slices"
 
 	"github.com/TheMarstonConnell/ted/agent"
 )
 
 func cloneDiskState(state diskState) diskState {
 	cloned := diskState{Version: state.Version}
-	if state.Projects != nil {
-		cloned.Projects = make(map[string]Project, len(state.Projects))
-		for id, project := range state.Projects {
-			cloned.Projects[id] = project
-		}
-	}
+	cloned.Projects = maps.Clone(state.Projects)
 	if state.Agents != nil {
 		cloned.Agents = make(map[string]*storedAgent, len(state.Agents))
 		for id, stored := range state.Agents {
@@ -28,12 +25,7 @@ func cloneDiskState(state diskState) diskState {
 			}
 		}
 	}
-	if state.Receipts != nil {
-		cloned.Receipts = make(map[string]receipt, len(state.Receipts))
-		for key, value := range state.Receipts {
-			cloned.Receipts[key] = value
-		}
-	}
+	cloned.Receipts = maps.Clone(state.Receipts)
 	return cloned
 }
 
@@ -43,19 +35,10 @@ func cloneAgent(value Agent) Agent {
 		settings := *value.ActiveSettings
 		cloned.ActiveSettings = &settings
 	}
-	cloned.Queue = cloneQueuedMessages(value.Queue)
+	cloned.Queue = slices.Clone(value.Queue)
 	cloned.Messages = cloneMessages(value.Messages)
 	// Preserve the former JSON snapshot omission.
 	cloned.Events = nil
-	return cloned
-}
-
-func cloneQueuedMessages(values []QueuedMessage) []QueuedMessage {
-	if values == nil {
-		return nil
-	}
-	cloned := make([]QueuedMessage, len(values))
-	copy(cloned, values)
 	return cloned
 }
 
@@ -87,8 +70,7 @@ func cloneMessage(value agent.Message) agent.Message {
 		}
 	}
 	if len(value.ToolCalls) != 0 {
-		cloned.ToolCalls = make([]agent.ToolCall, len(value.ToolCalls))
-		copy(cloned.ToolCalls, value.ToolCalls)
+		cloned.ToolCalls = slices.Clone(value.ToolCalls)
 	}
 	return cloned
 }

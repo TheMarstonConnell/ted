@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -28,8 +29,8 @@ func TestContentClone(t *testing.T) {
 	}
 	original := TextContent("plain text")
 	cloned := original.Clone()
-	if cloned.Text() != original.Text() {
-		t.Fatal("clone changed plain text")
+	if !reflect.DeepEqual(cloned, original) {
+		t.Fatal("clone changed plain text representation")
 	}
 	if err := json.Unmarshal([]byte(`"replacement"`), &cloned); err != nil {
 		t.Fatal(err)

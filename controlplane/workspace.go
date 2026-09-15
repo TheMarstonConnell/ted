@@ -166,11 +166,10 @@ func (s *Service) updateWorkspace(id string, selection WorkspaceSelection, norma
 		s.mu.RUnlock()
 		return Agent{}, problem(409, "workspace_locked", "workspace choices are permanently locked after the first message")
 	}
-	projectID := a.Agent.ProjectID
-	project := s.state.Projects[projectID]
+	root := s.state.Projects[a.Agent.ProjectID].Root
 	s.mu.RUnlock()
 
-	selection, err = normalize(project.Root, selection)
+	selection, err = normalize(root, selection)
 	if err != nil {
 		return Agent{}, err
 	}
@@ -186,10 +185,6 @@ func (s *Service) updateWorkspace(id string, selection WorkspaceSelection, norma
 	}
 	if a.Agent.Workspace.Locked {
 		return Agent{}, problem(409, "workspace_locked", "workspace choices are permanently locked after the first message")
-	}
-	currentProject, ok := s.state.Projects[projectID]
-	if a.Agent.ProjectID != projectID || !ok || currentProject.ID != project.ID || currentProject.Root != project.Root {
-		return Agent{}, problem(409, "workspace_unavailable", "workspace project changed during validation; try again")
 	}
 	before := cloneDiskState(s.state)
 	a.Agent.Workspace = Workspace{WorkspaceSelection: selection, Status: "draft"}

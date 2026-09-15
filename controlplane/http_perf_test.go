@@ -1,7 +1,6 @@
 package controlplane
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,23 +9,17 @@ import (
 	"time"
 
 	"github.com/TheMarstonConnell/ted/agent"
-	"github.com/TheMarstonConnell/ted/api"
-	"github.com/getkin/kin-openapi/routers/legacy"
 )
 
 func benchmarkValidationHandler(b *testing.B) http.Handler {
 	b.Helper()
-	spec, err := api.GetSwagger()
-	if err != nil {
-		b.Fatal(err)
-	}
-	router, err := legacy.NewRouter(spec)
+	_, router, metadata, err := sharedHTTPDefinition()
 	if err != nil {
 		b.Fatal(err)
 	}
 	return validateHTTP(router, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}), newHTTPValidationMetadata(spec))
+	}), metadata)
 }
 
 func BenchmarkValidateHTTP(b *testing.B) {
@@ -96,11 +89,8 @@ func BenchmarkSummaryWS(b *testing.B) {
 }
 
 func BenchmarkValidateWS(b *testing.B) {
-	spec, err := api.GetSwagger()
+	spec, _, _, err := sharedHTTPDefinition()
 	if err != nil {
-		b.Fatal(err)
-	}
-	if err = spec.Validate(context.Background()); err != nil {
 		b.Fatal(err)
 	}
 	h := &httpAPI{spec: spec}

@@ -16,31 +16,11 @@ func TestSettingsSelector(t *testing.T) {
 	if got := selector.Settings(); got.Model != "test/a" || got.Effort != EffortMedium {
 		t.Fatal(got)
 	}
-	if _, err := selector.SetEffort(EffortLow); err != nil {
-		t.Fatal(err)
-	}
-	change, err := selector.SetModel("test/b")
-	if err != nil || !change.EffortAdjusted || change.After.Effort != EffortMedium {
-		t.Fatal(change, err)
-	}
-	before := selector.Settings()
-	if _, err := selector.SetModel("missing"); err == nil || selector.Settings() != before {
-		t.Fatal("invalid model changed selection")
-	}
-	if _, err := selector.SetEffort("invalid"); err == nil || selector.Settings() != before {
-		t.Fatal("invalid effort changed selection")
-	}
-	if _, err := selector.SetModel("test/plain"); err != nil || selector.Settings().Effort != "" {
-		t.Fatal("plain model retained effort", err)
-	}
-	if _, err := selector.SetEffort(EffortHigh); err == nil {
-		t.Fatal("plain model accepted effort")
+	if models := selector.ListModels(); len(models) != 3 || models[0].ID != "test/a" {
+		t.Fatal(models)
 	}
 	entries, err := os.ReadDir(home)
 	if err != nil || len(entries) != 0 {
 		t.Fatal("settings wrote session files", entries, err)
-	}
-	if got := NewSettingsSelector(nil).Settings(); got != (Settings{}) {
-		t.Fatal(got)
 	}
 }

@@ -153,11 +153,12 @@ validation benchmarks were rerun for all five samples, as were all 26 route
 scenarios because direct clone calls are used across route paths. Raw output is
 in `docs/performance/review-simplification.txt` and
 `docs/performance/routes-review-after.txt`. This later shared-host run was
-noisier and is not substituted into the paired table above: clone medians were
-2.680 ms (durable state), 69.782 µs (agent), 66.912 µs (transcript), and
-74.095 µs (events); WebSocket validation was 4.385 µs. Clone allocation counts
-were unchanged. The route rerun retains every sample, including wide durable
-write variation (for example DELETE project ranged from 13.129 to 99.585 ms).
+a separate shared-host observation and is not substituted into the paired table
+above: clone medians were 1.081 ms (durable state), 66.381 µs (agent),
+63.387 µs (transcript), and 69.736 µs (events); WebSocket validation was
+4.519 µs. Clone allocation counts were unchanged. The route rerun retains every
+sample, including wide durable write variation (for example DELETE project
+ranged from 12.706 to 114.706 ms).
 
 ## Additional review findings and deliberate limits
 
