@@ -349,7 +349,15 @@ paths:
         schema: *id010
     patch:
       operationId: PatchAgent
-      description: Update settled state or advance the durable shared read cursor to exactly the supplied event cursor. Exactly one property is required. Lower or duplicate read cursors are no-ops; cursors beyond the current agent event stream are rejected.
+      description: >-
+        Update settled state or advance the durable shared read cursor to exactly
+        the supplied event cursor. Setting `settled` to true atomically settles
+        all descendants, including across projects and through already-settled
+        agents; queued work remains held and running turns are cancelled after
+        persistence. Setting it to false restores only the requested agent and
+        leaves queued work held. Exactly one property is required. Lower or
+        duplicate read cursors are no-ops; cursors beyond the current agent event
+        stream are rejected.
       responses:
         '200':
           description: Success

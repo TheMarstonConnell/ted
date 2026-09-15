@@ -102,9 +102,9 @@ empty, unlocked thread before its first message.
 The relationship is durable and creation-only. Children appear beneath their
 parent in the web sidebar, with an expand/collapse control. A family stays in its
 root parent's project section while any member is active; an entirely settled
-family moves to Settled chats. Settling, stopping, or disconnecting a parent does
-not cascade to children (the existing lifetime rule for a TUI-owned server still
-applies).
+family moves to Settled chats. Settling a parent cascades to all descendants.
+Stopping or disconnecting a parent does not cascade (the existing lifetime rule
+for a TUI-owned server still applies).
 
 ```sh
 # Agent tool commands already receive TED_THREAD_ID. For tmux, expand it in the
