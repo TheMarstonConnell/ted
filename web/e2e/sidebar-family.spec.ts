@@ -133,6 +133,7 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
   if (process.env.TED_WEB_RECORD) await page.waitForTimeout(1500);
 
   await settle(page, "Child chat");
+  fixture.updateAgent("grandchild", { settled: true });
   await expect(
     grandchild.getByRole("button", {
       name: "Restore chat: Grandchild chat",
@@ -152,15 +153,12 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
     }),
   ).toBeAttached();
 
-  const settleParent = page.getByRole("button", {
-    name: "Settle chat: Parent chat",
-    exact: true,
-  });
-  await settleParent.focus();
-  await settleParent.click();
   await page
     .getByRole("button", { name: "Settled chats", exact: true })
     .click();
+  await settle(page, "Parent chat");
+  fixture.updateAgent("child", { settled: true });
+  fixture.updateAgent("loose", { settled: true });
   for (const title of [
     "Parent chat",
     "Child chat",
