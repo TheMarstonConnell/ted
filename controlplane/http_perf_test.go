@@ -82,9 +82,7 @@ func BenchmarkSummaryWS(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := summaryWS(a); err != nil {
-			b.Fatal(err)
-		}
+		_ = summaryWS(a)
 	}
 }
 

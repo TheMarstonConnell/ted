@@ -131,10 +131,10 @@ same fixture/binary. Clone state has 8 agents, 384 messages, and 1,024 events.
 | WS inventory: 10 × 100-message agents, no replay | 1.709 ms | 2.725 µs | -99.8% | 904,314 → 5,480 |
 | SPA GET | 1.529 µs | 1.027 µs | -32.8% | 2,864 → 1,936 |
 | SPA HEAD | 0.894 µs | 0.411 µs | -54.0% | 1,504 → 576 |
-| Clone durable state | 5.224 ms | 1.101 ms | -78.9% | 1,513,288 → 450,379 |
-| Clone full agent | 317.407 µs | 62.658 µs | -80.3% | 88,438 → 29,354 |
-| Clone transcript | 311.440 µs | 62.766 µs | -79.8% | 80,338 → 28,170 |
-| Clone event page | 323.482 µs | 70.336 µs | -78.3% | 65,931 → 25,605 |
+| Clone durable state | 5.469 ms | 1.075 ms | -80.3% | 1,513,288 → 450,379 |
+| Clone full agent | 317.977 µs | 64.750 µs | -79.6% | 88,438 → 29,354 |
+| Clone transcript | 292.216 µs | 62.829 µs | -78.5% | 80,338 → 28,170 |
+| Clone event page | 327.703 µs | 68.382 µs | -79.1% | 65,931 → 25,605 |
 | Decode unchanged 256 KiB recording frame | 239.016 µs | 0.002 µs | <−99.9% | 270,336 → 0 |
 
 The repeated-frame result measures only decoding a 256 KiB unchanged frame, not
@@ -158,8 +158,8 @@ span route paths. Raw output is in `docs/performance/review-simplification.txt`,
 now use these final results. The later route run is a separate shared-host
 observation and is not substituted into the sequential route table; it retains
 every sample, including every durable-write sample (the final DELETE project run ranged from
-68.192 to 75.943 ms). WebSocket validation's final median was 4.579 µs; clone
-allocation counts were unchanged.
+68.192 to 75.943 ms). WebSocket command validation and internal conversion's
+final median was 5.560 µs; clone allocation counts were unchanged.
 
 ## Additional review findings and deliberate limits
 

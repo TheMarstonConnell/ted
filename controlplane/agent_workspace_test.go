@@ -234,13 +234,13 @@ func TestChildCreationValidationAndHTTPMetadata(t *testing.T) {
 	if got.ParentAgentID != parent.ID {
 		t.Fatal(got)
 	}
-	inventory, err := summaryWS(child)
-	if err != nil || inventory.ParentAgentId == nil || *inventory.ParentAgentId != parent.ID {
-		t.Fatalf("inventory %+v %v", inventory, err)
+	inventory := summaryWS(child)
+	if inventory.ParentAgentId == nil || *inventory.ParentAgentId != parent.ID {
+		t.Fatalf("inventory %+v", inventory)
 	}
 	events, _ := f.s.Events(child.ID, 0, 100)
 	var update map[string]any
-	if err = json.Unmarshal(events[0].Data, &update); err != nil {
+	if err := json.Unmarshal(events[0].Data, &update); err != nil {
 		t.Fatal(err)
 	}
 	if update["parent_agent_id"] != parent.ID {

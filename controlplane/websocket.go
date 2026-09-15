@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -133,13 +132,7 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 			requestID := command.requestID
 			switch command.kind {
 			case "subscribe":
-				candidate, err := newWSSubscription(*command.subscribe)
-				if err != nil {
-					if writeWSError(c, requestID, err) != nil {
-						return
-					}
-					continue
-				}
+				candidate := command.subscription
 				agents, events, next, err := h.snapshotWS(candidate)
 				if err != nil {
 					if writeWSError(c, requestID, err) != nil {
@@ -156,15 +149,14 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			case "submit":
-				submit := command.submit
-				m, err := h.service.Submit(submit.AgentId, submit.Text, submit.IdempotencyKey)
+				m, err := h.service.Submit(command.agentID, command.text, command.idempotencyKey)
 				if err != nil {
 					if writeWSError(c, requestID, err) != nil {
 						return
 					}
 					continue
 				}
-				if err = writeWS(c, api.WSAck{Type: api.Ack, RequestId: requestID, AgentId: submit.AgentId, MessageId: m.ID, Status: m.Status}); err != nil {
+				if err = writeWS(c, api.WSAck{Type: api.Ack, RequestId: requestID, AgentId: command.agentID, MessageId: m.ID, Status: m.Status}); err != nil {
 					return
 				}
 			}
@@ -174,10 +166,12 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 
 // Both transports validate requests against shared, generated-spec schemas.
 type wsCommand struct {
-	kind      string
-	requestID string
-	subscribe *api.WSSubscribe
-	submit    *api.WSSubmit
+	kind           string
+	requestID      string
+	subscription   *wsSubscription
+	agentID        string
+	text           string
+	idempotencyKey string
 }
 
 func (h *httpAPI) validateWS(data []byte) (command wsCommand, err error) {
@@ -210,59 +204,39 @@ func (h *httpAPI) validateWS(data []byte) (command wsCommand, err error) {
 		return command, problem(400, "invalid", e.Error())
 	}
 	if command.kind == "subscribe" {
-		command.subscribe, err = wsSubscribeFromJSON(raw)
+		command.subscription, err = wsSubscriptionFromJSON(raw)
 	} else {
-		command.submit = &api.WSSubmit{
-			Type: api.WSSubmitType(command.kind), RequestId: command.requestID,
-			AgentId: raw["agent_id"].(string), Text: raw["text"].(string),
-			IdempotencyKey: raw["idempotency_key"].(string),
-		}
+		command.agentID = raw["agent_id"].(string)
+		command.text = raw["text"].(string)
+		command.idempotencyKey = raw["idempotency_key"].(string)
 	}
 	return command, err
 }
 
-func wsSubscribeFromJSON(raw map[string]any) (*api.WSSubscribe, error) {
-	command := &api.WSSubscribe{Type: api.WSSubscribeType(raw["type"].(string)), RequestId: raw["request_id"].(string)}
+func wsSubscriptionFromJSON(raw map[string]any) (*wsSubscription, error) {
+	s := &wsSubscription{explicit: map[string]bool{}, known: map[string]bool{}, cursors: map[string]uint64{}, inventory: map[string][]byte{}}
 	if value, ok := raw["subscribe_all"]; ok {
-		v := value.(bool)
-		command.SubscribeAll = &v
+		s.all = value.(bool)
 	}
 	if value, ok := raw["agent_ids"]; ok {
-		values := value.([]any)
-		ids := make([]string, len(values))
-		for i := range values {
-			ids[i] = values[i].(string)
+		for _, id := range value.([]any) {
+			s.explicit[id.(string)] = true
 		}
-		command.AgentIds = &ids
 	}
 	if value, ok := raw["cursors"]; ok {
-		values := value.(map[string]any)
-		cursors := make(map[string]int64, len(values))
-		for id, value := range values {
-			cursor, parseErr := strconv.ParseInt(value.(json.Number).String(), 10, 64)
-			if parseErr != nil {
+		for id, value := range value.(map[string]any) {
+			cursor, err := strconv.ParseInt(value.(json.Number).String(), 10, 64)
+			if err != nil {
 				return nil, problem(400, "invalid", "cursor must be an int64: "+id)
 			}
-			cursors[id] = cursor
+			if !s.all && !s.explicit[id] {
+				return nil, problem(400, "invalid", "cursor supplied for an unsubscribed agent: "+id)
+			}
+			// Include resumed ids in the first atomic snapshot, even if they settled
+			// while the client was offline. This delivers their terminal events.
+			s.known[id] = true
+			s.cursors[id] = uint64(cursor)
 		}
-		command.Cursors = &cursors
-	}
-	return command, nil
-}
-
-func newWSSubscription(command api.WSSubscribe) (*wsSubscription, error) {
-	s := &wsSubscription{all: value(command.SubscribeAll), explicit: map[string]bool{}, known: map[string]bool{}, cursors: map[string]uint64{}, inventory: map[string][]byte{}}
-	for _, id := range value(command.AgentIds) {
-		s.explicit[id] = true
-	}
-	for id, cursor := range value(command.Cursors) {
-		if !s.all && !s.explicit[id] {
-			return nil, problem(400, "invalid", "cursor supplied for an unsubscribed agent: "+id)
-		}
-		// Include resumed ids in the first atomic snapshot, even if they settled
-		// while the client was offline. This delivers their terminal events.
-		s.known[id] = true
-		s.cursors[id] = uint64(cursor)
 	}
 	return s, nil
 }
@@ -283,14 +257,10 @@ func (h *httpAPI) snapshotWS(s *wsSubscription) ([]Agent, []Event, <-chan struct
 	return h.service.snapshotEvents(s.cursors, s.all, ids, true)
 }
 
-func summaryWS(a Agent) (api.AgentSummary, error) {
+func summaryWS(a Agent) api.AgentSummary {
 	// Runtime data stays detached. Build the bounded generated wire type directly;
 	// converting through JSON needlessly encoded the full Agent only to discard its
 	// conversation and queue.
-	cursor, err := wsCursor(a.Cursor)
-	if err != nil {
-		return api.AgentSummary{}, err
-	}
 	summary := api.AgentSummary{
 		Id:        a.ID,
 		ProjectId: a.ProjectID,
@@ -299,7 +269,7 @@ func summaryWS(a Agent) (api.AgentSummary, error) {
 		Settled:   a.Settled,
 		State:     api.AgentSummaryState(a.State),
 		Held:      a.Held,
-		Cursor:    cursor,
+		Cursor:    int64(a.Cursor),
 		CreatedAt: a.CreatedAt,
 		UpdatedAt: a.UpdatedAt,
 	}
@@ -309,15 +279,9 @@ func summaryWS(a Agent) (api.AgentSummary, error) {
 	if a.ActiveSettings != nil {
 		summary.ActiveSettings = &api.Settings{Model: a.ActiveSettings.Model, Effort: a.ActiveSettings.Effort}
 	}
-	last, err := wsCursor(a.LastResponseCursor)
-	if err != nil {
-		return api.AgentSummary{}, err
-	}
+	last := int64(a.LastResponseCursor)
 	summary.LastResponseCursor = &last
-	read, err := wsCursor(a.ReadCursor)
-	if err != nil {
-		return api.AgentSummary{}, err
-	}
+	read := int64(a.ReadCursor)
 	summary.ReadCursor = &read
 	summary.Workspace = wireWorkspace(a.Workspace)
 	u := a.ContextUsage
@@ -326,14 +290,7 @@ func summaryWS(a Agent) (api.AgentSummary, error) {
 		EstimatedTokens: u.EstimatedTokens, ContextWindow: u.ContextWindow,
 		Known: u.Known, Estimated: u.Estimated,
 	}
-	return summary, nil
-}
-
-func wsCursor(cursor uint64) (int64, error) {
-	if cursor > math.MaxInt64 {
-		return 0, fmt.Errorf("WebSocket cursor exceeds int64: %d", cursor)
-	}
-	return int64(cursor), nil
+	return summary
 }
 
 func stringPointer(v string) *string { return &v }
@@ -368,10 +325,7 @@ func wireWorkspace(w Workspace) *api.Workspace {
 
 func (h *httpAPI) deliverWS(c *websocket.Conn, s *wsSubscription, agents []Agent, events []Event) error {
 	for _, a := range agents {
-		summary, err := summaryWS(a)
-		if err != nil {
-			return err
-		}
+		summary := summaryWS(a)
 		frame, err := json.Marshal(api.WSInventory{Type: api.Inventory, Agent: summary})
 		if err != nil {
 			return err

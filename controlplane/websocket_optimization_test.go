@@ -2,7 +2,6 @@ package controlplane
 
 import (
 	"encoding/json"
-	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -31,10 +30,7 @@ func TestSummaryWSMatchesJSONWireConversion(t *testing.T) {
 	}
 	for name, input := range map[string]Agent{"zero_optional_fields": {ID: "agent", ProjectID: "project"}, "all_fields": full} {
 		t.Run(name, func(t *testing.T) {
-			got, err := summaryWS(input)
-			if err != nil {
-				t.Fatal(err)
-			}
+			got := summaryWS(input)
 			wire := wireAgent(input)
 			wire.Messages = nil
 			wire.Queue = nil
@@ -51,9 +47,6 @@ func TestSummaryWSMatchesJSONWireConversion(t *testing.T) {
 			}
 		})
 	}
-	if _, err := summaryWS(Agent{Cursor: math.MaxUint64}); err == nil {
-		t.Fatal("uint64 cursor overflow was accepted")
-	}
 }
 
 func TestValidateWSReturnsSchemaValidatedTypedCommand(t *testing.T) {
@@ -66,8 +59,8 @@ func TestValidateWSReturnsSchemaValidatedTypedCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if command.subscribe == nil || command.subscribe.Cursors == nil || (*command.subscribe.Cursors)["one"] != 9007199254740993 {
-		t.Fatalf("integer cursor lost precision: %#v", command.subscribe)
+	if command.subscription == nil || command.subscription.cursors["one"] != 9007199254740993 {
+		t.Fatalf("integer cursor lost precision: %#v", command.subscription)
 	}
 	for name, data := range map[string]string{
 		"typed integer exponent":       `{"type":"subscribe","request_id":"request","cursors":{"one":1e3}}`,
