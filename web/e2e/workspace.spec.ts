@@ -2193,6 +2193,7 @@ for (const width of [1440, 390]) {
         .click();
       await expect(
         page
+          .getByRole("region", { name: "Messages", exact: true })
           .getByRole("article", { name: "Your message", exact: true })
           .filter({ hasText: "The revised message" }),
       ).toBeVisible();

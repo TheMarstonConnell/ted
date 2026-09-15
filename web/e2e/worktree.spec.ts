@@ -518,7 +518,7 @@ test("workspace menus match the model menu padding", async ({ page }) => {
     .locator('[data-slot="select-group"]')
     .first()
     .evaluate((node) => getComputedStyle(node).padding);
-  await page.keyboard.press("Escape");
+  await page.getByRole("option", { selected: true }).click();
   for (const name of ["Workspace", "Start from"]) {
     await dialog.getByRole("combobox", { name, exact: true }).click();
     const group = page.locator(
@@ -528,7 +528,6 @@ test("workspace menus match the model menu padding", async ({ page }) => {
     await expect(group).toHaveCSS("padding", padding);
     if (name === "Workspace")
       await page.getByRole("option", { name: "Worktree", exact: true }).click();
-    else await page.keyboard.press("Escape");
   }
 });
 
