@@ -154,7 +154,7 @@
    The button class also covers composed triggers whose data-slot is renamed.
    Kept in base so explicit layout utilities (e.g. hidden sidebar actions) still work. */
 @layer base {
-  @media (max-width: 767px), (pointer: coarse) {
+  @media (max-width: 767px), (any-pointer: coarse) {
     :where(
       .group\/button,
       [data-slot="button"],

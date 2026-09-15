@@ -37,9 +37,9 @@ import { ErrorNotice } from "@/components/common";
 // Projects and chats share the same reveal behavior. Each group wraps only its
 // own row, so hovering/focusing a child chat never reveals the project action.
 const sidebarRowClass =
-  "group/sidebar-row flex items-center gap-2 transition-[gap] duration-150 [@media(hover:hover)_and_(pointer:fine)]:gap-0 hover:gap-2 focus-within:gap-2";
+  "group/sidebar-row flex items-center gap-2 transition-[gap] duration-150 [@media(hover:hover)_and_(pointer:fine)_and_(not_(any-pointer:coarse))]:gap-0 hover:gap-2 focus-within:gap-2";
 const sidebarActionClass =
-  "overflow-hidden border-x-0 [@media(hover:hover)_and_(pointer:fine)]:w-0 group-hover/sidebar-row:w-8 group-focus-within/sidebar-row:w-8 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:disabled:opacity-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:disabled:opacity-50 group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:disabled:opacity-50";
+  "overflow-hidden border-x-0 [@media(hover:hover)_and_(pointer:fine)_and_(not_(any-pointer:coarse))]:min-w-0 [@media(hover:hover)_and_(pointer:fine)_and_(not_(any-pointer:coarse))]:w-0 group-hover/sidebar-row:w-8 group-focus-within/sidebar-row:w-8 max-md:group-hover/sidebar-row:w-12 max-md:group-focus-within/sidebar-row:w-12 [@media(hover:hover)_and_(pointer:fine)_and_(not_(any-pointer:coarse))]:opacity-0 [@media(hover:hover)_and_(pointer:fine)_and_(not_(any-pointer:coarse))]:disabled:opacity-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:disabled:opacity-50 group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:disabled:opacity-50";
 
 export function AgentLink({
   agent,
@@ -79,7 +79,7 @@ export function AgentLink({
   const unread = !viewed && isUnread(agent, readPending[agent.id]);
   const children = childrenByParent.get(agent.id) || [];
   const hasChildren = children.length > 0;
-  const [childrenOpen, setChildrenOpen] = useState(true);
+  const [childrenOpen, setChildrenOpen] = useState(false);
   const running = !agent.settled && !agent.held && agent.state === "running";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,25 +109,6 @@ export function AgentLink({
         className={`space-y-2 ${agent.settled && !selected ? "opacity-60 hover:opacity-100 focus-within:opacity-100" : ""}`}
       >
         <div className={sidebarRowClass}>
-          {hasChildren && (
-            <CollapsibleTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  className="shrink-0"
-                  aria-label={`${childrenOpen ? "Collapse" : "Expand"} child chats for ${title}`}
-                  title={`${childrenOpen ? "Collapse" : "Expand"} child chats`}
-                />
-              }
-            >
-              <ChevronRight
-                className={`size-4 transition-transform ${childrenOpen ? "rotate-90" : ""}`}
-                aria-hidden="true"
-              />
-            </CollapsibleTrigger>
-          )}
           <Button
             variant="ghost"
             className={`relative h-auto min-w-0 flex-1 justify-start py-2 font-normal text-foreground ${selected ? "shadow-sm bg-sidebar-selected hover:bg-sidebar-selected dark:hover:bg-sidebar-selected" : ""} ${running ? "agent-running" : ""}`}
@@ -185,6 +166,25 @@ export function AgentLink({
               </span>
             </span>
           </Button>
+          {hasChildren && (
+            <CollapsibleTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={sidebarActionClass}
+                  aria-label={`${childrenOpen ? "Collapse" : "Expand"} child chats for ${title}`}
+                  title={`${childrenOpen ? "Collapse" : "Expand"} child chats`}
+                />
+              }
+            >
+              <ChevronRight
+                className={`size-4 transition-transform ${childrenOpen ? "rotate-90" : ""}`}
+                aria-hidden="true"
+              />
+            </CollapsibleTrigger>
+          )}
           <Button
             type="button"
             variant="ghost"
