@@ -104,16 +104,18 @@ worktree (including its current branch and uncommitted edits), or uses project
 defaults if the parent has no established worktree. Explicit `--cwd` takes
 precedence over parent inheritance. Managed worktrees retain their original
 project identity. Children are collapsible beneath their parent in the web
-sidebar; their execution and settling remain independent. Parentage is
-creation-only: do not combine `--parent-agent` with `--resume` or `--continue`.
+sidebar. Settling a parent cascades to its descendants; stopping or disconnecting
+does not. Parentage is creation-only: do not combine `--parent-agent` with
+`--resume` or `--continue`.
 `--cwd` can select the project for `--continue`, but cannot override `--resume`.
 
 Messages are durably queued, including while the agent is busy. Turns run FIFO,
 one at a time per agent. Failures hold the remaining queue. `/continue` releases
 held work; sending a new message does so implicitly, preserving FIFO order.
 `/stop` cancels the active turn and then starts the next queued message.
-`/settle` cancels work, holds pending messages, and hides the agent without
-removing its data. `/unsettle` (or restoring visibility through the API) does not resume work.
+`/settle` cascades to descendants, cancelling work, holding pending messages, and
+hiding them without removing data. `/unsettle` restores only the selected agent
+and does not resume work.
 
 Server state lives at `$TED_HOME/controlplane` (default `~/.ted/controlplane`),
 configurable with `ted serve --data-dir`. Queues, settings, conversations, and

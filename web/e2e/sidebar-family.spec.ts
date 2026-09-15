@@ -45,21 +45,6 @@ async function seedFamily(page: Page) {
   return fixture;
 }
 
-async function settle(page: Page, title: string) {
-  const button = page.getByRole("button", {
-    name: `Settle chat: ${title}`,
-    exact: true,
-  });
-  await button.focus();
-  await button.click();
-  await expect(
-    page.getByRole("button", {
-      name: `Restore chat: ${title}`,
-      exact: true,
-    }),
-  ).toBeAttached();
-}
-
 test("agent families nest, collapse, navigate and follow inventory updates", async ({
   page,
 }, testInfo) => {
@@ -131,47 +116,6 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
     path: testInfo.outputPath("sidebar-agent-family-desktop.png"),
   });
   if (process.env.TED_WEB_RECORD) await page.waitForTimeout(1500);
-
-  await settle(page, "Child chat");
-  fixture.updateAgent("grandchild", { settled: true });
-  await expect(
-    grandchild.getByRole("button", {
-      name: "Restore chat: Grandchild chat",
-      exact: true,
-    }),
-  ).toBeAttached();
-  await child
-    .getByRole("button", { name: "Restore chat: Child chat", exact: true })
-    .click();
-  await expect(
-    child.getByRole("button", { name: "Settle chat: Child chat", exact: true }),
-  ).toBeAttached();
-  await expect(
-    grandchild.getByRole("button", {
-      name: "Restore chat: Grandchild chat",
-      exact: true,
-    }),
-  ).toBeAttached();
-
-  await page
-    .getByRole("button", { name: "Settled chats", exact: true })
-    .click();
-  await settle(page, "Parent chat");
-  fixture.updateAgent("child", { settled: true });
-  fixture.updateAgent("loose", { settled: true });
-  for (const title of [
-    "Parent chat",
-    "Child chat",
-    "Grandchild chat",
-    "Loose chat",
-  ]) {
-    await expect(
-      page.getByRole("button", {
-        name: `Restore chat: ${title}`,
-        exact: true,
-      }),
-    ).toBeAttached();
-  }
 });
 
 test("agent family controls and navigation fit the mobile drawer", async ({

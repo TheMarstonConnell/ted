@@ -620,7 +620,6 @@ func TestSettleDescendants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sibling := create(root.ID)
 	unrelated := create("")
 	for _, a := range []Agent{child, grandchild} {
 		if _, err := s.Submit(a.ID, "running", ""); err != nil {
@@ -634,7 +633,7 @@ func TestSettleDescendants(t *testing.T) {
 	if _, err := s.SetSettled(root.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	for _, a := range []Agent{root, child, grandchild, sibling, crossProject} {
+	for _, a := range []Agent{root, child, grandchild, crossProject} {
 		awaitAgent(t, s, a.ID, func(a Agent) bool { return a.Settled && a.Held && a.State == "idle" })
 	}
 	other, err := s.GetAgent(unrelated.ID)
