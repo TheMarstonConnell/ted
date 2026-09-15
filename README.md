@@ -386,7 +386,7 @@ ted browser tab select TAB_ID
 ted browser tab close TAB_ID
 
 ted browser record start
-# Run browser actions here.
+# For PR demos, follow the pacing example below.
 ted browser record stop
 
 ted browser console
@@ -402,6 +402,42 @@ when references become stale. Ambiguous targets are errors rather than a
 license to click an arbitrary match. Snapshots and semantic targeting are a
 bounded, DOM-based view of the main document, not a complete accessibility-tree
 implementation. Complex iframe/shadow-DOM workflows may need raw CDP.
+
+### Recording PR demos
+
+PR videos should be slow enough to follow: leave **at least 1 second between
+visible actions**, including actions inside scripts or raw CDP calls, and aim
+for **10–30 seconds per clip** when possible. Add explicit pauses; waiting for a
+selector or navigation is not a pacing delay when it completes immediately.
+Hold the opening state and final result so reviewers can read them. Use longer
+pauses for important transitions, and split long workflows into focused clips
+rather than speeding them up.
+
+For example, with the login page already open, this sequence includes ten
+seconds of deliberate pauses:
+
+```sh
+ted browser record start
+sleep 2
+ted browser fill --label Email --value test@example.com
+sleep 4
+ted browser click --role button --name 'Sign in'
+ted browser wait --url-pattern '*/dashboard'
+sleep 4
+ted browser record stop
+```
+
+The recorder preserves elapsed time but does not automatically delay browser
+actions. Keep the pauses in the exported video; do not speed up playback or
+trim away the time needed to understand each step. Before attaching the video,
+check its duration using the `path` returned by `record stop`:
+
+```sh
+ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 /path/to/recording.mp4
+```
+
+Review the saved clip's pacing and visible outcome, and re-record it if it is
+rushed or unclear.
 
 ### Raw CDP escape hatch
 
