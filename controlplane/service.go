@@ -353,6 +353,49 @@ func (s *Service) agentsLocked(includeSettled bool, projectID string) []Agent {
 	})
 	return out
 }
+
+// AgentsPage requires positive page and pageSize values.
+func (s *Service) AgentsPage(includeSettled bool, projectID string, page, pageSize int64) ([]Agent, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	candidates := make([]*storedAgent, 0)
+	for _, a := range s.state.Agents {
+		if (!includeSettled && a.Agent.Settled) || (projectID != "" && a.Agent.ProjectID != projectID) {
+			continue
+		}
+		candidates = append(candidates, a)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Agent.UpdatedAt.Equal(candidates[j].Agent.UpdatedAt) {
+			return candidates[i].Agent.ID < candidates[j].Agent.ID
+		}
+		return candidates[i].Agent.UpdatedAt.After(candidates[j].Agent.UpdatedAt)
+	})
+
+	total := len(candidates)
+	// Check the page offset against the filtered count before multiplying. A
+	// very large, valid page is simply out of range, not an arithmetic error.
+	pageIndex := page - 1
+	if pageIndex > int64(total)/pageSize {
+		return []Agent{}, total
+	}
+	start64 := pageIndex * pageSize
+	if start64 >= int64(total) {
+		return []Agent{}, total
+	}
+	end64 := int64(total)
+	if pageSize <= int64(total)-start64 {
+		end64 = start64 + pageSize
+	}
+	start, end := int(start64), int(end64)
+	result := make([]Agent, 0, end-start)
+	for _, a := range candidates[start:end] {
+		result = append(result, copyJSON(a.Agent))
+	}
+	return result, total
+}
+
 func (s *Service) GetAgent(id string) (Agent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -629,25 +672,46 @@ func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 	if err != nil {
 		return Agent{}, err
 	}
-	if a.Agent.Settled == settled {
+	targets := []*storedAgent{a}
+	if settled {
+		for i := 0; i < len(targets); i++ {
+			for _, child := range s.state.Agents {
+				if child.Agent.ParentAgentID == targets[i].Agent.ID {
+					targets = append(targets, child)
+				}
+			}
+		}
+	}
+	changed := targets[:0]
+	for _, target := range targets {
+		if target.Agent.Settled != settled {
+			changed = append(changed, target)
+		}
+	}
+	if len(changed) == 0 {
 		return copyJSON(a.Agent), nil
 	}
 	before := copyJSON(s.state)
-	a.Agent.Settled = settled
-	a.Agent.Held = true
-	r := s.running[id]
-	if settled && r != nil {
-		a.Agent.State = "stopping"
+	for _, target := range changed {
+		target.Agent.Settled = settled
+		target.Agent.Held = true
+		if settled && s.running[target.Agent.ID] != nil {
+			target.Agent.State = "stopping"
+		}
+		s.eventLocked(target, "agent.updated", s.summaryLocked(target))
 	}
-	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
 	if err = s.commitLocked(before); err != nil {
 		return Agent{}, err
 	}
-	if settled && r != nil {
-		r.stopped = true
-		r.cancel()
-	} else if settled && s.instances[id] != nil {
-		_ = s.instances[id].Close()
+	if settled {
+		for _, target := range changed {
+			if r := s.running[target.Agent.ID]; r != nil {
+				r.stopped = true
+				r.cancel()
+			} else if instance := s.instances[target.Agent.ID]; instance != nil {
+				_ = instance.Close()
+			}
+		}
 	}
 	return copyJSON(a.Agent), nil
 }

@@ -45,21 +45,6 @@ async function seedFamily(page: Page) {
   return fixture;
 }
 
-async function settle(page: Page, title: string) {
-  const button = page.getByRole("button", {
-    name: `Settle chat: ${title}`,
-    exact: true,
-  });
-  await button.focus();
-  await button.click();
-  await expect(
-    page.getByRole("button", {
-      name: `Restore chat: ${title}`,
-      exact: true,
-    }),
-  ).toBeAttached();
-}
-
 test("agent families nest, collapse, navigate and follow inventory updates", async ({
   page,
 }, testInfo) => {
@@ -149,24 +134,6 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
     path: testInfo.outputPath("sidebar-agent-family-desktop.png"),
   });
   if (process.env.TED_WEB_RECORD) await page.waitForTimeout(1500);
-
-  // Settling one member is independent: it neither settles descendants nor
-  // removes a mixed active family from its root project.
-  await settle(page, "Child chat");
-  await expect(
-    grandchild.getByRole("button", {
-      name: "Settle chat: Grandchild chat",
-      exact: true,
-    }),
-  ).toBeAttached();
-  await settle(page, "Parent chat");
-  await expect(rootChildren).toBeVisible();
-  await expect(
-    grandchild.getByRole("button", {
-      name: "Settle chat: Grandchild chat",
-      exact: true,
-    }),
-  ).toBeAttached();
 
   await page.reload();
   await expect(rootToggle).toHaveAttribute("aria-expanded", "false");

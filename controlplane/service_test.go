@@ -467,7 +467,7 @@ func TestDeleteProjectWithSettledAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := s.CreateAgent(CreateAgentRequest{ProjectID: project.ID, ParentAgentID: a.ID}, "delete-key")
+	second, err := s.CreateAgent(CreateAgentRequest{ProjectID: project.ID}, "delete-key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -578,10 +578,6 @@ func TestDeleteProjectPreservesCrossProjectParentage(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertStatus(t, s.DeleteProject(project.ID), 409)
-	if _, err = s.SetSettled(child.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	assertStatus(t, s.DeleteProject(project.ID), 409)
 	persisted, err := loadState(s.dir)
 	if err != nil {
 		t.Fatal(err)
@@ -594,5 +590,71 @@ func TestDeleteProjectPreservesCrossProjectParentage(t *testing.T) {
 	}
 	if err = s.DeleteProject(project.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSettleDescendants(t *testing.T) {
+	s, p, project, root := serviceFixture(t)
+	create := func(parent string) Agent {
+		t.Helper()
+		a, err := s.CreateAgent(CreateAgentRequest{ProjectID: project.ID, ParentAgentID: parent}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	child := create(root.ID)
+	otherProject, err := s.CreateProject(CreateProjectRequest{Name: "other", Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	crossProject, err := s.CreateAgent(CreateAgentRequest{ProjectID: otherProject.ID, ParentAgentID: child.ID}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unrelated := create("")
+	for _, a := range []Agent{child, crossProject} {
+		if _, err := s.Submit(a.ID, "running", ""); err != nil {
+			t.Fatal(err)
+		}
+		awaitCall(t, p)
+		if _, err := s.Submit(a.ID, "queued", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.SetSettled(root.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []Agent{root, child, crossProject} {
+		awaitAgent(t, s, a.ID, func(a Agent) bool { return a.Settled && a.Held && a.State == "idle" })
+	}
+	other, err := s.GetAgent(unrelated.ID)
+	if err != nil || other.Settled || other.Held {
+		t.Fatalf("unrelated chat changed: %+v, %v", other, err)
+	}
+	noCall(t, p)
+	if _, err := s.SetSettled(child.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	restored, _ := s.GetAgent(child.ID)
+	descendant, _ := s.GetAgent(crossProject.ID)
+	if restored.Settled || !descendant.Settled {
+		t.Fatal("restore must affect only the requested chat")
+	}
+	// Repeating settlement must traverse an already-settled root.
+	if _, err := s.SetSettled(root.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	restored, _ = s.GetAgent(child.ID)
+	if !restored.Settled {
+		t.Fatal("restored child was not settled again")
+	}
+	cursor := restored.Cursor
+	if _, err := s.SetSettled(root.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	restored, _ = s.GetAgent(child.ID)
+	if restored.Cursor != cursor {
+		t.Fatal("duplicate settlement emitted another event")
 	}
 }
