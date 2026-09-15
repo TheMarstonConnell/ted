@@ -242,3 +242,71 @@ func TestDeletedAgentStopsSubscription(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentsPageRequestMetadataAndValidation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/agents" || r.URL.Query().Get("include_settled") != "true" ||
+			r.URL.Query().Get("page") != "2" || r.URL.Query().Get("page_size") != "3" ||
+			r.URL.Query().Get("project_id") != "project with spaces" {
+			t.Errorf("unexpected paged request: %s", r.URL.String())
+		}
+		w.Header().Set("X-Total-Count", "7")
+		_ = json.NewEncoder(w).Encode([]Snapshot{{ID: "a"}, {ID: "b"}, {ID: "c"}})
+	}))
+	defer server.Close()
+
+	result, total, err := New(server.URL).AgentsPage(context.Background(), "project with spaces", 2, 3)
+	if err != nil || total != 7 || len(result) != 3 || result[0].ID != "a" {
+		t.Fatalf("paged result: %+v total=%d err=%v", result, total, err)
+	}
+}
+
+func TestAgentsPageRejectsMissingOrInvalidMetadataAndOverflow(t *testing.T) {
+	missing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]Snapshot{{ID: "must not be accepted"}})
+	}))
+	defer missing.Close()
+	result, total, err := New(missing.URL).AgentsPage(context.Background(), "", 1, 1)
+	if err == nil || !strings.Contains(err.Error(), "X-Total-Count") || result != nil || total != 0 {
+		t.Fatalf("missing metadata: result=%+v total=%d err=%v", result, total, err)
+	}
+
+	invalid := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Total-Count", "not-a-count")
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer invalid.Close()
+	result, total, err = New(invalid.URL).AgentsPage(context.Background(), "", 1, 1)
+	if err == nil || !strings.Contains(err.Error(), "invalid X-Total-Count") || result != nil || total != 0 {
+		t.Fatalf("invalid metadata: result=%+v total=%d err=%v", result, total, err)
+	}
+
+	oversized := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Total-Count", "1")
+		_ = json.NewEncoder(w).Encode([]Snapshot{{ID: "a"}, {ID: "unexpected"}})
+	}))
+	defer oversized.Close()
+	result, total, err = New(oversized.URL).AgentsPage(context.Background(), "", 1, 1)
+	if err == nil || !strings.Contains(err.Error(), "expected 1") || result != nil || total != 1 {
+		t.Fatalf("oversized page: result=%+v total=%d err=%v", result, total, err)
+	}
+
+	var requests atomic.Int32
+	validation := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+	}))
+	defer validation.Close()
+	c := New(validation.URL)
+	for _, tc := range [][2]int{{0, 1}, {1, 0}, {-1, 1}} {
+		if _, _, err := c.AgentsPage(context.Background(), "", tc[0], tc[1]); err == nil {
+			t.Errorf("accepted invalid pagination %#v", tc)
+		}
+	}
+	maxInt := int(^uint(0) >> 1)
+	if _, _, err := c.AgentsPage(context.Background(), "", maxInt, 2); err == nil || !strings.Contains(err.Error(), "overflow") {
+		t.Errorf("overflow validation: %v", err)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("validation made %d requests", requests.Load())
+	}
+}

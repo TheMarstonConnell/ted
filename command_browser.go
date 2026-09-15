@@ -25,7 +25,14 @@ func newBrowserCommand(call browserCaller) *cobra.Command {
 	root.PersistentFlags().StringVar(&thread, "thread", "", "Thread ID (default TED_THREAD_ID or manual)")
 	root.PersistentFlags().DurationVar(&timeout, "timeout", 30*time.Second, "Operation timeout")
 	root.PersistentFlags().BoolVar(&isolated, "isolated", false, "Use a clean isolated session (choose before opening tabs)")
+	pagination := map[*cobra.Command]*listPagination{}
 	dispatch := func(cmd *cobra.Command, action string, params map[string]any) error {
+		page := pagination[cmd]
+		if page != nil {
+			if err := page.validate(); err != nil {
+				return err
+			}
+		}
 		if timeout <= 0 || timeout > 10*time.Minute {
 			return fmt.Errorf("timeout must be greater than zero and at most 10m")
 		}
@@ -54,6 +61,16 @@ func newBrowserCommand(call browserCaller) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if response.OK && page != nil && !page.all {
+			key := action
+			if action == "status" {
+				key = "projects"
+			}
+			response.Data, err = page.browserData(cmd, key, response.Data)
+			if err != nil {
+				return err
+			}
+		}
 		if err = json.NewEncoder(cmd.OutOrStdout()).Encode(response); err != nil {
 			return err
 		}
@@ -68,11 +85,18 @@ func newBrowserCommand(call browserCaller) *cobra.Command {
 	simple := func(parent *cobra.Command, use, short, action string) {
 		parent.AddCommand(&cobra.Command{Use: use, Short: short, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error { return dispatch(cmd, action, nil) }})
 	}
-	simple(root, "status", "Report browser status without starting Chrome", "status")
 	simple(root, "snapshot", "Get compact page content and interactive element references", "snapshot")
-	simple(root, "tabs", "List thread-owned tabs", "tabs")
-	simple(root, "console", "Get bounded browser console output", "console")
-	simple(root, "errors", "Get bounded browser errors", "errors")
+
+	for _, list := range []struct{ action, short string }{
+		{"status", "Report browser status without starting Chrome"},
+		{"tabs", "List thread-owned tabs"},
+		{"console", "List retained browser console output"},
+		{"errors", "List retained browser errors"},
+	} {
+		cmd := &cobra.Command{Use: list.action, Short: list.short, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return dispatch(cmd, list.action, nil) }}
+		pagination[cmd] = addListPagination(cmd)
+		root.AddCommand(cmd)
+	}
 	simple(root, "close", "Close this thread's tabs, preserving the project profile", "session-close")
 	root.AddCommand(&cobra.Command{Use: "open URL", Short: "Navigate to a URL", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		return dispatch(cmd, "open", map[string]any{"url": args[0]})

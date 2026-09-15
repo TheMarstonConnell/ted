@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -106,17 +107,22 @@ func newKey() string {
 	return hex.EncodeToString(b[:])
 }
 func (c *Client) request(ctx context.Context, method, path string, body, out any, key string) error {
+	_, err := c.requestWithHeaders(ctx, method, path, body, out, key)
+	return err
+}
+
+func (c *Client) requestWithHeaders(ctx context.Context, method, path string, body, out any, key string) (http.Header, error) {
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		reader = bytes.NewReader(data)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, reader)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -126,7 +132,7 @@ func (c *Client) request(ctx context.Context, method, path string, body, out any
 	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
@@ -134,15 +140,17 @@ func (c *Client) request(ctx context.Context, method, path string, body, out any
 			Error APIError `json:"error"`
 		}
 		if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&envelope); err != nil {
-			return fmt.Errorf("server HTTP %d", res.StatusCode)
+			return nil, fmt.Errorf("server HTTP %d", res.StatusCode)
 		}
 		envelope.Error.Status = res.StatusCode
-		return &envelope.Error
+		return nil, &envelope.Error
 	}
 	if out != nil {
-		return json.NewDecoder(res.Body).Decode(out)
+		if err := json.NewDecoder(res.Body).Decode(out); err != nil {
+			return nil, err
+		}
 	}
-	return nil
+	return res.Header, nil
 }
 func agentPath(id string) string { return "/v1/agents/" + url.PathEscape(id) }
 func (c *Client) Projects(ctx context.Context) ([]Project, error) {
@@ -175,6 +183,50 @@ func (c *Client) Agents(ctx context.Context, project string) ([]Snapshot, error)
 	}
 	err := c.request(ctx, "GET", path, nil, &result, "")
 	return result, err
+}
+
+// AgentsPage fetches one server-side page including settled agents.
+func (c *Client) AgentsPage(ctx context.Context, project string, page, pageSize int) ([]Snapshot, int, error) {
+	if page <= 0 || pageSize <= 0 {
+		return nil, 0, fmt.Errorf("page and page_size must be positive")
+	}
+	maxInt := int(^uint(0) >> 1)
+	if page-1 > maxInt/pageSize {
+		return nil, 0, fmt.Errorf("page and page_size overflow pagination offset")
+	}
+	query := url.Values{}
+	query.Set("include_settled", "true")
+	query.Set("page", strconv.Itoa(page))
+	query.Set("page_size", strconv.Itoa(pageSize))
+	if project != "" {
+		query.Set("project_id", project)
+	}
+	var result []Snapshot
+	headers, err := c.requestWithHeaders(ctx, "GET", "/v1/agents?"+query.Encode(), nil, &result, "")
+	if err != nil {
+		return result, 0, err
+	}
+	totalValue := headers.Get("X-Total-Count")
+	if totalValue == "" {
+		return nil, 0, fmt.Errorf("server response missing X-Total-Count; upgrade the server or use sessions --all")
+	}
+	total, err := strconv.Atoi(totalValue)
+	if err != nil || total < 0 {
+		return nil, 0, fmt.Errorf("invalid X-Total-Count response header %q", totalValue)
+	}
+	offset := (page - 1) * pageSize
+	expected := 0
+	if offset < total {
+		remaining := total - offset
+		expected = pageSize
+		if remaining < expected {
+			expected = remaining
+		}
+	}
+	if len(result) != expected {
+		return nil, total, fmt.Errorf("server returned %d agents for page, expected %d", len(result), expected)
+	}
+	return result, total, nil
 }
 func (c *Client) GetAgent(ctx context.Context, id string) (Snapshot, error) {
 	var result Snapshot

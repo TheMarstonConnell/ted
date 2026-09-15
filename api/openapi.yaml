@@ -228,10 +228,22 @@ paths:
   /v1/agents:
     get:
       operationId: ListAgents
-      description: ListAgents
+      description: >-
+        List agents. Without page or page_size, returns the legacy full array and
+        ordering. When either pagination parameter is supplied, an omitted page
+        defaults to 1 and an omitted page_size defaults to 25. Paginated results
+        are sorted by updated_at descending, then id ascending, and X-Total-Count
+        reports the matching total after filtering.
       responses:
         '200':
           description: Success
+          headers:
+            X-Total-Count:
+              description: Total number of agents matching the include_settled and project_id filters when pagination parameters are supplied.
+              schema:
+                type: integer
+                format: int64
+                minimum: 0
           content:
             application/json:
               schema:
@@ -258,6 +270,22 @@ paths:
         in: query
         required: false
         schema: *id010
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          default: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          default: 25
     post:
       operationId: CreateAgent
       description: Create an agent; optional prompt queues its first turn. Optional
