@@ -120,8 +120,18 @@ export async function workspace(page: Page) {
             emit(id, "agent.updated", { ...agents[id] });
           }
         } else {
-          agents[id].settled = body.settled;
-          inventory(id);
+          const targets = [agents[id]];
+          if (body.settled) {
+            for (let index = 0; index < targets.length; index++) {
+              Object.values(agents)
+                .filter((agent) => agent.parent_agent_id === targets[index].id)
+                .forEach((agent) => targets.push(agent));
+            }
+          }
+          targets.forEach((agent) => {
+            agent.settled = body.settled;
+            inventory(agent.id);
+          });
         }
       }
       if (operation === "workspace" && method === "PATCH") {

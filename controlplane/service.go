@@ -631,15 +631,9 @@ func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 	}
 	targets := []*storedAgent{a}
 	if settled {
-		children := make(map[string][]*storedAgent)
-		for _, child := range s.state.Agents {
-			children[child.Agent.ParentAgentID] = append(children[child.Agent.ParentAgentID], child)
-		}
-		seen := map[string]bool{id: true}
 		for i := 0; i < len(targets); i++ {
-			for _, child := range children[targets[i].Agent.ID] {
-				if !seen[child.Agent.ID] {
-					seen[child.Agent.ID] = true
+			for _, child := range s.state.Agents {
+				if child.Agent.ParentAgentID == targets[i].Agent.ID {
 					targets = append(targets, child)
 				}
 			}

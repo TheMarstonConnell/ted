@@ -132,23 +132,48 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
   });
   if (process.env.TED_WEB_RECORD) await page.waitForTimeout(1500);
 
-  // Settling one member is independent: it neither settles descendants nor
-  // removes a mixed active family from its root project.
   await settle(page, "Child chat");
   await expect(
     grandchild.getByRole("button", {
-      name: "Settle chat: Grandchild chat",
+      name: "Restore chat: Grandchild chat",
       exact: true,
     }),
   ).toBeAttached();
-  await settle(page, "Parent chat");
-  await expect(rootChildren).toBeVisible();
+  await child
+    .getByRole("button", { name: "Restore chat: Child chat", exact: true })
+    .click();
+  await expect(
+    child.getByRole("button", { name: "Settle chat: Child chat", exact: true }),
+  ).toBeAttached();
   await expect(
     grandchild.getByRole("button", {
-      name: "Settle chat: Grandchild chat",
+      name: "Restore chat: Grandchild chat",
       exact: true,
     }),
   ).toBeAttached();
+
+  const settleParent = page.getByRole("button", {
+    name: "Settle chat: Parent chat",
+    exact: true,
+  });
+  await settleParent.focus();
+  await settleParent.click();
+  await page
+    .getByRole("button", { name: "Settled chats", exact: true })
+    .click();
+  for (const title of [
+    "Parent chat",
+    "Child chat",
+    "Grandchild chat",
+    "Loose chat",
+  ]) {
+    await expect(
+      page.getByRole("button", {
+        name: `Restore chat: ${title}`,
+        exact: true,
+      }),
+    ).toBeAttached();
+  }
 });
 
 test("agent family controls and navigation fit the mobile drawer", async ({

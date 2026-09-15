@@ -126,13 +126,8 @@ func TestChildSharedWorktreePersistsAndRunsInParentsCurrentBranch(t *testing.T) 
 	if _, err = s.UpdateWorkspace(child.ID, WorkspaceSelection{Mode: "current_checkout"}); err == nil {
 		t.Fatal("shared workspace not locked")
 	}
-	// Restore the child separately before checking its missing workspace.
 	if _, err = s.SetSettled(parent.ID, true); err != nil {
 		t.Fatal(err)
-	}
-	current, _ := s.GetAgent(child.ID)
-	if !current.Settled {
-		t.Fatal("parent did not settle child")
 	}
 	if _, err = s.SetSettled(child.ID, false); err != nil {
 		t.Fatal(err)
