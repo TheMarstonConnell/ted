@@ -37,24 +37,32 @@ type pullRequestCacheEntry struct {
 	ready     chan struct{}
 }
 
+type repositoryLookup struct {
+	repository string
+	expiresAt  time.Time
+	ready      chan struct{}
+}
+
 type pullRequestResolver struct {
-	mu      sync.Mutex
-	cache   map[pullRequestCacheKey]*pullRequestCacheEntry
-	run     pullRequestCommand
-	now     func() time.Time
-	ttl     time.Duration
-	timeout time.Duration
-	limit   chan struct{}
+	mu                sync.Mutex
+	cache             map[pullRequestCacheKey]*pullRequestCacheEntry
+	repositoryLookups map[string]*repositoryLookup
+	run               pullRequestCommand
+	now               func() time.Time
+	ttl               time.Duration
+	timeout           time.Duration
+	limit             chan struct{}
 }
 
 func newPullRequestResolver() *pullRequestResolver {
 	return &pullRequestResolver{
-		cache:   map[pullRequestCacheKey]*pullRequestCacheEntry{},
-		run:     runWorkspaceCommand,
-		now:     time.Now,
-		ttl:     pullRequestCacheTTL,
-		timeout: pullRequestCommandTimeout,
-		limit:   make(chan struct{}, pullRequestConcurrency),
+		cache:             map[pullRequestCacheKey]*pullRequestCacheEntry{},
+		repositoryLookups: map[string]*repositoryLookup{},
+		run:               runWorkspaceCommand,
+		now:               time.Now,
+		ttl:               pullRequestCacheTTL,
+		timeout:           pullRequestCommandTimeout,
+		limit:             make(chan struct{}, pullRequestConcurrency),
 	}
 }
 
@@ -75,7 +83,13 @@ func (r *pullRequestResolver) currentBranch(ctx context.Context, directory strin
 }
 
 func (r *pullRequestResolver) lookup(ctx context.Context, repositoryRoot, directory, branch string) int {
-	key := pullRequestCacheKey{repository: filepath.Clean(repositoryRoot), branch: branch}
+	lookupCtx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
+	repository := r.repository(lookupCtx, repositoryRoot)
+	if repository == "" {
+		return 0
+	}
+	key := pullRequestCacheKey{repository: repository, branch: branch}
 	now := r.now()
 	r.mu.Lock()
 	for existingKey, entry := range r.cache {
@@ -106,12 +120,10 @@ func (r *pullRequestResolver) lookup(ctx context.Context, repositoryRoot, direct
 	r.cache[key] = entry
 	r.mu.Unlock()
 
-	lookupCtx, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
 	number := 0
 	select {
 	case r.limit <- struct{}{}:
-		resolved, err := r.lookupUncached(lookupCtx, repositoryRoot, directory, branch)
+		resolved, err := r.lookupUncached(lookupCtx, directory, repository, branch)
 		<-r.limit
 		if err == nil {
 			number = resolved
@@ -131,11 +143,64 @@ func (r *pullRequestResolver) lookup(ctx context.Context, repositoryRoot, direct
 	return number
 }
 
-func (r *pullRequestResolver) lookupUncached(ctx context.Context, repositoryRoot, directory, branch string) (int, error) {
-	repository, err := r.githubRepository(ctx, repositoryRoot)
-	if err != nil {
-		return 0, err
+func (r *pullRequestResolver) repository(ctx context.Context, directory string) string {
+	path := filepath.Clean(directory)
+	now := r.now()
+	r.mu.Lock()
+	if entry := r.repositoryLookups[path]; entry != nil {
+		if entry.ready == nil && !now.Before(entry.expiresAt) {
+			delete(r.repositoryLookups, path)
+		} else {
+			ready := entry.ready
+			if ready == nil {
+				repository := entry.repository
+				r.mu.Unlock()
+				return repository
+			}
+			r.mu.Unlock()
+			select {
+			case <-ready:
+				r.mu.Lock()
+				repository := entry.repository
+				r.mu.Unlock()
+				return repository
+			case <-ctx.Done():
+				return ""
+			}
+		}
 	}
+	entry := &repositoryLookup{ready: make(chan struct{})}
+	r.repositoryLookups[path] = entry
+	r.mu.Unlock()
+
+	repository := ""
+	select {
+	case r.limit <- struct{}{}:
+		resolved, err := r.githubRepository(ctx, directory)
+		<-r.limit
+		if err == nil {
+			repository = resolved
+		}
+	case <-ctx.Done():
+	}
+
+	r.mu.Lock()
+	if r.repositoryLookups[path] == entry {
+		ready := entry.ready
+		entry.repository = repository
+		entry.ready = nil
+		if repository == "" {
+			entry.expiresAt = r.now().Add(r.ttl)
+		} else {
+			delete(r.repositoryLookups, path)
+		}
+		close(ready)
+	}
+	r.mu.Unlock()
+	return repository
+}
+
+func (r *pullRequestResolver) lookupUncached(ctx context.Context, directory, repository, branch string) (int, error) {
 	const fields = "number,headRefName,state,createdAt,updatedAt,closedAt,mergedAt,headRepository,headRepositoryOwner,isCrossRepository"
 	output, err := r.run(ctx, directory, "gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "100", "--json", fields, "--repo", repository)
 	if err != nil {

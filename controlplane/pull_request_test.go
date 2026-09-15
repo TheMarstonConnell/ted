@@ -106,6 +106,79 @@ func TestPullRequestLookupUsesExactBranchAndRepository(t *testing.T) {
 	}
 }
 
+func TestPullRequestLookupKeysCacheByResolvedRepository(t *testing.T) {
+	remotes := map[string]string{
+		"/clone-a": "https://github.com/acme/app.git",
+		"/clone-b": "git@github.com:acme/app.git",
+	}
+	var ghCalls atomic.Int32
+	resolver := testPullRequestResolver(func(_ context.Context, directory, name string, _ ...string) ([]byte, error) {
+		if name == "git" {
+			return []byte(remotes[directory]), nil
+		}
+		ghCalls.Add(1)
+		return []byte(`[{"number":42,"headRefName":"feature","state":"OPEN","headRepository":{"nameWithOwner":"acme/app"}}]`), nil
+	})
+	for _, root := range []string{"/clone-a", "/clone-b"} {
+		if number := resolver.lookup(context.Background(), root, root, "feature"); number != 42 {
+			t.Fatalf("lookup for %s = %d; want 42", root, number)
+		}
+	}
+	if calls := ghCalls.Load(); calls != 1 {
+		t.Fatalf("gh calls across equivalent clones = %d; want 1", calls)
+	}
+}
+
+func TestPullRequestLookupDoesNotReuseCacheAfterOriginChanges(t *testing.T) {
+	repository := "acme/first"
+	resolver := testPullRequestResolver(func(_ context.Context, _ string, name string, args ...string) ([]byte, error) {
+		if name == "git" {
+			return []byte("https://github.com/" + repository + ".git"), nil
+		}
+		want := "41"
+		if repository == "acme/second" {
+			want = "42"
+		}
+		if args[len(args)-1] != repository {
+			t.Fatalf("gh repository = %q; want %q", args[len(args)-1], repository)
+		}
+		return []byte(`[{"number":` + want + `,"headRefName":"feature","state":"OPEN","headRepository":{"nameWithOwner":"` + repository + `"}}]`), nil
+	})
+	if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 41 {
+		t.Fatalf("first repository lookup = %d; want 41", number)
+	}
+	repository = "acme/second"
+	if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 42 {
+		t.Fatalf("changed repository lookup = %d; want 42", number)
+	}
+}
+
+func TestPullRequestLookupCachesOriginFailures(t *testing.T) {
+	var gitCalls atomic.Int32
+	resolver := testPullRequestResolver(func(_ context.Context, _ string, name string, _ ...string) ([]byte, error) {
+		if name != "git" {
+			t.Fatalf("unexpected command %q after origin failure", name)
+		}
+		gitCalls.Add(1)
+		return nil, errors.New("origin unavailable")
+	})
+	clock := time.Unix(1000, 0)
+	resolver.now = func() time.Time { return clock }
+	for range 2 {
+		if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 0 {
+			t.Fatalf("origin failure = %d; want 0", number)
+		}
+	}
+	if calls := gitCalls.Load(); calls != 1 {
+		t.Fatalf("git calls for cached origin failure = %d; want 1", calls)
+	}
+	clock = clock.Add(pullRequestCacheTTL + time.Second)
+	resolver.lookup(context.Background(), "/repo", "/repo", "feature")
+	if calls := gitCalls.Load(); calls != 2 {
+		t.Fatalf("git calls after origin failure expiry = %d; want 2", calls)
+	}
+}
+
 func TestPullRequestLookupDeduplicatesAndCachesFailures(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
