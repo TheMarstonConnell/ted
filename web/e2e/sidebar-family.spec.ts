@@ -79,6 +79,23 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
   });
 
   await expect(root.getByRole("link")).toHaveAttribute("aria-current", "page");
+  await expect(child).not.toBeVisible();
+  await expect(grandchild).not.toBeVisible();
+  await root.getByRole("link").hover();
+  const rootToggle = root.getByRole("button", {
+    name: /child chats for Parent chat/,
+  });
+  await expect(rootToggle).toHaveAttribute("aria-expanded", "false");
+  await rootToggle.click();
+  await expect(child).toBeVisible();
+  await expect(grandchild).not.toBeVisible();
+  await child.getByRole("link").hover();
+  await child
+    .getByRole("button", {
+      name: "Expand child chats for Child chat",
+      exact: true,
+    })
+    .click();
   await expect(rootChildren.locator('[data-agent-id="child"]')).toBeVisible();
   await expect(
     childChildren.locator('[data-agent-id="grandchild"]'),
@@ -116,6 +133,13 @@ test("agent families nest, collapse, navigate and follow inventory updates", asy
     })
     .click();
 
+  await child.getByRole("link").hover();
+  await child
+    .getByRole("button", {
+      name: "Expand child chats for Child chat",
+      exact: true,
+    })
+    .click();
   await grandchild.getByRole("link").click();
   await expect(page).toHaveURL(/\/agents\/grandchild$/);
   await expect(grandchild.getByRole("link")).toHaveAttribute(
@@ -173,10 +197,12 @@ test("child toggles reveal on the right without moving settle or switching chats
   const childToggle = child.getByRole("button", {
     name: /child chats for Child chat/,
   });
-  for (const action of [toggle, settleButton, childToggle]) {
+  for (const action of [toggle, settleButton]) {
     await expect(action).toHaveCSS("width", "0px");
     await expect(action).toHaveCSS("opacity", "0");
   }
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(child).not.toBeVisible();
   const before = (await link.boundingBox())!;
   expect(before.width).toBe((await root.boundingBox())!.width);
   await page.screenshot({
@@ -189,7 +215,7 @@ test("child toggles reveal on the right without moving settle or switching chats
     await expect(action).toHaveCSS("width", "32px");
     await expect(action).toHaveCSS("opacity", "1");
   }
-  await expect(childToggle).toHaveCSS("width", "0px");
+  await expect(child).not.toBeVisible();
   await expect
     .poll(async () => (await link.boundingBox())!.width)
     .toBeCloseTo(before.width - 80, 0);
@@ -207,6 +233,13 @@ test("child toggles reveal on the right without moving settle or switching chats
   await page.screenshot({
     path: testInfo.outputPath("family-actions-hover.png"),
   });
+  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(750);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(child).toBeVisible();
+  await expect(childToggle).toHaveCSS("width", "0px");
+  await expect(childToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator('[data-agent-id="grandchild"]')).not.toBeVisible();
   if (process.env.TED_WEB_RECORD) await page.waitForTimeout(750);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -257,6 +290,30 @@ test("child toggles reveal on the right without moving settle or switching chats
   ).toBeLessThan(0.001);
 });
 
+test("inventory updates and reloads do not automatically open child chats", async ({
+  page,
+}) => {
+  const fixture = await seedFamily(page);
+  await page.goto("/agents/child");
+  const root = page.locator('[data-agent-id="root"]');
+  const toggle = root.getByRole("button", {
+    name: "Expand child chats for Parent chat",
+    exact: true,
+  });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  fixture.updateAgent("loose", { parent_agent_id: "root" });
+  await expect(page.getByText("Misc", { exact: true })).toHaveCount(0);
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator('[data-agent-id="loose"]')).not.toBeVisible();
+  await root.getByRole("link").hover();
+  await toggle.click();
+  await expect(page.locator('[data-agent-id="loose"]')).toBeVisible();
+  await page.reload();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator('[data-agent-id="child"]')).not.toBeVisible();
+  await expect(page).toHaveURL(/\/agents\/child$/);
+});
+
 test.describe("touch family controls", () => {
   test.use({ hasTouch: true });
 
@@ -270,7 +327,7 @@ test.describe("touch family controls", () => {
     const drawer = page.getByRole("dialog", { name: "Workspace", exact: true });
     const child = drawer.locator('[data-agent-id="child"]');
     const toggle = drawer.getByRole("button", {
-      name: "Collapse child chats for Parent chat",
+      name: /child chats for Parent chat/,
       exact: true,
     });
     await expect(toggle).toBeVisible();
@@ -290,7 +347,16 @@ test.describe("touch family controls", () => {
     const settleBox = (await settleButton.boundingBox())!;
     expect(toggleBox.x).toBeGreaterThanOrEqual(linkBox.x + linkBox.width);
     expect(settleBox.x).toBeGreaterThanOrEqual(toggleBox.x + toggleBox.width);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(child).not.toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("sidebar-family-mobile-default-collapsed.png"),
+    });
+    await toggle.tap();
     await expect(child).toBeVisible();
+    await expect(
+      drawer.locator('[data-agent-id="grandchild"]'),
+    ).not.toBeVisible();
     const bounds = (await child.boundingBox())!;
     expect(bounds.x).toBeGreaterThanOrEqual(0);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);

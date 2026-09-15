@@ -79,7 +79,7 @@ export function AgentLink({
   const unread = !viewed && isUnread(agent, readPending[agent.id]);
   const children = childrenByParent.get(agent.id) || [];
   const hasChildren = children.length > 0;
-  const [childrenOpen, setChildrenOpen] = useState(true);
+  const [childrenOpen, setChildrenOpen] = useState(false);
   const running = !agent.settled && !agent.held && agent.state === "running";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
