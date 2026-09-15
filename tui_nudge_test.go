@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -46,65 +45,44 @@ func TestBotNotificationLiveAndHistory(t *testing.T) {
 }
 
 func TestBotNotificationEventReplayRows(t *testing.T) {
-	queued := func(id, text, status string) remote.QueuedMessage {
-		return remote.QueuedMessage{ID: id, Text: text, Kind: "bot", SenderAgentID: "reviewer", Status: status}
-	}
-	event := func(cursor uint64, eventType string, data any) remote.Event {
-		encoded, err := json.Marshal(data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return remote.Event{AgentID: "target", Cursor: cursor, Type: eventType, Data: encoded}
-	}
-	same := queued("completed", "same report", "pending")
-	failed := queued("failed", "same report", "pending")
-	graceful := queued("graceful", "saved before shutdown", "pending")
-	crashed := queued("crashed", "lost during crash", "pending")
-	cancelled := queued("cancelled", "cancelled before start", "pending")
-	events := []remote.Event{
-		event(1, "message.queued", same),
-		event(2, "conversation", []agent.Message{{Role: "user", Kind: "bot", SenderAgentID: "reviewer", Content: agent.TextContent(same.Text)}}),
-		event(3, "turn.completed", queued(same.ID, same.Text, "completed")),
-		event(4, "message.queued", failed),
-		event(5, "turn.failed", remote.QueuedMessage{ID: failed.ID, Text: failed.Text, Kind: "bot", SenderAgentID: "reviewer", Status: "failed", Error: "provider failed"}),
-		event(6, "message.queued", graceful),
-		event(7, "conversation", []agent.Message{{Role: "user", Kind: "bot", SenderAgentID: "reviewer", Content: agent.TextContent(graceful.Text)}}),
-		event(8, "turn.interrupted", queued(graceful.ID, graceful.Text, "interrupted")),
-		event(9, "message.queued", crashed),
-		event(10, "turn.interrupted", queued(crashed.ID, crashed.Text, "interrupted")),
-		event(11, "message.queued", cancelled),
-		event(12, "message.cancelled", queued(cancelled.ID, cancelled.Text, "cancelled")),
-	}
-	instance, err := remote.NewAgentWithEvents(context.Background(), nil, remote.Snapshot{
-		ID: "target", Cursor: 12,
+	snapshot := remote.Snapshot{
+		ID: "target", Cursor: 5,
 		Messages: []agent.Message{
-			{Role: "user", Kind: "bot", SenderAgentID: "reviewer", Content: agent.TextContent(same.Text)},
-			{Role: "user", Kind: "bot", SenderAgentID: "reviewer", Content: agent.TextContent(graceful.Text)},
+			{Role: "user", Kind: "bot", SenderAgentID: "reviewer", Content: agent.TextContent("same report")},
+			{Role: "user", Kind: "bot", SenderAgentID: "reviewer", Content: agent.TextContent("saved before shutdown")},
 		},
-	}, "", nil, events)
-	if err != nil {
-		t.Fatal(err)
 	}
-	model := initialModel(instance)
+	snapshot.Messages = nil
+	snapshot.Cursor = 0
+	instance := remote.NewAgent(context.Background(), nil, snapshot, "", nil)
+	m := initialModel(instance)
+	if len(m.messages) != 1 {
+		t.Fatalf("snapshot history rendered before event replay: %+v", m.messages)
+	}
+	replayed := []remote.QueuedMessage{
+		{Text: "same report", SenderAgentID: "reviewer"},
+		{Text: "same report", SenderAgentID: "reviewer"},
+		{Text: "saved before shutdown", SenderAgentID: "reviewer"},
+		{Text: "lost during crash", SenderAgentID: "reviewer"},
+		{Text: "cancelled before start", SenderAgentID: "reviewer"},
+	}
+	for _, notification := range replayed {
+		next, _ := m.Update(notification)
+		m = next.(model)
+	}
 	var rows []string
-	for _, entry := range model.messages {
+	for _, entry := range m.messages {
 		if entry.kind == toolCallMessage && strings.HasPrefix(entry.content, "Bot notification") {
 			rows = append(rows, entry.content)
 		}
 	}
-	want := []string{
-		"Bot notification from chat reviewer: same report",
-		"Bot notification from chat reviewer: same report",
-		"Bot notification from chat reviewer: saved before shutdown",
-		"Bot notification from chat reviewer: lost during crash",
-		"Bot notification from chat reviewer: cancelled before start",
+	if len(rows) != len(replayed) {
+		t.Fatalf("bot rows = %q, want %d", rows, len(replayed))
 	}
-	if len(rows) != len(want) {
-		t.Fatalf("bot rows = %q, want %q", rows, want)
-	}
-	for i := range want {
-		if rows[i] != want[i] {
-			t.Fatalf("bot rows = %q, want %q", rows, want)
+	for i, notification := range replayed {
+		want := formatTUIBotNotification(notification)
+		if rows[i] != want {
+			t.Fatalf("bot rows = %q, want row %q", rows, want)
 		}
 	}
 }

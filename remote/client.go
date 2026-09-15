@@ -213,37 +213,6 @@ func (c *Client) GetAgent(ctx context.Context, id string) (Snapshot, error) {
 	return result, err
 }
 
-type eventPage struct {
-	Events []Event `json:"events"`
-}
-
-// EventsThrough returns a gap-free prefix capped at an observed snapshot cursor.
-func (c *Client) EventsThrough(ctx context.Context, id string, through uint64) ([]Event, error) {
-	var events []Event
-	for cursor := uint64(0); cursor < through; {
-		var page eventPage
-		path := agentPath(id) + "/events?after=" + strconv.FormatUint(cursor, 10) + "&limit=1000"
-		if err := c.request(ctx, "GET", path, nil, &page, ""); err != nil {
-			return nil, err
-		}
-		advanced := false
-		for _, event := range page.Events {
-			if event.Cursor > through {
-				break
-			}
-			if event.AgentID != id || event.Cursor != cursor+1 {
-				return nil, fmt.Errorf("invalid event replay at cursor %d", event.Cursor)
-			}
-			events = append(events, event)
-			cursor = event.Cursor
-			advanced = true
-		}
-		if !advanced {
-			return nil, fmt.Errorf("event replay ended at cursor %d, want %d", cursor, through)
-		}
-	}
-	return events, nil
-}
 func (c *Client) CreateAgent(ctx context.Context, project string, workspace ...WorkspaceSelection) (Snapshot, error) {
 	if len(workspace) > 1 {
 		return Snapshot{}, fmt.Errorf("only one workspace selection may be specified")

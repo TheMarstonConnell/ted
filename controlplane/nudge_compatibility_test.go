@@ -26,6 +26,9 @@ func TestUserSubmissionKindPreservesLegacyReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if second.Kind != "" {
+		t.Fatalf("explicit user kind was not normalized: %+v", second)
+	}
 	same, err = s.Submit(a.ID, "explicit user", "explicit-key")
 	if err != nil || same.ID != second.ID {
 		t.Fatalf("omitted user kind must reuse explicit receipt: %+v %v", same, err)

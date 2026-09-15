@@ -693,7 +693,7 @@ func TestMixedUserBotQueueFIFOAndAttribution(t *testing.T) {
 	if len(done.Queue) != 3 || done.Queue[0].ID != first.ID || done.Queue[1].ID != bot.ID || done.Queue[2].ID != user.ID {
 		t.Fatalf("queue order: %+v", done.Queue)
 	}
-	if done.Queue[1].Kind != "bot" || done.Queue[1].SenderAgentID != "unknown-script-source" || done.Queue[2].Kind != "user" {
+	if done.Queue[1].Kind != "bot" || done.Queue[1].SenderAgentID != "unknown-script-source" || done.Queue[2].Kind != "" {
 		t.Fatalf("queue metadata: %+v", done.Queue)
 	}
 	if len(done.Messages) < 6 {

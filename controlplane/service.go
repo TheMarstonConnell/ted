@@ -561,9 +561,12 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 	if err = validateSubmitMessage(req); err != nil {
 		return QueuedMessage{}, err
 	}
+	if req.Kind == "user" {
+		req.Kind = ""
+	}
 	scope := "message:" + id + ":" + key
 	hash := fingerprint(req)
-	if req.Kind == "" || req.Kind == "user" {
+	if req.Kind == "" {
 		hash = fingerprint(req.Text)
 	}
 	if key != "" {

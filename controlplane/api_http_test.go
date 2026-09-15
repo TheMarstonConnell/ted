@@ -670,8 +670,8 @@ func TestHTTPSubmitMessageKindsAndValidation(t *testing.T) {
 		t.Fatalf("bot metadata missing: %+v", bot)
 	}
 	user := decodeHTTP[QueuedMessage](t, f.request("POST", base, `{"text":"explicit","kind":"user"}`, "user", 202))
-	if user.Kind != "user" || user.SenderAgentID != "" {
-		t.Fatalf("user metadata changed: %+v", user)
+	if user.Kind != "" || user.SenderAgentID != "" {
+		t.Fatalf("explicit user kind was not normalized: %+v", user)
 	}
 	for _, body := range []string{
 		`{"text":"bad","kind":"system"}`,

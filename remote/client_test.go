@@ -325,33 +325,3 @@ func TestAgentsPageLegacyRejectionGuidance(t *testing.T) {
 		})
 	}
 }
-
-func TestEventsThroughStopsAtSnapshotCursorAcrossPages(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		if r.URL.Path != "/v1/agents/a/events" || r.URL.Query().Get("limit") != "1000" {
-			t.Errorf("request = %s", r.URL.String())
-		}
-		after := r.URL.Query().Get("after")
-		var events []Event
-		switch after {
-		case "0":
-			events = []Event{{AgentID: "a", Cursor: 1, Type: "agent.created"}}
-		case "1":
-			events = []Event{
-				{AgentID: "a", Cursor: 2, Type: "agent.updated"},
-				{AgentID: "a", Cursor: 3, Type: "agent.updated"},
-			}
-		default:
-			t.Errorf("unexpected cursor %q", after)
-		}
-		_ = json.NewEncoder(w).Encode(eventPage{Events: events})
-	}))
-	defer server.Close()
-
-	events, err := New(server.URL).EventsThrough(context.Background(), "a", 2)
-	if err != nil || len(events) != 2 || events[0].Cursor != 1 || events[1].Cursor != 2 || requests.Load() != 2 {
-		t.Fatalf("events=%+v requests=%d err=%v", events, requests.Load(), err)
-	}
-}
