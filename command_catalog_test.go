@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -108,5 +109,96 @@ func TestCatalogMultipleProviders(t *testing.T) {
 		if out.String() != want.String() {
 			t.Fatalf("models for %q = %q, want %q", provider, out.String(), want.String())
 		}
+	}
+}
+
+type paginationCatalogProvider struct {
+	agent.Provider
+	name string
+}
+
+func (p paginationCatalogProvider) Name() string { return p.name }
+func (p paginationCatalogProvider) ListModels() []agent.ModelInfo {
+	var models []agent.ModelInfo
+	for i := 1; i <= 32; i++ {
+		models = append(models, agent.ModelInfo{ID: fmt.Sprintf("model-%02d", i), Provider: p.name, Efforts: []agent.Effort{agent.EffortLow, agent.EffortMedium, agent.EffortHigh}})
+	}
+	return models
+}
+
+func TestCatalogPagination(t *testing.T) {
+	load := func() (*agent.Agent, error) {
+		return agent.NewAgent(nil, []agent.Provider{paginationCatalogProvider{name: "a"}, paginationCatalogProvider{name: "b"}}), nil
+	}
+	for _, tc := range []struct {
+		name                      string
+		make                      func(catalogAgentLoader) *cobra.Command
+		args                      []string
+		count                     int
+		first, last, notice, next string
+	}{
+		{"default", newModelsCommand, nil, 25, "a/model-01", "a/model-25", "Showing 1–25 of 64 models.", "ted models --page 2"},
+		{"filtered second page", newModelsCommand, []string{"--provider", "b", "--page", "2", "--page-size", "10"}, 10, "b/model-11", "b/model-20", "Showing 11–20 of 32 models.", "ted models --page-size 10 --provider b --page 3"},
+		{"last page", newModelsCommand, []string{"--provider", "b", "--page", "4", "--page-size", "10"}, 2, "b/model-31", "b/model-32", "Showing 31–32 of 32 models.", ""},
+		{"past end", newModelsCommand, []string{"--page", "100"}, 0, "", "", "No results on page 100 (64 models total).", ""},
+		{"all", newModelsCommand, []string{"--all"}, 64, "a/model-01", "b/model-32", "", ""},
+		{"providers", newProvidersCommand, []string{"--page-size", "1"}, 1, "a", "a", "Showing 1–1 of 2 providers.", "ted providers --page-size 1 --page 2"},
+		{"efforts", newEffortsCommand, []string{"a/model-01", "--page-size", "1", "--page", "2"}, 1, "medium", "medium", "Showing 2–2 of 3 efforts.", "ted efforts a/model-01 --page-size 1 --page 3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := tc.make(load)
+			var out, notices bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&notices)
+			cmd.SetArgs(tc.args)
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Fields(out.String())
+			if len(lines) != tc.count {
+				t.Fatalf("got %d rows: %s", len(lines), out.String())
+			}
+			if tc.count > 0 && (lines[0] != tc.first || lines[len(lines)-1] != tc.last) {
+				t.Fatal(lines)
+			}
+			wantNotice := tc.notice
+			if wantNotice != "" {
+				wantNotice += "\n"
+			}
+			if tc.next != "" {
+				wantNotice += "Next: " + tc.next + "\n"
+			}
+			if notices.String() != wantNotice {
+				t.Fatalf("notices: %q, want %q", notices.String(), wantNotice)
+			}
+		})
+	}
+}
+
+func TestEffortsEmptyInventoryPagination(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		flags       []string
+		out, notice string
+	}{
+		{"default", nil, "Model \"openrouter/meta/muse-spark-1.3-contributor\" does not expose configurable effort.\n", ""},
+		{"all", []string{"--all"}, "Model \"openrouter/meta/muse-spark-1.3-contributor\" does not expose configurable effort.\n", ""},
+		{"past end", []string{"--page", "2"}, "", "No results on page 2 (0 efforts total).\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newEffortsCommand(func() (*agent.Agent, error) {
+				return agent.NewAgent(nil, []agent.Provider{agent.NewOpenRouterProvider("")}), nil
+			})
+			var out, notice bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&notice)
+			cmd.SetArgs(append([]string{"openrouter/meta/muse-spark-1.3-contributor"}, tc.flags...))
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != tc.out || notice.String() != tc.notice {
+				t.Fatalf("stdout=%q stderr=%q", out.String(), notice.String())
+			}
+		})
 	}
 }

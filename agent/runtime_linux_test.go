@@ -47,18 +47,25 @@ func TestTurnCancellationKillsBashProcessGroup(t *testing.T) {
 	if err := awaitTurn(t, done); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	// A killed orphan may remain a zombie until init reaps it. It must not be
-	// running when TurnContext returns, nor may the direct shell remain unreaped.
+	// SIGKILL delivery is asynchronous for orphaned descendants; cmd.Wait only
+	// reaps the direct shell. Allow the child to finish its kernel exit path.
 	for i, pid := range pids {
-		data, err := os.ReadFile(fmt.Sprintf("/proc/%s/stat", pid))
-		if procStatProcessGone(err) {
-			continue
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !procStatProcessExited(string(data), i > 0) {
-			t.Fatalf("process %s still running after cancellation: %s", pid, data)
+		deadline := time.Now().Add(time.Second)
+		for {
+			data, err := os.ReadFile(fmt.Sprintf("/proc/%s/stat", pid))
+			if procStatProcessGone(err) {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if procStatProcessExited(string(data), i > 0) {
+				break
+			}
+			if i == 0 || time.Now().After(deadline) {
+				t.Fatalf("process %s still running after cancellation: %s", pid, data)
+			}
+			time.Sleep(time.Millisecond)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(dir, "executed")); !errors.Is(err, os.ErrNotExist) {

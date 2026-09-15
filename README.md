@@ -87,7 +87,7 @@ agents. Chats use the current checkout or an isolated worktree according to the
 project defaults and startup flags; see [chat workspaces](docs/workspaces.md).
 
 ```sh
-ted sessions                 # agents on the running local server
+ted sessions                 # newest 25 server sessions (including settled)
 ted tui --continue           # latest unsettled agent in this directory's project
 ted tui --resume <agent-id>   # specific server agent
 ted tui --cwd /path/to/repo   # select a directory without changing your shell cwd
@@ -151,6 +151,40 @@ when a completion updates the snapshot. Embedded applications using OpenRouter
 can call `LoadModelMetadata(ctx)` with a bounded context to populate capacities;
 provider construction itself does not perform network requests.
 
+### Paginated command output
+
+`sessions`, `models`, `providers`, `efforts`, and the browser lists (`status`,
+`tabs`, `console`, `errors`) show **25 results per page** by default, including
+when piped or run by an agent. Use the same flags on each:
+
+```sh
+ted sessions                     # Page 1, newest sessions first
+ted sessions --page 2             # Next 25 sessions
+ted sessions --page-size 50       # Larger page
+ted sessions --all                # Explicitly list everything
+ted models --provider codex --page-size 5 --page 2
+```
+
+Pages start at 1; `--page` and `--page-size` must be positive integers. `--all`
+cannot be combined with either paging flag. An out-of-range page is empty, not
+an error. Text lists show a range and a copyable next-page command on stderr when
+there are additional pages, leaving stdout for the results. Filters apply before
+pagination. Scripts that previously expected complete lists should add `--all`.
+
+Sessions are paginated by the server, sorted by update time (newest first), with
+ID as the tie-breaker. This requires an updated server; `--all` also works with
+older servers. Pages reflect the current list rather than a frozen snapshot:
+new or updated sessions can move between pages between requests.
+
+`browser status` paginates its project list while retaining daemon-status fields.
+Browser lists retain their JSON response envelope and list fields, with a
+`data.pagination` object containing `page`, `page_size`, `total`, and `has_more`.
+When another page exists, it also includes `next_page` and `next_command`.
+`--all` returns the original full response without pagination metadata. Browser
+pagination limits CLI output; it does not change how the daemon collects projects
+and tabs or its bounded console/error buffers. `--all` on logs means all **retained** events,
+not unlimited history. CDP event listening keeps its existing `--limit` flag.
+
 ### Discover providers, models, and efforts
 
 List model IDs available through your configured providers without starting the TUI:
@@ -166,8 +200,9 @@ go run . providers
 go run . models --provider codex
 ```
 
-Without `--provider` (or with an empty value), `models` lists all configured
-providers' models. Unknown or unconfigured provider names return an error.
+Without `--provider` (or with an empty value), `models` lists models across all
+configured providers, one page at a time. Unknown or unconfigured provider names
+return an error.
 `providers` prints one configured provider name per line.
 
 List reasoning effort options for a specific model:

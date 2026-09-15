@@ -353,6 +353,49 @@ func (s *Service) agentsLocked(includeSettled bool, projectID string) []Agent {
 	})
 	return out
 }
+
+// AgentsPage requires positive page and pageSize values.
+func (s *Service) AgentsPage(includeSettled bool, projectID string, page, pageSize int64) ([]Agent, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	candidates := make([]*storedAgent, 0)
+	for _, a := range s.state.Agents {
+		if (!includeSettled && a.Agent.Settled) || (projectID != "" && a.Agent.ProjectID != projectID) {
+			continue
+		}
+		candidates = append(candidates, a)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Agent.UpdatedAt.Equal(candidates[j].Agent.UpdatedAt) {
+			return candidates[i].Agent.ID < candidates[j].Agent.ID
+		}
+		return candidates[i].Agent.UpdatedAt.After(candidates[j].Agent.UpdatedAt)
+	})
+
+	total := len(candidates)
+	// Check the page offset against the filtered count before multiplying. A
+	// very large, valid page is simply out of range, not an arithmetic error.
+	pageIndex := page - 1
+	if pageIndex > int64(total)/pageSize {
+		return []Agent{}, total
+	}
+	start64 := pageIndex * pageSize
+	if start64 >= int64(total) {
+		return []Agent{}, total
+	}
+	end64 := int64(total)
+	if pageSize <= int64(total)-start64 {
+		end64 = start64 + pageSize
+	}
+	start, end := int(start64), int(end64)
+	result := make([]Agent, 0, end-start)
+	for _, a := range candidates[start:end] {
+		result = append(result, copyJSON(a.Agent))
+	}
+	return result, total
+}
+
 func (s *Service) GetAgent(id string) (Agent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

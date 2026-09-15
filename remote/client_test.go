@@ -242,3 +242,86 @@ func TestDeletedAgentStopsSubscription(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentsPageRequestMetadataAndValidation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/agents" || r.URL.Query().Get("include_settled") != "true" ||
+			r.URL.Query().Get("page") != "2" || r.URL.Query().Get("page_size") != "3" ||
+			r.URL.Query().Has("project_id") {
+			t.Errorf("unexpected paged request: %s", r.URL.String())
+		}
+		w.Header().Set("X-Total-Count", "7")
+		_ = json.NewEncoder(w).Encode([]Snapshot{{ID: "a"}, {ID: "b"}, {ID: "c"}})
+	}))
+	defer server.Close()
+
+	result, total, err := New(server.URL).AgentsPage(context.Background(), 2, 3)
+	if err != nil || total != 7 || len(result) != 3 || result[0].ID != "a" {
+		t.Fatalf("paged result: %+v total=%d err=%v", result, total, err)
+	}
+}
+
+func TestAgentsPageRejectsMissingOrInvalidMetadata(t *testing.T) {
+	missing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]Snapshot{{ID: "must not be accepted"}})
+	}))
+	defer missing.Close()
+	result, total, err := New(missing.URL).AgentsPage(context.Background(), 1, 1)
+	if err == nil || !strings.Contains(err.Error(), "X-Total-Count") || result != nil || total != 0 {
+		t.Fatalf("missing metadata: result=%+v total=%d err=%v", result, total, err)
+	}
+
+	invalid := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Total-Count", "not-a-count")
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer invalid.Close()
+	result, total, err = New(invalid.URL).AgentsPage(context.Background(), 1, 1)
+	if err == nil || !strings.Contains(err.Error(), "invalid X-Total-Count") || result != nil || total != 0 {
+		t.Fatalf("invalid metadata: result=%+v total=%d err=%v", result, total, err)
+	}
+}
+
+func TestAgentsPageLegacyRejectionGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		name, code, message string
+		status              int
+		guidance            bool
+	}{
+		{"legacy page", "invalid", "unknown or repeated query parameter: page", 400, true},
+		{"legacy page size", "invalid", "unknown or repeated query parameter: page_size", 400, true},
+		{"alternate diagnostic", "invalid", "unsupported query fields", 400, true},
+		{"other parameter", "invalid", "unknown or repeated query parameter: project_id", 400, true},
+		{"invalid project", "invalid_project", "invalid project", 400, false},
+		{"unavailable", "shutting_down", "server shutting down", 503, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !r.URL.Query().Has("page") {
+					_ = json.NewEncoder(w).Encode([]Snapshot{{ID: "legacy"}})
+					return
+				}
+				w.WriteHeader(tc.status)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": APIError{Code: tc.code, Message: tc.message}})
+			}))
+			defer server.Close()
+			client := New(server.URL)
+			rows, total, err := client.AgentsPage(context.Background(), 1, 25)
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.Status != tc.status || apiErr.Code != tc.code || apiErr.Message != tc.message || rows != nil || total != 0 {
+				t.Fatalf("rows=%v total=%d error=%v", rows, total, err)
+			}
+			for _, guidance := range []string{"upgrade the server", "sessions --all"} {
+				if strings.Contains(err.Error(), guidance) != tc.guidance {
+					t.Fatalf("guidance %q: %v", guidance, err)
+				}
+			}
+			if tc.guidance {
+				rows, err = client.Agents(context.Background(), "")
+				if err != nil || len(rows) != 1 || rows[0].ID != "legacy" {
+					t.Fatalf("legacy unpaged request: %v, %v", rows, err)
+				}
+			}
+		})
+	}
+}
