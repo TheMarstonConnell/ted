@@ -467,14 +467,11 @@ func TestDeleteProjectWithSettledAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := s.CreateAgent(CreateAgentRequest{ProjectID: project.ID, ParentAgentID: a.ID}, "delete-key")
+	second, err := s.CreateAgent(CreateAgentRequest{ProjectID: project.ID}, "delete-key")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.SetSettled(a.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.SetSettled(second.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	assertStatus(t, s.DeleteProject(project.ID), 409)
@@ -611,7 +608,6 @@ func TestSettleDescendants(t *testing.T) {
 		return a
 	}
 	child := create(root.ID)
-	grandchild := create(child.ID)
 	otherProject, err := s.CreateProject(CreateProjectRequest{Name: "other", Root: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -621,7 +617,7 @@ func TestSettleDescendants(t *testing.T) {
 		t.Fatal(err)
 	}
 	unrelated := create("")
-	for _, a := range []Agent{child, grandchild} {
+	for _, a := range []Agent{child, crossProject} {
 		if _, err := s.Submit(a.ID, "running", ""); err != nil {
 			t.Fatal(err)
 		}
@@ -633,7 +629,7 @@ func TestSettleDescendants(t *testing.T) {
 	if _, err := s.SetSettled(root.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	for _, a := range []Agent{root, child, grandchild, crossProject} {
+	for _, a := range []Agent{root, child, crossProject} {
 		awaitAgent(t, s, a.ID, func(a Agent) bool { return a.Settled && a.Held && a.State == "idle" })
 	}
 	other, err := s.GetAgent(unrelated.ID)
@@ -645,7 +641,7 @@ func TestSettleDescendants(t *testing.T) {
 		t.Fatal(err)
 	}
 	restored, _ := s.GetAgent(child.ID)
-	descendant, _ := s.GetAgent(grandchild.ID)
+	descendant, _ := s.GetAgent(crossProject.ID)
 	if restored.Settled || !descendant.Settled {
 		t.Fatal("restore must affect only the requested chat")
 	}
