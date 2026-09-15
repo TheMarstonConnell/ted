@@ -171,43 +171,6 @@
   }
 }
 
-/* Excluding any coarse pointer keeps hybrid touchscreen controls visible
-   even when a mouse is primary. */
-@media (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
-  .sidebar-action-row {
-    gap: 0;
-  }
-
-  .sidebar-action {
-    width: 0;
-    min-width: 0;
-    opacity: 0;
-  }
-
-  .sidebar-action-row:is(:hover, :focus-within) {
-    gap: 0.5rem;
-  }
-
-  .sidebar-action-row:is(:hover, :focus-within) .sidebar-action {
-    width: 2rem;
-    opacity: 1;
-  }
-
-  .sidebar-action:disabled {
-    opacity: 0;
-  }
-
-  .sidebar-action-row:is(:hover, :focus-within) .sidebar-action:disabled {
-    opacity: 0.5;
-  }
-}
-
-@media (max-width: 767px) and (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
-  .sidebar-action-row:is(:hover, :focus-within) .sidebar-action {
-    width: 3rem;
-  }
-}
-
 /* Reserve identical native scrollbar space for transcript and composer. */
 @utility workspace-scroll-gutter {
   scrollbar-gutter: stable both-edges;
