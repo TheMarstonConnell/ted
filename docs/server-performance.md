@@ -121,8 +121,10 @@ cache-lifetime change, rather than silently returning different snapshots.
 
 Service microbenchmarks use 100 iterations × 5 samples. SPA, cloning, and recording
 helpers use 200 ms × 5 samples. Clone comparisons retain the original JSON
-round-trip implementation in the benchmark, so both implementations run on the
-same fixture/binary. Clone state has 8 agents, 384 messages, and 1,024 events.
+round-trip implementation in the benchmark, and the recording benchmark retains
+decode-every-tick as its reference,
+so each pair runs on the same fixture/binary. Clone state has 8 agents, 384
+messages, and 1,024 events.
 
 | Helper workload | Before | After | Δ time | Before → after B/op |
 |---|---:|---:|---:|---:|
@@ -201,14 +203,26 @@ worktree, and run each revision sequentially (avoid concurrent tests/load):
 
 ```sh
 git worktree add --detach /tmp/ted-server-before d0a764d5e9ff4cacccb68e5f422978c1242b697a
-cp controlplane/routes_benchmark_test.go /tmp/ted-server-before/controlplane/
+cp controlplane/routes_benchmark_test.go controlplane/service_benchmark_test.go \
+  /tmp/ted-server-before/controlplane/
+cp web/embed_benchmark_test.go /tmp/ted-server-before/web/
+(cd /tmp/ted-server-before/web && npm ci && npm run build)
 (cd /tmp/ted-server-before && GOMAXPROCS=2 go test ./controlplane -run '^$' \
   -bench '^BenchmarkRoutes$' -benchmem -benchtime=20x -count=5)
+(cd /tmp/ted-server-before && GOMAXPROCS=2 go test ./controlplane -run '^$' \
+  -bench 'BenchmarkParallelAgentRead|BenchmarkSettleTree|BenchmarkWebSocketInventorySnapshot' \
+  -benchmem -benchtime=100x -count=5)
+(cd /tmp/ted-server-before && GOMAXPROCS=2 go test ./controlplane -run '^$' \
+  -bench '^BenchmarkDeleteProjectCPU$' -benchmem -benchtime=20x -count=5)
+(cd /tmp/ted-server-before && GOMAXPROCS=2 go test ./web -run '^$' \
+  -bench '^BenchmarkSPA$' -benchmem -benchtime=200ms -count=5)
 GOMAXPROCS=2 go test ./controlplane -run '^$' \
   -bench '^BenchmarkRoutes$' -benchmem -benchtime=20x -count=5
 GOMAXPROCS=2 go test ./controlplane -run '^$' \
   -bench 'BenchmarkParallelAgentRead|BenchmarkSettleTree|BenchmarkWebSocketInventorySnapshot' \
   -benchmem -benchtime=100x -count=5
+GOMAXPROCS=2 go test ./controlplane -run '^$' \
+  -bench '^BenchmarkDeleteProjectCPU$' -benchmem -benchtime=20x -count=5
 GOMAXPROCS=2 go test ./controlplane -run '^$' -bench '^BenchmarkClone' \
   -benchmem -benchtime=200ms -count=5
 GOMAXPROCS=2 go test ./web ./browser -run '^$' \

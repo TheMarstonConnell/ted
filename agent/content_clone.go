@@ -6,8 +6,8 @@ import (
 	"unicode/utf8"
 )
 
-// Clone detaches the opaque JSON backing bytes without re-decoding the content.
-func (c Content) Clone() Content {
+// clone detaches the opaque JSON backing bytes without re-decoding the content.
+func (c Content) clone() Content {
 	c.raw = bytes.Clone(c.raw)
 	return c
 }

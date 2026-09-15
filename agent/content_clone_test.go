@@ -13,7 +13,7 @@ func TestContentClone(t *testing.T) {
 		if err := json.Unmarshal([]byte(raw), &original); err != nil {
 			t.Fatal(err)
 		}
-		cloned := original.Clone()
+		cloned := original.clone()
 		if cloned.Text() != original.Text() {
 			t.Fatal("clone changed readable text")
 		}
@@ -28,7 +28,7 @@ func TestContentClone(t *testing.T) {
 		}
 	}
 	original := TextContent("plain text")
-	cloned := original.Clone()
+	cloned := original.clone()
 	if !reflect.DeepEqual(cloned, original) {
 		t.Fatal("clone changed plain text representation")
 	}

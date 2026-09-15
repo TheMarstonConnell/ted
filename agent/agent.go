@@ -317,18 +317,13 @@ func newAgentIn(logger *zap.Logger, providers []Provider, dir string) *Agent {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	a := &Agent{
-		logger:      logger,
-		providers:   append([]Provider(nil), providers...),
-		messages:    []Message{{Role: "system", Content: TextContent(SYSTEM_PROMPT)}},
-		threadID:    newThreadID(),
-		projectRoot: resolveProjectRoot(dir),
-		workingDir:  dir,
-		home:        tedHome(),
-	}
-	if models := a.ListModels(); len(models) > 0 {
-		_, _ = a.SetModel(models[0].ID)
-	}
+	a := NewSettingsSelector(providers)
+	a.logger = logger
+	a.messages = []Message{{Role: "system", Content: TextContent(SYSTEM_PROMPT)}}
+	a.threadID = newThreadID()
+	a.projectRoot = resolveProjectRoot(dir)
+	a.workingDir = dir
+	a.home = tedHome()
 	return a
 }
 
@@ -364,7 +359,7 @@ func (a *Agent) Messages() []Message {
 func cloneMessages(messages []Message) []Message {
 	result := append([]Message(nil), messages...)
 	for i := range result {
-		result[i].Content = messages[i].Content.Clone()
+		result[i].Content = messages[i].Content.clone()
 		result[i].ToolCalls = append([]ToolCall(nil), messages[i].ToolCalls...)
 		result[i].ReasoningDetails = nil
 		for _, raw := range messages[i].ReasoningDetails {

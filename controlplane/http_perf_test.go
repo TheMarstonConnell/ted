@@ -11,19 +11,14 @@ import (
 	"github.com/TheMarstonConnell/ted/agent"
 )
 
-func benchmarkValidationHandler(b *testing.B) http.Handler {
-	b.Helper()
+func BenchmarkValidateHTTP(b *testing.B) {
 	definition, err := sharedHTTPDefinition()
 	if err != nil {
 		b.Fatal(err)
 	}
-	return validateHTTP(definition.router, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := validateHTTP(definition.router, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}), definition.metadata)
-}
-
-func BenchmarkValidateHTTP(b *testing.B) {
-	h := benchmarkValidationHandler(b)
 	b.Run("no_body_or_query", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
