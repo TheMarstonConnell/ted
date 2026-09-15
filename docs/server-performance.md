@@ -133,10 +133,10 @@ messages, and 1,024 events.
 | WS inventory: 10 × 100-message agents, no replay | 1.709 ms | 2.725 µs | -99.8% | 904,314 → 5,480 |
 | SPA GET | 1.529 µs | 1.027 µs | -32.8% | 2,864 → 1,936 |
 | SPA HEAD | 0.894 µs | 0.411 µs | -54.0% | 1,504 → 576 |
-| Clone durable state | 5.469 ms | 1.075 ms | -80.3% | 1,513,288 → 450,379 |
-| Clone full agent | 317.977 µs | 64.750 µs | -79.6% | 88,438 → 29,354 |
-| Clone transcript | 292.216 µs | 62.829 µs | -78.5% | 80,338 → 28,170 |
-| Clone event page | 327.703 µs | 68.382 µs | -79.1% | 65,931 → 25,605 |
+| Clone durable state | 5.469 ms | 1.075 ms | -80.3% | 1,536,463 → 450,374 |
+| Clone full agent | 317.977 µs | 64.750 µs | -79.6% | 88,791 → 29,354 |
+| Clone transcript | 292.216 µs | 62.829 µs | -78.5% | 80,242 → 28,170 |
+| Clone event page | 327.703 µs | 68.382 µs | -79.1% | 66,054 → 25,605 |
 | Decode unchanged 256 KiB recording frame | 229.553 µs | 0.003 µs | <−99.9% | 270,336 → 0 |
 
 The repeated-frame result calls the production `frameDecoder` but measures only
@@ -219,6 +219,9 @@ GOMAXPROCS=2 go test ./controlplane -run '^$' \
 GOMAXPROCS=2 go test ./controlplane -run '^$' \
   -bench '^BenchmarkDeleteProjectCPU$' -benchmem -benchtime=20x -count=5
 GOMAXPROCS=2 go test ./controlplane -run '^$' -bench '^BenchmarkClone' \
+  -benchmem -benchtime=200ms -count=5
+GOMAXPROCS=2 go test ./controlplane -run '^$' \
+  -bench 'BenchmarkValidateHTTP|BenchmarkNewHandler|BenchmarkSummaryWS|BenchmarkValidateWS' \
   -benchmem -benchtime=200ms -count=5
 GOMAXPROCS=2 go test ./web ./browser -run '^$' \
   -bench 'BenchmarkSPA|BenchmarkRepeatedFrame' -benchmem -benchtime=200ms -count=5
