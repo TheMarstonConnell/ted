@@ -682,7 +682,7 @@ func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 			}
 		}
 	}
-	changed := make([]*storedAgent, 0, len(targets))
+	changed := targets[:0]
 	for _, target := range targets {
 		if target.Agent.Settled != settled {
 			changed = append(changed, target)
