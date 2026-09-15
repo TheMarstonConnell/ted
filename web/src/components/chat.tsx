@@ -3,6 +3,7 @@ import { usePanel } from "@/lib/navigation";
 import {
   memo,
   useCallback,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -186,18 +187,27 @@ const Message = memo(function Message({ item }: { item: TranscriptItem }) {
         <AlertDescription>{item.text}</AlertDescription>
       </Alert>
     );
+  return <ConversationMessage text={item.text} user={item.kind === "user"} />;
+});
+
+const ConversationMessage = memo(function ConversationMessage({
+  text,
+  user,
+}: {
+  text: string;
+  user: boolean;
+}) {
   return (
     <article
-      aria-label={item.kind === "user" ? "Your message" : "Assistant message"}
+      aria-label={user ? "Your message" : "Assistant message"}
       className={cn(
         "min-w-0",
-        item.kind === "user" &&
-          "ml-auto w-fit max-w-[90%] rounded-xl bg-muted p-4",
+        user && "ml-auto w-fit max-w-[90%] rounded-xl bg-muted p-4",
       )}
     >
       <div className="markdown text-sm leading-6 [overflow-wrap:anywhere] [&>*+*]:mt-4 [&_p]:whitespace-pre-wrap [&_h1]:text-xl [&_h1]:leading-7 [&_h2]:text-xl [&_h2]:leading-7 [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h4]:font-semibold [&_h5]:font-semibold [&_h6]:font-semibold [&_a]:underline [&_a]:underline-offset-4 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-5 [&_code]:font-mono [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_blockquote]:border-l-2 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_th]:border [&_th]:px-4 [&_th]:py-2 [&_th]:text-left [&_td]:border [&_td]:px-4 [&_td]:py-2">
         <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-          {item.text}
+          {text}
         </Markdown>
       </div>
     </article>
@@ -356,10 +366,19 @@ function ChatWorkspace() {
     agents,
     projects,
     transcripts,
+    outgoing,
     ready: replayed,
     loaded,
     status,
   } = useControl();
+  const outgoingViewport = useRef<HTMLElement>(null);
+  const newestOutgoing = outgoing[agentId]?.at(-1)?.key;
+  useLayoutEffect(() => {
+    if (outgoingViewport.current)
+      outgoingViewport.current.scrollTo({
+        top: outgoingViewport.current.scrollHeight,
+      });
+  }, [agentId, newestOutgoing]);
   const { open } = usePanel();
   const navigate = useNavigate();
   const agent = agents[agentId];
@@ -624,7 +643,7 @@ function ChatWorkspace() {
           state={agent.state}
           onScrollIntent={onScrollIntent}
         />
-        <div className="workspace-scroll-gutter scrollbar-thin shrink-0 overflow-y-auto">
+        <div className="workspace-scroll-gutter scrollbar-thin max-h-full shrink-0 overflow-y-auto">
           <div className="mx-auto w-full max-w-chat space-y-4 px-4 pb-4 pt-2 md:px-8">
             <ErrorNotice error={error} />
             {workspace && workspace.status !== "draft" && (
@@ -702,6 +721,21 @@ function ChatWorkspace() {
                   </div>
                 )}
               </div>
+            )}
+            {!!outgoing[agentId]?.length && (
+              <section
+                ref={outgoingViewport}
+                aria-label="Outgoing messages"
+                className="workspace-scroll-gutter scrollbar-thin max-h-40 space-y-6 overflow-y-auto"
+              >
+                {outgoing[agentId].map((message) => (
+                  <ConversationMessage
+                    key={message.key}
+                    text={message.text}
+                    user
+                  />
+                ))}
+              </section>
             )}
             <form onSubmit={submit} aria-label="Message composer">
               <InputGroup

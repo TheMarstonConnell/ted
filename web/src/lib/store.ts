@@ -24,6 +24,11 @@ export type TranscriptItem = {
   output?: string;
   time: string;
 };
+type OutgoingMessage = {
+  key: string;
+  text: string;
+  messageId?: string;
+};
 export type State = {
   agents: Record<string, Agent>;
   projects: Project[];
@@ -32,6 +37,7 @@ export type State = {
   cursors: Record<string, number>;
   ready: Record<string, boolean>;
   readPending: Record<string, number>;
+  outgoing: Record<string, OutgoingMessage[]>;
   status: "connecting" | "live" | "offline";
   error: string | null;
   loaded: boolean;
@@ -44,6 +50,7 @@ const initial = (): State => ({
   cursors: {},
   ready: {},
   readPending: {},
+  outgoing: {},
   status: "connecting",
   error: null,
   loaded: false,
@@ -84,6 +91,7 @@ export function reduceEvent(state: State, event: Event): State {
       `Event gap for ${id}; reconnecting from the last processed cursor.`,
     );
   let item: TranscriptItem | undefined;
+  let outgoing = state.outgoing;
   let agent = state.agents[id];
   if (!agent) throw new Error(`Missing inventory for ${id}`);
   if (type === "agent.created" || type === "agent.updated") {
@@ -99,6 +107,12 @@ export function reduceEvent(state: State, event: Event): State {
   }
   if (type.startsWith("message.") || type.startsWith("turn.")) {
     const q = data as QueueMessage;
+    outgoing = {
+      ...outgoing,
+      [id]: (outgoing[id] || []).filter(
+        (message) => message.messageId !== q.id,
+      ),
+    };
     const queue = [...(agent.queue || [])];
     const index = queue.findIndex((m) => m.id === q.id);
     if (index < 0) queue.push(q);
@@ -175,6 +189,7 @@ export function reduceEvent(state: State, event: Event): State {
     ready: { ...state.ready, [id]: state.ready[id] || cursor >= agent.cursor },
     agents: { ...state.agents, [id]: agent },
     cursors: { ...state.cursors, [id]: cursor },
+    outgoing,
     transcripts: item
       ? { ...state.transcripts, [id]: transcript }
       : state.transcripts,
@@ -230,6 +245,7 @@ export class ControlPlane {
         ),
         projects,
         models,
+        outgoing: this.state.outgoing,
         loaded: true,
       });
       this.connect();
@@ -521,22 +537,51 @@ export class ControlPlane {
       "DELETE",
     );
   send = async (id: string, text: string, key: string) => {
-    // Check current server state, not a potentially stale sidebar summary.
-    const agent = await api<Agent>(agentPath(id));
-    this.mergeAgent(agent);
-    if (agent.settled) await this.settle(id, false);
+    const generation = this.generation;
+    const updateOutgoing = (message?: OutgoingMessage) => {
+      const current = this.state.outgoing[id] || [];
+      if (
+        generation !== this.generation &&
+        (this.stopped || !current.some((item) => item.key === key))
+      )
+        return;
+      this.set({
+        outgoing: {
+          ...this.state.outgoing,
+          [id]: [
+            ...current.filter((item) => item.key !== key),
+            ...(message ? [message] : []),
+          ],
+        },
+      });
+    };
+    updateOutgoing({ key, text });
+    const submit = () =>
+      api<QueueMessage>(`${agentPath(id)}/messages`, "POST", { text }, key);
     try {
-      const message = await api<QueueMessage>(
-        `${agentPath(id)}/messages`,
-        "POST",
-        { text },
-        key,
+      if (this.state.agents[id]?.settled) await this.settle(id, false);
+      let message: QueueMessage;
+      try {
+        message = await submit();
+      } catch (error) {
+        // Another client may have settled the chat since our last event.
+        if (!(error instanceof APIError) || error.code !== "settled")
+          throw error;
+        await this.settle(id, false);
+        message = await submit();
+      }
+      // Either transport can win. Retain the preview until replay owns the ID.
+      updateOutgoing(
+        this.state.agents[id]?.queue?.some((m) => m.id === message.id)
+          ? undefined
+          : { key, text, messageId: message.id },
       );
+      if (generation !== this.generation) return message;
+      const agent = this.state.agents[id];
       // The message response is intentionally queue-only, but a successful
       // first submission guarantees the server locked the location. Reflect
       // that immediately if its WebSocket update has not arrived yet.
-      const latest = this.state.agents[id];
-      if (agent.workspace && !latest?.workspace?.locked)
+      if (agent?.workspace && !agent.workspace.locked)
         this.mergeAgent({
           ...agent,
           workspace: {
@@ -547,10 +592,12 @@ export class ControlPlane {
         });
       return message;
     } catch (error) {
+      updateOutgoing();
       // First send locks a workspace even when setup or submission fails. Pull
       // the authoritative state so a stale draft UI never offers a retry.
       try {
-        this.mergeAgent(await api<Agent>(agentPath(id)));
+        const agent = await api<Agent>(agentPath(id));
+        if (generation === this.generation) this.mergeAgent(agent);
       } catch {
         // Preserve the original submission error.
       }
