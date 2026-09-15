@@ -93,7 +93,10 @@ for (const mobile of [false, true]) {
       expect(await gap()).toBeLessThan(5);
       await send.click();
       await expect(
-        page.getByRole("article", { name: "Your message", exact: true }),
+        viewport.getByRole("article", {
+          name: "Your message",
+          exact: true,
+        }),
       ).toContainText("Send after a gesture at the bottom");
       await expect(composer).toHaveValue("");
       await expect.poll(gap).toBeLessThan(5);
@@ -108,14 +111,17 @@ for (const mobile of [false, true]) {
     test("sending a tall draft stays at the bottom as the composer shrinks", async ({
       page,
     }) => {
-      const { gap, composer } = await longChat(page);
+      const { viewport, gap, composer } = await longChat(page);
       const text = "A line in a long draft\n".repeat(20);
       await composer.fill(text);
       await expect.poll(gap).toBeLessThan(5);
       const before = (await composer.boundingBox())!.height;
       await composer.press("Enter");
       await expect(
-        page.getByRole("article", { name: "Your message", exact: true }),
+        viewport.getByRole("article", {
+          name: "Your message",
+          exact: true,
+        }),
       ).toContainText("A line in a long draft");
       await expect(composer).toHaveValue("");
       await expect
@@ -152,13 +158,19 @@ for (const mobile of [false, true]) {
         page.getByText("Up next · 1 pending", { exact: true }),
       ).toBeVisible();
       await expect(
-        page.getByRole("article", { name: "Your message", exact: true }),
+        viewport.getByRole("article", {
+          name: "Your message",
+          exact: true,
+        }),
       ).toHaveCount(0);
       await expect.poll(gap).toBeLessThan(5);
       emit("a1", "turn.started", { ...queued!, status: "running" });
       output("The queued reply arrived later. " + "More output. ".repeat(100));
       await expect(
-        page.getByRole("article", { name: "Your message", exact: true }),
+        viewport.getByRole("article", {
+          name: "Your message",
+          exact: true,
+        }),
       ).toHaveText("Follow my queued turn");
       await expect.poll(gap).toBeLessThan(5);
       await readOlder(page, viewport, mobile);
@@ -203,10 +215,25 @@ for (const mobile of [false, true]) {
       await composer.fill("A slow send");
       await send.click();
       await requestSeen;
+      const outgoing = page.getByRole("region", {
+        name: "Outgoing messages",
+      });
+      await expect(
+        outgoing.getByRole("article", {
+          name: "Your message",
+          exact: true,
+        }),
+      ).toHaveText("A slow send");
+      await expect(outgoing.getByRole("status")).toHaveCount(0);
+      await expect(composer).toHaveValue("");
       await readOlder(page, viewport, mobile);
       release();
+      await expect(outgoing).toHaveCount(0);
       await expect(
-        page.getByRole("article", { name: "Your message", exact: true }),
+        viewport.getByRole("article", {
+          name: "Your message",
+          exact: true,
+        }),
       ).toHaveText("A slow send");
       await expect(
         page
@@ -222,25 +249,58 @@ for (const mobile of [false, true]) {
       expect(await viewport.evaluate((n) => n.scrollTop)).toBeLessThan(5);
     });
 
-    test("a failed send restores the draft without leaving the reading position", async ({
+    test("a failed send restores the draft and retry key without moving the reader", async ({
       page,
     }) => {
-      const { viewport, composer, send } = await longChat(page);
-      await page.route("**/v1/agents/a1/messages", (route) =>
-        route.fulfill({
-          status: 503,
-          json: { error: { message: "Send unavailable" } },
-        }),
-      );
+      const { emit, viewport, composer, send } = await longChat(page);
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const keys: string[] = [];
+      await page.route("**/v1/agents/a1/messages", async (route) => {
+        keys.push(route.request().headers()["idempotency-key"]);
+        if (keys.length === 1) {
+          await held;
+          await route.fulfill({
+            status: 503,
+            json: { error: { message: "Send unavailable" } },
+          });
+          return;
+        }
+        const queued = {
+          id: "retry",
+          text: route.request().postDataJSON().text,
+          status: "pending",
+          created_at: new Date().toISOString(),
+        };
+        emit("a1", "message.queued", queued);
+        emit("a1", "turn.started", { ...queued, status: "running" });
+        await route.fulfill({ json: queued });
+      });
       await composer.fill("Keep this failed draft");
       await readOlder(page, viewport, mobile);
       await send.click();
+      const outgoing = page.getByRole("region", {
+        name: "Outgoing messages",
+      });
+      await expect(outgoing).toContainText("Keep this failed draft");
+      release();
       await expect(page.getByRole("alert")).toContainText("Send unavailable");
+      await expect(outgoing).toHaveCount(0);
       await expect(composer).toHaveValue("Keep this failed draft");
+      expect(await viewport.evaluate((node) => node.scrollTop)).toBeLessThan(5);
+      await send.click();
+      await expect(outgoing).toHaveCount(0);
       await expect(
-        page.getByRole("article", { name: "Your message", exact: true }),
-      ).toHaveCount(0);
-      expect(await viewport.evaluate((n) => n.scrollTop)).toBeLessThan(5);
+        viewport.getByRole("article", {
+          name: "Your message",
+          exact: true,
+        }),
+      ).toHaveText("Keep this failed draft");
+      expect(keys).toHaveLength(2);
+      expect(keys[0]).toBeTruthy();
+      expect(keys[1]).toBe(keys[0]);
     });
   });
 }
@@ -273,11 +333,14 @@ test("a late send acknowledgement cannot scroll another chat", async ({
   await composer.fill("Send in the old chat");
   await send.click();
   await requestSeen;
+  const outgoing = page.getByRole("region", { name: "Outgoing messages" });
+  await expect(outgoing).toContainText("Send in the old chat");
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   await page
     .getByRole("button", { name: "harness /srv/harness", exact: true })
     .click();
   await expect(page).toHaveURL(/\/agents\/a2$/);
+  await expect(outgoing).toHaveCount(0);
   for (let i = 0; i < 25; i++)
     output(`Another chat ${i}\n\n${"Long reply. ".repeat(100)}`, "a2");
   await expect(
@@ -303,4 +366,58 @@ test("a late send acknowledgement cannot scroll another chat", async ({
   await expect(page).toHaveURL(/\/agents\/a2$/);
   await expect(composer).toHaveValue("Keep the new chat draft");
   expect(await viewport.evaluate((n) => n.scrollTop)).toBeLessThan(5);
+});
+test("keeps the newest outgoing preview visible in the capped outbox", async ({
+  page,
+}) => {
+  await workspace(page);
+  await page.goto("/?dialog=new-agent");
+  await page
+    .getByRole("button", { name: "harness /srv/harness", exact: true })
+    .click();
+  let count = 0;
+  await page.route("**/v1/agents/a1/messages", async (route) => {
+    const text = route.request().postDataJSON().text;
+    await route.fulfill({
+      json: {
+        id: `delayed-${++count}`,
+        text,
+        status: "pending",
+        created_at: new Date().toISOString(),
+      },
+    });
+  });
+  const composer = page.getByRole("textbox", { name: "Message", exact: true });
+  const preview = page.getByRole("region", { name: "Outgoing messages" });
+  await composer.fill(Array(12).fill("Earlier outgoing content").join("\n"));
+  await composer.press("Enter");
+  await expect(preview.locator(":scope > article")).toHaveCount(1);
+  await composer.fill("Newest outgoing message");
+  const send = page.getByRole("button", {
+    name: "Send message",
+    exact: true,
+  });
+  await expect(send).toBeEnabled();
+  await send.click();
+  const newest = preview.getByText("Newest outgoing message", { exact: true });
+  await expect(newest).toBeVisible();
+  await expect
+    .poll(() =>
+      preview.evaluate((outbox) => {
+        const items = [...outbox.children].map((item) =>
+          item.getBoundingClientRect(),
+        );
+        const bounds = outbox.getBoundingClientRect();
+        return {
+          newestVisible: items.at(-1)!.bottom <= bounds.bottom + 1,
+          messageGap: Math.round(items[1].top - items[0].bottom),
+          scrollbarGutter: getComputedStyle(outbox).scrollbarGutter,
+        };
+      }),
+    )
+    .toEqual({
+      newestVisible: true,
+      messageGap: 24,
+      scrollbarGutter: "stable both-edges",
+    });
 });

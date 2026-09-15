@@ -190,6 +190,13 @@ action with an accessible label and hover title. Project creation is no longer r
 - `/model`, `/effort`, `/stop`, `/settle`, `/unsettle`, `/continue`, `/help`, and
   `/exit` match the TUI controls. `/exit` returns to the workspace; `//` escapes a
   literal slash. Model/effort changes apply on the next turn.
+- Sending immediately shows the submitted text in a plain message bubble above
+  the composer, without waiting for HTTP or event replay or showing delivery
+  status labels. Normal sends POST directly; a server `settled` rejection
+  restores the chat and retries with the same key. The bubble stays visible
+  until its server message ID reaches the queue/transcript. Reconciliation uses
+  IDs, never text, and failures remove the preview without overwriting newer
+  typing. Slash commands do not create previews.
 - Drafts and retry keys are in memory, scoped per agent. Switching retains drafts;
   refreshing discards them. They are never written to localStorage or the URL.
   Keystrokes update only the textarea and send-button state, not the whole chat.

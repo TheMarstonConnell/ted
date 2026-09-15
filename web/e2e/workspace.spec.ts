@@ -61,6 +61,9 @@ test("complete project-first workflow, settlement, Markdown, drafts and deep lin
   await expect(
     page.getByText("Use // to send", { exact: false }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Outgoing messages" }),
+  ).toHaveCount(0);
   await page
     .getByRole("textbox", { name: "Message", exact: true })
     .fill("Clear on refresh");

@@ -32,6 +32,7 @@ const state = (): State => ({
   cursors: {},
   ready: {},
   readPending: {},
+  outgoing: {},
   loaded: true,
   status: "live",
   error: null,
@@ -366,41 +367,143 @@ describe("mutations", () => {
     await request;
     expect(client.snapshot().agents.a).toEqual(locked);
   });
-  it("restores before sending with a durable retry key, without calling Continue", async () => {
+  it("posts immediately and keeps an acknowledged preview until its event arrives", async () => {
+    let acknowledge!: (response: Response) => void;
+    const fetcher = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const client = new ControlPlane();
+    client.state = state();
+    const sending = client.send("a", "Hello", "key");
+    expect(fetcher.mock.calls[0]).toEqual([
+      "/v1/agents/a/messages",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "Idempotency-Key": "key" }),
+      }),
+    ]);
+    expect(client.snapshot().outgoing.a).toEqual([
+      { key: "key", text: "Hello" },
+    ]);
+    acknowledge(Response.json(queued));
+    await sending;
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(client.snapshot().outgoing.a).toEqual([
+      { key: "key", text: "Hello", messageId: "m" },
+    ]);
+    // Identical text from another client is not our receipt.
+    client.state = reduceEvent(
+      client.state,
+      event(1, "message.queued", { ...queued, id: "other" }),
+    );
+    expect(client.snapshot().outgoing.a).toHaveLength(1);
+    client.state = reduceEvent(
+      client.state,
+      event(2, "message.queued", queued),
+    );
+    expect(client.snapshot().outgoing.a).toEqual([]);
+    expect(client.snapshot().agents.a.queue).toHaveLength(2);
+  });
+  it("removes the preview when replay beats the HTTP acknowledgement", async () => {
+    let acknowledge!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            acknowledge = resolve;
+          }),
+      ),
+    );
+    const client = new ControlPlane();
+    client.state = state();
+    const sending = client.send("a", "Hello", "key");
+    client.state = reduceEvent(
+      client.state,
+      event(1, "message.queued", queued),
+    );
+    client.state = reduceEvent(
+      client.state,
+      event(2, "turn.started", { ...queued, status: "running" }),
+    );
+    acknowledge(Response.json(queued));
+    await sending;
+    expect(client.snapshot().outgoing.a).toEqual([]);
+    expect(client.snapshot().agents.a.queue?.[0].status).toBe("running");
+    expect(client.snapshot().transcripts.a.map((m) => m.text)).toEqual([
+      "Hello",
+    ]);
+  });
+  it("restores a remotely settled chat and retries only the rejected POST with the same key", async () => {
     const fetcher = vi
       .fn()
-      .mockResolvedValueOnce(Response.json(agent("a", { settled: true })))
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: "settled", message: "restore first" } },
+          { status: 409 },
+        ),
+      )
       .mockResolvedValueOnce(Response.json(agent()))
       .mockResolvedValueOnce(Response.json(queued));
     vi.stubGlobal("fetch", fetcher);
-    await new ControlPlane().send("a", "Hello", "retry-key");
+    const client = new ControlPlane();
+    client.state = state();
+    await client.send("a", "Hello", "key");
     expect(fetcher.mock.calls.map((c) => [c[0], c[1].method])).toEqual([
-      ["/v1/agents/a", "GET"],
+      ["/v1/agents/a/messages", "POST"],
       ["/v1/agents/a", "PATCH"],
       ["/v1/agents/a/messages", "POST"],
     ]);
-    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({
+    for (const index of [0, 2])
+      expect(fetcher.mock.calls[index][1].headers["Idempotency-Key"]).toBe(
+        "key",
+      );
+  });
+  it("restores before sending with a durable retry key, without calling Continue", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(agent()))
+      .mockResolvedValueOnce(Response.json(queued));
+    vi.stubGlobal("fetch", fetcher);
+    const client = new ControlPlane();
+    client.state = state();
+    client.state.agents.a.settled = true;
+    await client.send("a", "Hello", "retry-key");
+    expect(fetcher.mock.calls.map((c) => [c[0], c[1].method])).toEqual([
+      ["/v1/agents/a", "PATCH"],
+      ["/v1/agents/a/messages", "POST"],
+    ]);
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
       settled: false,
     });
-    expect(fetcher.mock.calls[2][1].headers["Idempotency-Key"]).toBe(
+    expect(fetcher.mock.calls[1][1].headers["Idempotency-Key"]).toBe(
       "retry-key",
     );
   });
   it("never submits if restoration fails", async () => {
     const fetcher = vi
       .fn()
-      .mockResolvedValueOnce(Response.json(agent("a", { settled: true })))
       .mockResolvedValueOnce(
         Response.json(
           { error: { code: "unavailable", message: "Try again" } },
           { status: 503 },
         ),
-      );
+      )
+      .mockResolvedValueOnce(Response.json(agent("a", { settled: true })));
     vi.stubGlobal("fetch", fetcher);
-    await expect(new ControlPlane().send("a", "Hello", "key")).rejects.toThrow(
-      "Try again",
-    );
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    const client = new ControlPlane();
+    client.state = state();
+    client.state.agents.a.settled = true;
+    await expect(client.send("a", "Hello", "key")).rejects.toThrow("Try again");
+    expect(fetcher.mock.calls.map((c) => [c[0], c[1].method])).toEqual([
+      ["/v1/agents/a", "PATCH"],
+      ["/v1/agents/a", "GET"],
+    ]);
+    expect(client.snapshot().outgoing.a).toEqual([]);
   });
   it("refreshes the irrevocable workspace lock after a failed first send", async () => {
     const draft = agent("a", {
@@ -422,7 +525,6 @@ describe("mutations", () => {
     });
     const fetcher = vi
       .fn()
-      .mockResolvedValueOnce(Response.json(draft))
       .mockResolvedValueOnce(
         Response.json(
           { error: { code: "workspace_failed", message: "fetch failed" } },
@@ -432,12 +534,14 @@ describe("mutations", () => {
       .mockResolvedValueOnce(Response.json(failed));
     vi.stubGlobal("fetch", fetcher);
     const client = new ControlPlane();
+    client.state = state();
+    client.state.agents.a = draft;
     await expect(client.send("a", "Hello", "key")).rejects.toThrow(
       "fetch failed",
     );
     expect(client.snapshot().agents.a.workspace).toEqual(failed.workspace);
+    expect(client.snapshot().outgoing.a).toEqual([]);
     expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
-      "/v1/agents/a",
       "/v1/agents/a/messages",
       "/v1/agents/a",
     ]);
@@ -703,6 +807,41 @@ describe("sidebar branch refresh", () => {
     );
     return new ControlPlane();
   }
+  it("preserves an in-flight preview through restart and reconciles replay before acknowledgement", async () => {
+    let acknowledge!: (response: Response) => void;
+    const fetcher = vi.fn(async (path: string) => {
+      if (path === "/v1/agents/a/messages")
+        return new Promise<Response>((resolve) => {
+          acknowledge = resolve;
+        });
+      if (path.startsWith("/v1/agents")) return Response.json([agent()]);
+      if (path === "/v1/projects") return Response.json(projects);
+      if (path === "/v1/models") return Response.json([]);
+      return Response.json(projects[0]);
+    });
+    const client = prepare(fetcher);
+    client.state = state();
+    const sending = client.send("a", "Hello", "key");
+    expect(client.state.outgoing.a).toEqual([{ key: "key", text: "Hello" }]);
+    try {
+      await client.start();
+      expect(client.state.outgoing.a).toHaveLength(1);
+      (WebSocket as any).instances[0].onmessage({
+        data: JSON.stringify({
+          type: "event",
+          event: event(1, "message.queued", queued),
+        }),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(client.state.outgoing.a).toHaveLength(1);
+      acknowledge(Response.json(queued));
+      await sending;
+      expect(client.state.outgoing.a).toEqual([]);
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
   it.each([
     { initialRace: false, failReload: false },
     { initialRace: true, failReload: false },
