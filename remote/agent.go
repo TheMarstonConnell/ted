@@ -147,6 +147,13 @@ type Update struct {
 	Err    error
 }
 
+func formatBotNotification(text, senderAgentID string) string {
+	if senderAgentID == "" {
+		return "Bot notification: " + text
+	}
+	return "Bot notification from chat " + senderAgentID + ": " + text
+}
+
 func (a *Agent) consume(e Event, notify func(Update)) error {
 	a.mu.Lock()
 	if e.AgentID != a.snapshot.ID || e.Cursor <= a.cursor {
@@ -189,7 +196,12 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 			return err
 		}
 		if q.Text != "" {
-			output = &agent.AgentResponse{ResponseType: "user", Content: q.Text}
+			responseType, content := "user", q.Text
+			if q.Kind == "bot" {
+				responseType = "bot"
+				content = formatBotNotification(q.Text, q.SenderAgentID)
+			}
+			output = &agent.AgentResponse{ResponseType: responseType, Content: content}
 		}
 
 	case "turn.failed", "turn.interrupted", "turn.cancelled":

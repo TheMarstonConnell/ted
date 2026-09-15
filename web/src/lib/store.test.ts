@@ -88,6 +88,42 @@ describe("event replay", () => {
     expect(s.agents.a.queue![0].status).toBe("completed");
     expect(s.cursors.a).toBe(5);
   });
+  it("renders bot turns once with sender provenance across queue and history events", () => {
+    const bot = {
+      ...queued,
+      kind: "bot" as const,
+      sender_agent_id: "review-chat",
+    };
+    let s = reduceEvent(state(), event(1, "message.queued", bot));
+    expect(s.transcripts.a || []).toHaveLength(0);
+    expect(s.agents.a.queue![0]).toMatchObject({
+      kind: "bot",
+      sender_agent_id: "review-chat",
+      status: "pending",
+    });
+    s = reduceEvent(s, event(2, "turn.started", { ...bot, status: "running" }));
+    expect(s.transcripts.a).toEqual([
+      expect.objectContaining({
+        id: "2",
+        kind: "bot",
+        text: "Hello",
+        senderAgentId: "review-chat",
+      }),
+    ]);
+    s = reduceEvent(
+      s,
+      event(3, "conversation", [
+        {
+          role: "user",
+          kind: "bot",
+          sender_agent_id: "review-chat",
+          content: "Hello",
+        },
+      ]),
+    );
+    expect(s.transcripts.a).toHaveLength(1);
+  });
+
   it("rejects gaps without advancing a processed cursor", () => {
     const s = state();
     expect(() => reduceEvent(s, event(2, "output", output))).toThrow(

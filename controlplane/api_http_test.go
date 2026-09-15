@@ -656,3 +656,29 @@ func TestHTTPAgentPaginationOrderingFilteringAndLegacyList(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPSubmitMessageKindsAndValidation(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	a := f.agent(f.project())
+	base := "/v1/agents/" + a.ID + "/messages"
+	ordinary := decodeHTTP[QueuedMessage](t, f.request("POST", base, `{"text":"ordinary"}`, "ordinary", 202))
+	if ordinary.Kind != "" || ordinary.SenderAgentID != "" {
+		t.Fatalf("omitted kind was not preserved: %+v", ordinary)
+	}
+	bot := decodeHTTP[QueuedMessage](t, f.request("POST", base, `{"text":"report","kind":"bot","sender_agent_id":"unknown-script"}`, "bot", 202))
+	if bot.Kind != "bot" || bot.SenderAgentID != "unknown-script" {
+		t.Fatalf("bot metadata missing: %+v", bot)
+	}
+	user := decodeHTTP[QueuedMessage](t, f.request("POST", base, `{"text":"explicit","kind":"user"}`, "user", 202))
+	if user.Kind != "user" || user.SenderAgentID != "" {
+		t.Fatalf("user metadata changed: %+v", user)
+	}
+	for _, body := range []string{
+		`{"text":"bad","kind":"system"}`,
+		`{"text":"bad","sender_agent_id":"source"}`,
+		`{"text":"bad","kind":"user","sender_agent_id":"source"}`,
+		`{"text":"bad","kind":"bot","sender_agent_id":""}`,
+	} {
+		f.request("POST", base, body, "", 400)
+	}
+}

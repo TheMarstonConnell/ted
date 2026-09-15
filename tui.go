@@ -46,6 +46,7 @@ const (
 	userMessage
 	agentMessage
 	toolCallMessage
+	botMessage
 	commandMessage
 )
 
@@ -153,6 +154,13 @@ type tuiAgent interface {
 	Turn(string) error
 }
 
+func formatTUIBotNotification(text, senderAgentID string) string {
+	if senderAgentID == "" {
+		return "Bot notification: " + text
+	}
+	return "Bot notification from chat " + senderAgentID + ": " + text
+}
+
 func (m model) acceptsQueuedInput() bool {
 	client, ok := m.agent.(interface{ AcceptsQueuedInput() bool })
 	return ok && client.AcceptsQueuedInput()
@@ -204,7 +212,12 @@ func initialModel(agent tuiAgent) model {
 			if text == "" {
 				text = "[Image attachment]"
 			}
-			entries = append(entries, transcriptEntry{kind: userMessage, content: text})
+			kind := userMessage
+			if message.Kind == "bot" {
+				kind = botMessage
+				text = formatTUIBotNotification(text, message.SenderAgentID)
+			}
+			entries = append(entries, transcriptEntry{kind: kind, content: text})
 		case "tool":
 			// Results stay in server history, not the visible transcript.
 			continue
@@ -370,7 +383,7 @@ func (m model) styleFor(kind messageKind) lipgloss.Style {
 		return m.bannerStyle
 	case userMessage:
 		return m.senderStyle
-	case toolCallMessage, commandMessage:
+	case toolCallMessage, botMessage, commandMessage:
 		return m.toolCallStyle
 	default:
 		return m.agentStyle
@@ -382,8 +395,8 @@ func (m model) styleFor(kind messageKind) lipgloss.Style {
 // with terminal styling; if the markdown renderer is unavailable or fails,
 // the raw text is shown instead.
 func (m *model) renderEntry(entry transcriptEntry, width int) string {
-	if entry.kind == toolCallMessage {
-		// Keep the raw entry intact so resizing can reveal more of the command.
+	if entry.kind == toolCallMessage || entry.kind == botMessage {
+		// Keep the raw entry intact so resizing can reveal more of the content.
 		// Strip terminal escapes and collapse whitespace before measuring cells,
 		// not bytes, so wide Unicode characters cannot cause wrapping.
 		line := strings.Join(strings.Fields(ansi.Strip(entry.content)), " ")
@@ -392,7 +405,7 @@ func (m *model) renderEntry(entry transcriptEntry, width int) string {
 			return ""
 		}
 		tail := "…"
-		if strings.HasSuffix(line, `"`) && limit >= 2 {
+		if entry.kind == toolCallMessage && strings.HasSuffix(line, `"`) && limit >= 2 {
 			tail += `"`
 		}
 		return m.toolCallStyle.Render(ansi.Truncate(line, limit, tail))
@@ -524,6 +537,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agent.AgentResponse:
 		if msg.ResponseType == "user" {
 			m.appendMessage(userMessage, msg.Content)
+		} else if msg.ResponseType == "bot" {
+			m.appendMessage(botMessage, msg.Content)
 		} else if msg.ResponseType == "usage" {
 			return m, nil // Usage changed; redraw the toolbar without transcript noise.
 		} else if msg.ResponseType == "status" {

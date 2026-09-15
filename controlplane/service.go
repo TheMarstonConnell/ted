@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/TheMarstonConnell/ted/agent"
 	"go.uber.org/zap"
@@ -544,6 +545,10 @@ func (s *Service) UpdateSettings(id string, patch SettingsPatch) (Agent, error) 
 	return copyJSON(a.Agent), nil
 }
 func (s *Service) Submit(id, text, key string) (QueuedMessage, error) {
+	return s.SubmitMessage(id, SubmitMessageRequest{Text: text}, key)
+}
+
+func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string) (QueuedMessage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.writableLocked(); err != nil {
@@ -553,8 +558,14 @@ func (s *Service) Submit(id, text, key string) (QueuedMessage, error) {
 	if err != nil {
 		return QueuedMessage{}, err
 	}
+	if err = validateSubmitMessage(req); err != nil {
+		return QueuedMessage{}, err
+	}
 	scope := "message:" + id + ":" + key
-	hash := fingerprint(text)
+	hash := fingerprint(req)
+	if req.Kind == "" || req.Kind == "user" {
+		hash = fingerprint(req.Text)
+	}
 	if key != "" {
 		if r, ok := s.state.Receipts[scope]; ok {
 			if r.Fingerprint != hash {
@@ -573,12 +584,9 @@ func (s *Service) Submit(id, text, key string) (QueuedMessage, error) {
 	if a.Agent.Settled {
 		return QueuedMessage{}, problem(409, "settled", "restore agent before submitting messages")
 	}
-	if strings.TrimSpace(text) == "" {
-		return QueuedMessage{}, problem(400, "invalid_message", "text cannot be empty")
-	}
 	before := copyJSON(s.state)
 	s.lockWorkspaceLocked(a)
-	m := QueuedMessage{ID: newID(), Text: text, Status: "pending", CreatedAt: time.Now().UTC()}
+	m := QueuedMessage{ID: newID(), Text: req.Text, Kind: req.Kind, SenderAgentID: req.SenderAgentID, Status: "pending", CreatedAt: time.Now().UTC()}
 	a.Agent.Queue = append(a.Agent.Queue, m)
 	a.Agent.Held = false
 	s.eventLocked(a, "message.queued", m)
@@ -595,6 +603,26 @@ func (s *Service) Submit(id, text, key string) (QueuedMessage, error) {
 	}
 	return m, nil
 }
+
+func validateSubmitMessage(req SubmitMessageRequest) error {
+	if strings.TrimSpace(req.Text) == "" {
+		return problem(400, "invalid_message", "text cannot be empty")
+	}
+	if utf8.RuneCountInString(req.SenderAgentID) > 256 {
+		return problem(400, "invalid_message", "sender_agent_id must not exceed 256 characters")
+	}
+	switch req.Kind {
+	case "", "user":
+		if req.SenderAgentID != "" {
+			return problem(400, "invalid_message", "sender_agent_id is only valid for bot messages")
+		}
+	case "bot":
+	default:
+		return problem(400, "invalid_message", "kind must be user or bot")
+	}
+	return nil
+}
+
 func (s *Service) DeletePending(id, messageID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -780,11 +808,11 @@ func (s *Service) startLocked(id string) {
 	s.running[id] = r
 	project := s.state.Projects[a.Agent.ProjectID]
 	history := copyJSON(a.Agent.Messages)
-	text := m.Text
+	message := *m
 	s.workers.Add(1)
-	go s.run(ctx, id, r, project, settings, history, text)
+	go s.run(ctx, id, r, project, settings, history, message)
 }
-func (s *Service) run(ctx context.Context, id string, r *runningTurn, project Project, settings Settings, history []agent.Message, text string) {
+func (s *Service) run(ctx context.Context, id string, r *runningTurn, project Project, settings Settings, history []agent.Message, message QueuedMessage) {
 	defer s.workers.Done()
 	defer r.cancel()
 	s.mu.Lock()
@@ -835,7 +863,7 @@ func (s *Service) run(ctx context.Context, id string, r *runningTurn, project Pr
 				s.logger.Error("could not save agent event", zap.Error(err))
 			}
 		})
-		err = instance.TurnContext(ctx, text)
+		err = instance.TurnMessageContext(ctx, message.Text, message.Kind, message.SenderAgentID)
 	}
 	s.mu.Lock()
 	delete(s.running, id)

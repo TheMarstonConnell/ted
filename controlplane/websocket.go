@@ -168,7 +168,7 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 					}
 					continue
 				}
-				m, err := h.service.Submit(command.AgentId, command.Text, command.IdempotencyKey)
+				m, err := h.service.SubmitMessage(command.AgentId, SubmitMessageRequest{Text: command.Text, Kind: string(value(command.Kind)), SenderAgentID: value(command.SenderAgentId)}, command.IdempotencyKey)
 				if err != nil {
 					if writeWSError(c, requestID, err) != nil {
 						return

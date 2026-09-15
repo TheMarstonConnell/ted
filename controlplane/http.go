@@ -363,7 +363,7 @@ func (h *httpAPI) SubmitMessage(w http.ResponseWriter, r *http.Request, id strin
 	if !ok {
 		return
 	}
-	m, err := h.service.Submit(id, b.Text, value(p.IdempotencyKey))
+	m, err := h.service.SubmitMessage(id, SubmitMessageRequest{Text: b.Text, Kind: string(value(b.Kind)), SenderAgentID: value(b.SenderAgentId)}, value(p.IdempotencyKey))
 	respond(w, 202, m, err)
 }
 func (h *httpAPI) DeletePending(w http.ResponseWriter, r *http.Request, id, mid string) {

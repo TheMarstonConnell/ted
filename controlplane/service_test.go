@@ -658,3 +658,179 @@ func TestSettleDescendants(t *testing.T) {
 		t.Fatal("duplicate settlement emitted another event")
 	}
 }
+
+func TestMixedUserBotQueueFIFOAndAttribution(t *testing.T) {
+	s, p, _, a := serviceFixture(t)
+	first, err := s.Submit(a.ID, "first user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstCall := awaitCall(t, p)
+	if got := firstCall.Messages[len(firstCall.Messages)-1].Content.Text(); got != "first user" {
+		t.Fatal(got)
+	}
+	bot, err := s.SubmitMessage(a.ID, SubmitMessageRequest{Text: "bot report", Kind: "bot", SenderAgentID: "unknown-script-source"}, "bot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := s.SubmitMessage(a.ID, SubmitMessageRequest{Text: "last user", Kind: "user"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.results <- nil
+	botCall := awaitCall(t, p)
+	botInput := botCall.Messages[len(botCall.Messages)-1]
+	if botInput.Kind != "" || botInput.SenderAgentID != "" || !strings.Contains(botInput.Content.Text(), "unknown-script-source") || !strings.Contains(botInput.Content.Text(), "bot report") {
+		t.Fatalf("unsafe bot input: %+v", botInput)
+	}
+	p.results <- nil
+	userCall := awaitCall(t, p)
+	if got := userCall.Messages[len(userCall.Messages)-1].Content.Text(); got != "last user" {
+		t.Fatalf("FIFO ran %q", got)
+	}
+	p.results <- nil
+	done := awaitAgent(t, s, a.ID, func(a Agent) bool { return a.State == "idle" })
+	if len(done.Queue) != 3 || done.Queue[0].ID != first.ID || done.Queue[1].ID != bot.ID || done.Queue[2].ID != user.ID {
+		t.Fatalf("queue order: %+v", done.Queue)
+	}
+	if done.Queue[1].Kind != "bot" || done.Queue[1].SenderAgentID != "unknown-script-source" || done.Queue[2].Kind != "user" {
+		t.Fatalf("queue metadata: %+v", done.Queue)
+	}
+	if len(done.Messages) < 6 {
+		t.Fatalf("history: %+v", done.Messages)
+	}
+	botHistory := done.Messages[len(done.Messages)-4]
+	if botHistory.Role != "user" || botHistory.Kind != "bot" || botHistory.SenderAgentID != "unknown-script-source" || botHistory.Content.Text() != "bot report" {
+		t.Fatalf("bot history: %+v", botHistory)
+	}
+}
+
+func TestBotSubmissionWakesHeldQueue(t *testing.T) {
+	s, p, _, a := serviceFixture(t)
+	if _, err := s.Submit(a.ID, "fail", ""); err != nil {
+		t.Fatal(err)
+	}
+	awaitCall(t, p)
+	p.results <- errors.New("failed turn")
+	awaitAgent(t, s, a.ID, func(a Agent) bool { return a.State == "idle" && a.Held })
+	if _, err := s.SubmitMessage(a.ID, SubmitMessageRequest{Text: "wake from bot", Kind: "bot"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	call := awaitCall(t, p)
+	if got := call.Messages[len(call.Messages)-1].Content.Text(); !strings.Contains(got, "wake from bot") || !strings.Contains(got, "external bot report") {
+		t.Fatal(got)
+	}
+	p.results <- nil
+	done := awaitAgent(t, s, a.ID, func(a Agent) bool { return a.State == "idle" })
+	if done.Held || done.Queue[1].Status != "completed" {
+		t.Fatalf("bot did not resume held agent: %+v", done)
+	}
+}
+
+func TestBotMessagePersistenceAndIdempotencyMetadata(t *testing.T) {
+	s, p, _, a := serviceFixture(t)
+	if _, err := s.Submit(a.ID, "blocking", ""); err != nil {
+		t.Fatal(err)
+	}
+	awaitCall(t, p)
+	req := SubmitMessageRequest{Text: "persist bot", Kind: "bot", SenderAgentID: "external-42"}
+	queued, err := s.SubmitMessage(a.ID, req, "metadata-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err := s.SubmitMessage(a.ID, req, "metadata-key")
+	if err != nil || same.ID != queued.ID {
+		t.Fatalf("dedupe: %+v %v", same, err)
+	}
+	for _, conflict := range []SubmitMessageRequest{
+		{Text: req.Text, Kind: "bot", SenderAgentID: "other-source"},
+		{Text: req.Text, Kind: "user"},
+		{Text: req.Text},
+	} {
+		_, err = s.SubmitMessage(a.ID, conflict, "metadata-key")
+		assertStatus(t, err, 409)
+	}
+	if err = s.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := NewService(s.dir, nil, []agent.Provider{p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = recovered.Close(context.Background()) })
+	got, err := recovered.GetAgent(a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Queue) != 2 || got.Queue[1].Kind != "bot" || got.Queue[1].SenderAgentID != "external-42" || got.Queue[1].Status != "pending" {
+		t.Fatalf("restored queue: %+v", got.Queue)
+	}
+	events, err := recovered.Events(a.ID, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range events {
+		if event.Type != "message.queued" {
+			continue
+		}
+		var message QueuedMessage
+		if json.Unmarshal(event.Data, &message) == nil && message.ID == queued.ID {
+			found = message.Kind == "bot" && message.SenderAgentID == "external-42"
+		}
+	}
+	if !found {
+		t.Fatal("durable queued event lost bot metadata")
+	}
+	same, err = recovered.SubmitMessage(a.ID, req, "metadata-key")
+	if err != nil || same.ID != queued.ID {
+		t.Fatalf("restored receipt: %+v %v", same, err)
+	}
+	noCall(t, p)
+	if _, err = recovered.Continue(a.ID); err != nil {
+		t.Fatal(err)
+	}
+	call := awaitCall(t, p)
+	if input := call.Messages[len(call.Messages)-1]; !strings.Contains(input.Content.Text(), "persist bot") || input.Kind != "" || input.SenderAgentID != "" {
+		t.Fatalf("restored bot input: %+v", input)
+	}
+	p.results <- nil
+	awaitAgent(t, recovered, a.ID, func(a Agent) bool { return a.State == "idle" })
+	if err = recovered.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewService(s.dir, nil, []agent.Provider{p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close(context.Background())
+	got, err = restarted.GetAgent(a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found = false
+	for _, message := range got.Messages {
+		if message.Kind == "bot" && message.SenderAgentID == "external-42" && message.Content.Text() == "persist bot" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("restored history lost bot metadata: %+v", got.Messages)
+	}
+}
+
+func TestSubmitMessageMetadataValidation(t *testing.T) {
+	s, _, _, a := serviceFixture(t)
+	for _, req := range []SubmitMessageRequest{
+		{Text: "message", Kind: "system"},
+		{Text: "message", SenderAgentID: "source"},
+		{Text: "message", Kind: "user", SenderAgentID: "source"},
+		{Text: "message", Kind: "bot", SenderAgentID: strings.Repeat("source", 50)},
+	} {
+		_, err := s.SubmitMessage(a.ID, req, "")
+		assertStatus(t, err, 400)
+	}
+	if _, err := s.SubmitMessage(a.ID, SubmitMessageRequest{Text: "message", Kind: "bot", SenderAgentID: "does-not-exist"}, ""); err != nil {
+		t.Fatal(err)
+	}
+}

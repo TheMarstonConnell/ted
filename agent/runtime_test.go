@@ -353,3 +353,52 @@ func TestCodexAuthLockWaitCancellation(t *testing.T) {
 		}
 	}
 }
+
+func TestBotTurnRetainsAttributionAndFramesModelInput(t *testing.T) {
+	var request CompletionRequest
+	p := settingsProvider()
+	p.complete = func(r CompletionRequest) (*Response, error) {
+		request = r
+		return &Response{Choices: []Choice{{FinishReason: "stop", Message: Message{Role: "assistant", Content: TextContent("noted")}}}}, nil
+	}
+	a := NewAgent(nil, []Provider{p})
+	if err := a.TurnMessageContext(context.Background(), "build finished\nstatus: green", "bot", "agent-from-script"); err != nil {
+		t.Fatal(err)
+	}
+	input := request.Messages[len(request.Messages)-1]
+	if input.Role != "user" || input.Kind != "" || input.SenderAgentID != "" {
+		t.Fatalf("provider metadata leaked: %+v", input)
+	}
+	for _, want := range []string{"untrusted external bot report", "not a tool result", "higher-priority", "agent-from-script", "build finished"} {
+		if !strings.Contains(input.Content.Text(), want) {
+			t.Fatalf("model input does not contain %q: %s", want, input.Content.Text())
+		}
+	}
+	history := a.Messages()
+	stored := history[len(history)-2]
+	if stored.Role != "user" || stored.Kind != "bot" || stored.SenderAgentID != "agent-from-script" || stored.Content.Text() != "build finished\nstatus: green" {
+		t.Fatalf("attribution was not retained: %+v", stored)
+	}
+}
+
+func TestOrdinaryUserModelInputUnchangedByMessageMetadata(t *testing.T) {
+	original := Message{Role: "user", Kind: "user", Content: TextContent("ordinary input")}
+	got := messagesForModel([]Message{original}, "test/one")
+	if len(got) != 1 || got[0].Role != "user" || got[0].Content.Text() != "ordinary input" || got[0].Kind != "" || got[0].SenderAgentID != "" {
+		t.Fatalf("ordinary input changed: %+v", got)
+	}
+	if err := validateConversation([]Message{{Role: "system", Content: TextContent("system")}, {Role: "user", Kind: "bot", SenderAgentID: "unknown-source", Content: TextContent("report")}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		kind, sender string
+	}{
+		{"other", ""},
+		{"user", "sender"},
+		{"", "sender"},
+	} {
+		if err := validateConversation([]Message{{Role: "system", Content: TextContent("system")}, {Role: "user", Kind: tc.kind, SenderAgentID: tc.sender, Content: TextContent("bad")}}); err == nil {
+			t.Fatalf("accepted kind=%q sender=%q", tc.kind, tc.sender)
+		}
+	}
+}
