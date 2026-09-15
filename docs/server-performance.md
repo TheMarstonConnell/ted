@@ -135,7 +135,7 @@ same fixture/binary. Clone state has 8 agents, 384 messages, and 1,024 events.
 | Clone full agent | 317.977 µs | 64.750 µs | -79.6% | 88,438 → 29,354 |
 | Clone transcript | 292.216 µs | 62.829 µs | -78.5% | 80,338 → 28,170 |
 | Clone event page | 327.703 µs | 68.382 µs | -79.1% | 65,931 → 25,605 |
-| Decode unchanged 256 KiB recording frame | 239.016 µs | 0.002 µs | <−99.9% | 270,336 → 0 |
+| Decode unchanged 256 KiB recording frame | 229.553 µs | 0.003 µs | <−99.9% | 270,336 → 0 |
 
 The repeated-frame result measures only decoding a 256 KiB unchanged frame, not
 Chrome capture, ffmpeg, I/O, or full video generation; its one cached allocation
@@ -148,8 +148,10 @@ HTTP validation and direct WebSocket mapping also have standalone
 shared setup; the first process-wide schema load still has a cold-start cost.
 
 Post-review simplification removed generic clone and settings-selector façades,
-a one-use JSON-whitespace helper, a one-use frame decoder type, manual shallow
-clone loops, and manual `sync.Once` result storage. All standalone clone,
+a one-use JSON-whitespace helper, manual shallow clone loops, and manual
+`sync.Once` result storage. A standards review superseded the minimalism request
+to inline the frame cache: the small production `frameDecoder` remains so the
+benchmark invokes real code instead of duplicating its branch. All standalone clone,
 HTTP-validation/handler, WebSocket mapping/validation, and recording benchmarks
 were rerun for five samples, as were all 26 route scenarios because clone calls
 span route paths. Raw output is in `docs/performance/review-simplification.txt`,
