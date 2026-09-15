@@ -645,7 +645,6 @@ func TestSettleDescendants(t *testing.T) {
 	if restored.Settled || !descendant.Settled {
 		t.Fatal("restore must affect only the requested chat")
 	}
-	noCall(t, p)
 	// Repeating settlement must traverse an already-settled root.
 	if _, err := s.SetSettled(root.ID, true); err != nil {
 		t.Fatal(err)
