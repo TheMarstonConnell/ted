@@ -1,0 +1,16 @@
+goos: linux
+goarch: amd64
+pkg: github.com/TheMarstonConnell/ted/browser
+cpu: AMD Ryzen 7 5700G with Radeon Graphics
+BenchmarkRepeatedFrame/decode_every_tick-2         	     945	    230041 ns/op	  270336 B/op	       1 allocs/op
+BenchmarkRepeatedFrame/decode_every_tick-2         	    1045	    227108 ns/op	  270336 B/op	       1 allocs/op
+BenchmarkRepeatedFrame/decode_every_tick-2         	    1087	    229553 ns/op	  270341 B/op	       1 allocs/op
+BenchmarkRepeatedFrame/decode_every_tick-2         	    1051	    228201 ns/op	  270336 B/op	       1 allocs/op
+BenchmarkRepeatedFrame/decode_every_tick-2         	     996	    235313 ns/op	  270336 B/op	       1 allocs/op
+BenchmarkRepeatedFrame/cache_unchanged_frame-2     	68090611	         3.288 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRepeatedFrame/cache_unchanged_frame-2     	64739828	         3.091 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRepeatedFrame/cache_unchanged_frame-2     	68741710	         3.146 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRepeatedFrame/cache_unchanged_frame-2     	65719214	         3.313 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRepeatedFrame/cache_unchanged_frame-2     	76951647	         3.162 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/TheMarstonConnell/ted/browser	2.289s

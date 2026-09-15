@@ -23,6 +23,7 @@ func Handler(api http.Handler) http.Handler {
 		panic(err)
 	}
 	files := http.FileServer(http.FS(root))
+	index, indexErr := fs.ReadFile(root, "index.html")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" || r.URL.Path == "/v1" || strings.HasPrefix(r.URL.Path, "/v1/") {
 			api.ServeHTTP(w, r)
@@ -47,13 +48,12 @@ func Handler(api http.Handler) http.Handler {
 		}
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		data, err := fs.ReadFile(root, "index.html")
-		if err != nil {
+		if indexErr != nil {
 			http.Error(w, "web bundle unavailable", http.StatusInternalServerError)
 			return
 		}
 		if r.Method != http.MethodHead {
-			_, _ = w.Write(data)
+			_, _ = w.Write(index)
 		}
 	})
 }
