@@ -190,7 +190,6 @@
 
   .sidebar-action-row:is(:hover, :focus-within) .sidebar-action {
     width: 2rem;
-    min-width: 2rem;
     opacity: 1;
   }
 
@@ -206,7 +205,6 @@
 @media (max-width: 767px) and (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
   .sidebar-action-row:is(:hover, :focus-within) .sidebar-action {
     width: 3rem;
-    min-width: 3rem;
   }
 }
 

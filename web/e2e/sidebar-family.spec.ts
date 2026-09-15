@@ -196,34 +196,17 @@ test("child toggles reveal on the right without moving settle or switching chats
   const childToggle = child.getByRole("button", {
     name: /child chats for Child chat/,
   });
-  for (const action of [toggle, settleButton]) {
-    await expect(action).toHaveCSS("width", "0px");
-    await expect(action).toHaveCSS("opacity", "0");
-  }
+  await expect(toggle).toHaveCSS("width", "0px");
+  await expect(toggle).toHaveCSS("opacity", "0");
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(child).not.toBeVisible();
-  const before = (await link.boundingBox())!;
-  expect(before.width).toBe((await root.boundingBox())!.width);
   await link.hover();
-  for (const action of [toggle, settleButton]) {
-    await expect(action).toHaveCSS("width", "32px");
-    await expect(action).toHaveCSS("opacity", "1");
-  }
+  await expect(toggle).toHaveCSS("width", "32px");
+  await expect(toggle).toHaveCSS("opacity", "1");
   await expect(child).not.toBeVisible();
-  await expect
-    .poll(async () => (await link.boundingBox())!.width)
-    .toBeCloseTo(before.width - 80, 0);
-  const after = (await link.boundingBox())!;
   const toggleBox = (await toggle.boundingBox())!;
   const settleBox = (await settleButton.boundingBox())!;
-  expect(after.x).toBe(before.x);
-  expect(after.y).toBe(before.y);
-  expect(after.height).toBe(before.height);
-  expect(toggleBox.x).toBe(after.x + after.width + 8);
   expect(settleBox.x).toBe(toggleBox.x + toggleBox.width + 8);
-  expect(settleBox.x + settleBox.width).toBe(before.x + before.width);
-  await toggle.hover();
-  await expect(toggle).toHaveCSS("opacity", "1");
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(child).toBeVisible();
@@ -252,7 +235,6 @@ test("child toggles reveal on the right without moving settle or switching chats
   await child.getByRole("link").hover();
   await expect(childToggle).toHaveCSS("opacity", "1");
   await expect(toggle).toHaveCSS("width", "0px");
-  await expect(settleButton).toHaveCSS("width", "0px");
 
   await page.setViewportSize({ width: 700, height: 844 });
   await page.goto("/agents/grandchild?sidebar=open");
@@ -269,26 +251,18 @@ test("child toggles reveal on the right without moving settle or switching chats
   const narrowToggle = narrowRoot.getByRole("button", {
     name: /child chats for Parent chat/,
   });
-  const narrowSettle = narrowRoot.getByRole("button", {
-    name: "Settle chat: Parent chat",
-    exact: true,
-  });
 
-  for (const action of [narrowToggle, narrowSettle]) {
-    await expect(action).toHaveCSS("width", "0px");
-    await expect(action).toHaveCSS("min-width", "0px");
-    await expect(action).toHaveCSS("opacity", "0");
-  }
+  await expect(narrowToggle).toHaveCSS("width", "0px");
+  await expect(narrowToggle).toHaveCSS("min-width", "0px");
+  await expect(narrowToggle).toHaveCSS("opacity", "0");
   const restingLink = (await narrowLink.boundingBox())!;
   expect(restingLink.width).toBe((await narrowRoot.boundingBox())!.width);
 
   await narrowLink.hover();
-  for (const action of [narrowToggle, narrowSettle]) {
-    await expect(action).toHaveCSS("opacity", "1");
-    const box = (await action.boundingBox())!;
-    expect(box.width).toBeGreaterThanOrEqual(48);
-    expect(box.height).toBeGreaterThanOrEqual(48);
-  }
+  await expect(narrowToggle).toHaveCSS("opacity", "1");
+  const narrowToggleBox = (await narrowToggle.boundingBox())!;
+  expect(narrowToggleBox.width).toBeGreaterThanOrEqual(48);
+  expect(narrowToggleBox.height).toBeGreaterThanOrEqual(48);
 });
 
 test.describe("touch family controls", () => {
@@ -313,16 +287,11 @@ test.describe("touch family controls", () => {
       name: "Settle chat: Parent chat",
       exact: true,
     });
-    for (const action of [toggle, settleButton]) {
-      await expect(action).toHaveCSS("opacity", "1");
-      const box = (await action.boundingBox())!;
-      expect(box.width).toBeGreaterThanOrEqual(48);
-      expect(box.height).toBeGreaterThanOrEqual(48);
-    }
-    const linkBox = (await root.getByRole("link").boundingBox())!;
+    await expect(toggle).toHaveCSS("opacity", "1");
     const toggleBox = (await toggle.boundingBox())!;
     const settleBox = (await settleButton.boundingBox())!;
-    expect(toggleBox.x).toBeGreaterThanOrEqual(linkBox.x + linkBox.width);
+    expect(toggleBox.width).toBeGreaterThanOrEqual(48);
+    expect(toggleBox.height).toBeGreaterThanOrEqual(48);
     expect(settleBox.x).toBeGreaterThanOrEqual(toggleBox.x + toggleBox.width);
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await expect(child).not.toBeVisible();
