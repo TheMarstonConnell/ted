@@ -111,11 +111,11 @@ writes the same checkpoint and performs the same file/directory sync sequence.
 This supports a CPU improvement but does not establish an end-to-end storage
 latency improvement. Retest real write latency on deployment storage.
 
-A post-change CPU profile of the full agent-list benchmark attributes about
-65% of sampled CPU (cumulative) to JSON compaction and 39% to snapshot message
-copying (overlapping stacks). JSON normalization/response bytes are now major
-remaining costs; eliminating their scans safely would need a representation or
-cache-lifetime change, rather than silently returning different snapshots.
+A post-change CPU profile of the full agent-list benchmark identified JSON
+compaction and snapshot message copying as major remaining costs. No profile
+artifact is committed, so this report makes no reproducible numerical attribution.
+Eliminating those scans safely would need a representation or cache-lifetime
+change, rather than silently returning different snapshots.
 
 ## Helper results
 
