@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlPlane, isUnread, reduceEvent, type State } from "./store";
 import {
   groupAgents,
+  branchPullRequest,
   projectName,
   type Agent,
   type Event,
@@ -27,6 +28,7 @@ const agent = (id = "a", overrides: Partial<Agent> = {}): Agent => ({
 const state = (): State => ({
   agents: { a: agent() },
   projects: [],
+  pullRequests: {},
   models: [],
   transcripts: {},
   cursors: {},
@@ -891,7 +893,9 @@ describe("sidebar branch refresh", () => {
         expect(client.state.projects).toEqual([]);
         expect(client.state.agents).toEqual({});
         expect(
-          fetcher.mock.calls.filter(([path]) => path.startsWith("/v1/agents")),
+          fetcher.mock.calls.filter(
+            ([path]) => path === "/v1/agents?include_settled=true",
+          ),
         ).toHaveLength(failReload ? 3 : 2);
         fetcher.mockClear();
         await vi.advanceTimersByTimeAsync(15000);
@@ -904,6 +908,97 @@ describe("sidebar branch refresh", () => {
       }
     },
   );
+  it("refreshes PRs for unselected and settled threads, clears misses, and tolerates unavailable GitHub metadata", async () => {
+    let association: { branch: string; number?: number } = {
+      branch: "ted/feature",
+      number: 42,
+    };
+    let unavailable = false;
+    const fetcher = vi.fn(async (path: string) => {
+      if (path.endsWith("/pull-request")) {
+        if (unavailable)
+          return Response.json(
+            { error: { message: "offline" } },
+            { status: 503 },
+          );
+        return Response.json(association);
+      }
+      if (path.startsWith("/v1/agents"))
+        return Response.json([agent(), agent("b", { settled: true })]);
+      if (path === "/v1/projects") return Response.json(projects);
+      if (path === "/v1/models") return Response.json([]);
+      return Response.json(projects[0]);
+    });
+    const client = prepare(fetcher);
+    try {
+      await client.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(client.state.pullRequests).toEqual({
+        a: association,
+        b: association,
+      });
+      association = { branch: "ted/feature" };
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(client.state.pullRequests.a.number).toBeUndefined();
+      association = { branch: "ted/feature", number: 43 };
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(client.state.pullRequests.b.number).toBe(43);
+      unavailable = true;
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(client.state.pullRequests).toEqual({ a: {}, b: {} });
+      expect(client.state.error).toBeNull();
+      client.stop();
+      const calls = fetcher.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(fetcher.mock.calls).toHaveLength(calls);
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
+  it("deduplicates pending PR lookups and ignores results from a previous connection", async () => {
+    let resolveOld!: (response: Response) => void;
+    const old = new Promise<Response>((resolve) => {
+      resolveOld = resolve;
+    });
+    let requests = 0;
+    const fetcher = vi.fn(async (path: string) => {
+      if (path.endsWith("/pull-request"))
+        return ++requests === 1
+          ? old
+          : Response.json({ branch: "main", number: 43 });
+      if (path.startsWith("/v1/agents")) return Response.json([agent()]);
+      if (path === "/v1/projects") return Response.json(projects);
+      if (path === "/v1/models") return Response.json([]);
+      return Response.json(projects[0]);
+    });
+    const client = prepare(fetcher);
+    try {
+      await client.start();
+      client.select("a");
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(requests).toBe(1);
+      await client.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(client.state.pullRequests.a.number).toBe(43);
+      resolveOld(Response.json({ branch: "main", number: 42 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(client.state.pullRequests.a.number).toBe(43);
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
+  it("never renders a PR for a missing, changed, or unavailable branch", () => {
+    const association = { branch: "ted/feature", number: 42 };
+    expect(branchPullRequest(association, "ted/feature")).toBe(42);
+    expect(branchPullRequest(association, "main")).toBeUndefined();
+    expect(branchPullRequest(association, undefined)).toBeUndefined();
+    expect(branchPullRequest(undefined, "ted/feature")).toBeUndefined();
+    expect(
+      branchPullRequest({ branch: "ted/feature" }, "ted/feature"),
+    ).toBeUndefined();
+  });
   it("refreshes all represented projects once, including unselected and settled chats, and clears removed branches", async () => {
     const branches: Record<string, string | undefined> = {
       p: "main",

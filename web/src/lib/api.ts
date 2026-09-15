@@ -11,6 +11,7 @@ export type Output = Schema["AgentOutput"];
 // fixtures, although current servers always return them.
 export type WorkspaceSelection = Schema["WorkspaceSelection"];
 export type Workspace = Schema["Workspace"];
+export type AgentPullRequest = Schema["AgentPullRequest"];
 export type ProjectBranches = Schema["ProjectBranches"];
 export function agentWorkspace(agent: Agent): Workspace | undefined {
   return agent.workspace;
@@ -166,4 +167,16 @@ export function requestKey() {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
     byte.toString(16).padStart(2, "0"),
   ).join("");
+}
+
+export function branchPullRequest(
+  association: AgentPullRequest | undefined,
+  branch: string | undefined,
+): number | undefined {
+  return branch &&
+    association?.branch === branch &&
+    Number.isSafeInteger(association.number) &&
+    association.number! > 0
+    ? association.number
+    : undefined;
 }

@@ -30,6 +30,7 @@ generated. Edit the YAML, then regenerate; never edit `generated.go` manually.
 | GET, PATCH, DELETE | `/v1/projects/{project_id}` | Read, update name/defaults, delete a project and its settled agents |
 | GET, POST | `/v1/agents` | List or create durable agents |
 | GET, PATCH | `/v1/agents/{agent_id}` | Read an agent, update `settled`, or advance `read_cursor` |
+| GET | `/v1/agents/{agent_id}/pull-request` | Resolve the GitHub pull request for the agent's branch |
 | PATCH | `/v1/agents/{agent_id}/settings` | Patch model and/or effort for future turns |
 | GET, POST | `/v1/agents/{agent_id}/messages` | Inspect queue (including terminal entries) or submit text |
 | DELETE | `/v1/agents/{agent_id}/messages/{message_id}` | Cancel a pending entry only |
@@ -104,6 +105,27 @@ no-ops. A cursor beyond the agent's current event cursor returns 410
 response racing with the acknowledgement remains
 unread. A successful advance emits `agent.updated` and updates WebSocket
 inventory, synchronizing other clients.
+
+## Pull request association
+
+`GET /v1/agents/{agent_id}/pull-request` reports the branch used for GitHub
+association and, when found, its positive pull request `number`. It returns `{}`
+when the agent has no eligible branch, `{"branch":"..."}` for a miss or when Git
+or `gh` is unavailable, and adds `number` only for an exact match. Clients should
+confirm that the returned branch still equals the branch currently displayed for
+the agent before using the number.
+
+Current-checkout agents use the project's live branch. Managed worktree agents
+use only their recorded branch after setup reaches `ready`. Children sharing an
+already established worktree also qualify before their first send. Unstarted,
+fetching, creating, and failed worktrees do not resolve a pull request. Settled
+agents remain eligible. The server uses its
+noninteractive `gh` authentication, prefers an open pull request, retains the
+latest closed or merged association otherwise, and briefly caches matches,
+misses, and failures by repository and branch. Repository identity comes from the
+project's `origin` remote, including GitHub Enterprise hosts; pull requests whose
+base repository is only configured through another remote are intentionally not
+associated.
 
 ## Pagination
 
