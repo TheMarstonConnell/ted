@@ -49,14 +49,10 @@ type httpRouteMetadata struct {
 	query map[string]struct{}
 	allow string
 }
-type httpValidationMetadata struct {
-	routes map[*openapi3.Operation]httpRouteMetadata
-}
-
 type httpDefinition struct {
 	spec     *openapi3.T
 	router   routers.Router
-	metadata *httpValidationMetadata
+	metadata map[*openapi3.Operation]httpRouteMetadata
 }
 
 var (
@@ -76,8 +72,8 @@ var (
 	})
 )
 
-func newHTTPValidationMetadata(spec *openapi3.T) *httpValidationMetadata {
-	metadata := &httpValidationMetadata{routes: make(map[*openapi3.Operation]httpRouteMetadata)}
+func newHTTPValidationMetadata(spec *openapi3.T) map[*openapi3.Operation]httpRouteMetadata {
+	metadata := make(map[*openapi3.Operation]httpRouteMetadata)
 	for _, pathItem := range spec.Paths.Map() {
 		operations := pathItem.Operations()
 		allow := make([]string, 0, len(operations))
@@ -98,7 +94,7 @@ func newHTTPValidationMetadata(spec *openapi3.T) *httpValidationMetadata {
 					}
 				}
 			}
-			metadata.routes[operation] = httpRouteMetadata{query: query, allow: allowHeader}
+			metadata[operation] = httpRouteMetadata{query: query, allow: allowHeader}
 		}
 	}
 	return metadata
@@ -107,7 +103,7 @@ func newHTTPValidationMetadata(spec *openapi3.T) *httpValidationMetadata {
 // Validate against the same embedded document used to generate server types.
 // In addition to schema validation, reject duplicate/unknown query parameters,
 // unexpected bodies, trailing JSON, and oversized bodies before runtime mutation.
-func validateHTTP(router routers.Router, next http.Handler, metadata *httpValidationMetadata) http.Handler {
+func validateHTTP(router routers.Router, next http.Handler, metadata map[*openapi3.Operation]httpRouteMetadata) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		route, pathParams, err := router.FindRoute(r)
 		if err != nil {
@@ -117,7 +113,7 @@ func validateHTTP(router routers.Router, next http.Handler, metadata *httpValida
 				*probe = *r
 				probe.Method = method
 				if matched, _, probeErr := router.FindRoute(probe); probeErr == nil {
-					w.Header().Set("Allow", metadata.routes[matched.Operation].allow)
+					w.Header().Set("Allow", metadata[matched.Operation].allow)
 					writeProblem(w, 405, "method_not_allowed", "method not allowed")
 					return
 				}
@@ -126,7 +122,7 @@ func validateHTTP(router routers.Router, next http.Handler, metadata *httpValida
 			return
 		}
 
-		routeMetadata := metadata.routes[route.Operation]
+		routeMetadata := metadata[route.Operation]
 		query := emptyQuery
 		if r.URL.RawQuery != "" {
 			query, err = parseQuery(r)

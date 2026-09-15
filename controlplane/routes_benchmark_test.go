@@ -49,7 +49,6 @@ type routeBenchmarkFixture struct {
 	handler        http.Handler
 	service        *Service
 	stateJSON      []byte
-	dataDir        string
 	projectRoot    string
 	newProjectRoot string
 }
@@ -209,7 +208,6 @@ func newRouteBenchmarkFixture(b *testing.B) *routeBenchmarkFixture {
 		handler:        NewHandler(s),
 		service:        s,
 		stateJSON:      stateJSON,
-		dataDir:        dataDir,
 		projectRoot:    projectRoot,
 		newProjectRoot: newProjectRoot,
 	}
