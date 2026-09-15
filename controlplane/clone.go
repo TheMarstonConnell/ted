@@ -6,27 +6,6 @@ import (
 	"github.com/TheMarstonConnell/ted/agent"
 )
 
-// New snapshot types require an explicit deep-copy implementation.
-type cloneable interface {
-	diskState | Agent | []agent.Message | []Event
-}
-
-// Snapshots preserve wire fields and detach all mutable backing storage.
-func cloneSnapshot[T cloneable](value T) T {
-	switch value := any(value).(type) {
-	case diskState:
-		return any(cloneDiskState(value)).(T)
-	case Agent:
-		return any(cloneAgent(value)).(T)
-	case []agent.Message:
-		return any(cloneMessages(value)).(T)
-	case []Event:
-		return any(cloneEvents(value)).(T)
-	default:
-		panic("unreachable clone type")
-	}
-}
-
 func cloneDiskState(state diskState) diskState {
 	cloned := diskState{Version: state.Version}
 	if state.Projects != nil {

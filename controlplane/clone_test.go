@@ -110,9 +110,8 @@ func cloningFixture(t testing.TB) diskState {
 	return state
 }
 
-func assertJSONCloneEquivalent[T cloneable](t *testing.T, value T) {
+func assertJSONCloneEquivalent[T any](t *testing.T, got, value T) {
 	t.Helper()
-	got := cloneSnapshot(value)
 	want := jsonCloneForTest(value)
 	gotJSON, err := json.Marshal(got)
 	if err != nil {
@@ -129,20 +128,20 @@ func assertJSONCloneEquivalent[T cloneable](t *testing.T, value T) {
 
 func TestCloneSnapshotPreservesJSONSemantics(t *testing.T) {
 	state := cloningFixture(t)
-	assertJSONCloneEquivalent(t, state)
-	assertJSONCloneEquivalent(t, state.Agents["agent"].Agent)
-	assertJSONCloneEquivalent(t, state.Agents["agent"].Agent.Messages)
-	assertJSONCloneEquivalent(t, state.Agents["agent"].Events)
+	assertJSONCloneEquivalent(t, cloneDiskState(state), state)
+	assertJSONCloneEquivalent(t, cloneAgent(state.Agents["agent"].Agent), state.Agents["agent"].Agent)
+	assertJSONCloneEquivalent(t, cloneMessages(state.Agents["agent"].Agent.Messages), state.Agents["agent"].Agent.Messages)
+	assertJSONCloneEquivalent(t, cloneEvents(state.Agents["agent"].Events), state.Agents["agent"].Events)
 
-	if got := cloneSnapshot(state.Agents["agent"].Agent).Events; got != nil {
+	if got := cloneAgent(state.Agents["agent"].Agent).Events; got != nil {
 		t.Fatalf("Agent.Events survived json omission: %#v", got)
 	}
 	// Raw bytes may retain their internal whitespace; encoding/json still emits
 	// exactly the same canonical wire representation (checked above).
-	if got := cloneSnapshot(state.Agents["agent"].Events)[0].Data; !json.Valid(got) {
+	if got := cloneEvents(state.Agents["agent"].Events)[0].Data; !json.Valid(got) {
 		t.Fatalf("cloned event data is invalid JSON: %q", got)
 	}
-	if got := string(cloneSnapshot(state.Agents["agent"].Events)[1].Data); got != "null" {
+	if got := string(cloneEvents(state.Agents["agent"].Events)[1].Data); got != "null" {
 		t.Fatalf("nil event data = %q, want JSON null", got)
 	}
 }
@@ -160,7 +159,7 @@ func TestCloneSnapshotOmitsPrivateMessageProvenance(t *testing.T) {
 	// Messages exposes SourceModel while retaining private sourceModel for its
 	// own runtime. Snapshot cloning must retain only the exported durable field,
 	// exactly as the former JSON round trip did.
-	got := cloneSnapshot(messages)
+	got := cloneMessages(messages)
 	want := jsonCloneForTest(messages)
 
 	if !reflect.DeepEqual(got, want) {
@@ -170,7 +169,7 @@ func TestCloneSnapshotOmitsPrivateMessageProvenance(t *testing.T) {
 
 func TestCloneSnapshotIsolation(t *testing.T) {
 	original := cloningFixture(t)
-	cloned := cloneSnapshot(original)
+	cloned := cloneDiskState(original)
 
 	cloned.Projects["project"] = Project{ID: "replacement"}
 	cloned.Receipts["request"] = receipt{Fingerprint: "replacement"}
@@ -221,7 +220,7 @@ func TestCloneSnapshotIsolation(t *testing.T) {
 	// Independently cloning repeated pointers is also JSON round-trip behavior.
 	aliased := original.Agents["agent"]
 	original.Agents["alias"] = aliased
-	separate := cloneSnapshot(original)
+	separate := cloneDiskState(original)
 	separate.Agents["agent"].Agent.Title = "only one"
 	if separate.Agents["alias"].Agent.Title == "only one" {
 		t.Fatal("repeated storedAgent pointers remain aliased")
@@ -229,10 +228,10 @@ func TestCloneSnapshotIsolation(t *testing.T) {
 }
 
 func TestCloneSnapshotNilAndEmptySlices(t *testing.T) {
-	assertJSONCloneEquivalent(t, diskState{})
-	assertJSONCloneEquivalent(t, Agent{})
-	assertJSONCloneEquivalent(t, []agent.Message(nil))
-	assertJSONCloneEquivalent(t, []Event(nil))
+	assertJSONCloneEquivalent(t, cloneDiskState(diskState{}), diskState{})
+	assertJSONCloneEquivalent(t, cloneAgent(Agent{}), Agent{})
+	assertJSONCloneEquivalent(t, cloneMessages(nil), []agent.Message(nil))
+	assertJSONCloneEquivalent(t, cloneEvents(nil), []Event(nil))
 
 	emptyState := diskState{
 		Projects: map[string]Project{},
@@ -249,24 +248,24 @@ func TestCloneSnapshotNilAndEmptySlices(t *testing.T) {
 		ReasoningDetails: agent.ReasoningDetails{},
 		ToolCalls:        []agent.ToolCall{},
 	}}
-	assertJSONCloneEquivalent(t, emptyState)
-	assertJSONCloneEquivalent(t, emptyAgent)
-	assertJSONCloneEquivalent(t, []agent.Message{})
-	assertJSONCloneEquivalent(t, []Event{})
-	assertJSONCloneEquivalent(t, emptyMessageFields)
+	assertJSONCloneEquivalent(t, cloneDiskState(emptyState), emptyState)
+	assertJSONCloneEquivalent(t, cloneAgent(emptyAgent), emptyAgent)
+	assertJSONCloneEquivalent(t, cloneMessages([]agent.Message{}), []agent.Message{})
+	assertJSONCloneEquivalent(t, cloneEvents([]Event{}), []Event{})
+	assertJSONCloneEquivalent(t, cloneMessages(emptyMessageFields), emptyMessageFields)
 
-	clonedState := cloneSnapshot(emptyState)
+	clonedState := cloneDiskState(emptyState)
 	if clonedState.Projects == nil || clonedState.Agents == nil || clonedState.Receipts == nil {
 		t.Fatal("non-nil empty maps became nil")
 	}
-	clonedAgent := cloneSnapshot(emptyAgent)
+	clonedAgent := cloneAgent(emptyAgent)
 	if clonedAgent.Queue == nil || clonedAgent.Messages == nil {
 		t.Fatal("non-nil, non-omitempty agent slices became nil")
 	}
 	if clonedAgent.Events != nil {
 		t.Fatal("omitted Agent.Events did not become nil")
 	}
-	clonedMessages := cloneSnapshot(emptyMessageFields)
+	clonedMessages := cloneMessages(emptyMessageFields)
 	if clonedMessages[0].ReasoningDetails != nil || clonedMessages[0].ToolCalls != nil {
 		t.Fatal("empty omitempty message slices did not become nil")
 	}
@@ -278,7 +277,7 @@ func TestCloneSnapshotRejectsMalformedRawJSON(t *testing.T) {
 			t.Fatal("malformed raw JSON did not panic like json.Marshal")
 		}
 	}()
-	cloneSnapshot([]Event{{Data: json.RawMessage(`{"unterminated":`)}})
+	cloneEvents([]Event{{Data: json.RawMessage(`{"unterminated":`)}})
 }
 
 func benchmarkState() diskState {
@@ -333,7 +332,7 @@ func BenchmarkCloneDiskState(b *testing.B) {
 	b.Run("typed", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			benchmarkDiskStateSink = cloneSnapshot(state)
+			benchmarkDiskStateSink = cloneDiskState(state)
 		}
 	})
 	b.Run("json", func(b *testing.B) {
@@ -349,7 +348,7 @@ func BenchmarkCloneAgent(b *testing.B) {
 	b.Run("typed", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			benchmarkAgentSink = cloneSnapshot(value)
+			benchmarkAgentSink = cloneAgent(value)
 		}
 	})
 	b.Run("json", func(b *testing.B) {
@@ -365,7 +364,7 @@ func BenchmarkCloneMessages(b *testing.B) {
 	b.Run("typed", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			benchmarkMessagesSink = cloneSnapshot(value)
+			benchmarkMessagesSink = cloneMessages(value)
 		}
 	})
 	b.Run("json", func(b *testing.B) {
@@ -381,7 +380,7 @@ func BenchmarkCloneEvents(b *testing.B) {
 	b.Run("typed", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			benchmarkEventsSink = cloneSnapshot(value)
+			benchmarkEventsSink = cloneEvents(value)
 		}
 	})
 	b.Run("json", func(b *testing.B) {

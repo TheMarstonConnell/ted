@@ -189,7 +189,7 @@ func (h *httpAPI) validateWS(data []byte) (command wsCommand, err error) {
 	}
 	// Decoder.Decode accepts a valid value followed by another value. Reject any
 	// non-whitespace after that value to preserve json.Unmarshal's contract.
-	if !onlyJSONWhitespace(data[decoder.InputOffset():]) {
+	if len(bytes.Trim(data[decoder.InputOffset():], " \t\r\n")) != 0 {
 		return command, problem(400, "invalid", "expected a JSON object")
 	}
 	command.kind, _ = raw["type"].(string)
@@ -219,15 +219,6 @@ func (h *httpAPI) validateWS(data []byte) (command wsCommand, err error) {
 		}
 	}
 	return command, err
-}
-
-func onlyJSONWhitespace(data []byte) bool {
-	for _, c := range data {
-		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
-			return false
-		}
-	}
-	return true
 }
 
 func wsSubscribeFromJSON(raw map[string]any) (*api.WSSubscribe, error) {

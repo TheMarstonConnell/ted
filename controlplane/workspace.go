@@ -191,13 +191,13 @@ func (s *Service) updateWorkspace(id string, selection WorkspaceSelection, norma
 	if a.Agent.ProjectID != projectID || !ok || currentProject.ID != project.ID || currentProject.Root != project.Root {
 		return Agent{}, problem(409, "workspace_unavailable", "workspace project changed during validation; try again")
 	}
-	before := cloneSnapshot(s.state)
+	before := cloneDiskState(s.state)
 	a.Agent.Workspace = Workspace{WorkspaceSelection: selection, Status: "draft"}
 	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
 	if err := s.commitLocked(before); err != nil {
 		return Agent{}, err
 	}
-	return cloneSnapshot(a.Agent), nil
+	return cloneAgent(a.Agent), nil
 }
 
 // This is part of the first message's transaction, before any external effects.
@@ -247,7 +247,7 @@ func (s *Service) saveWorkspace(id string, update func(*Workspace)) error {
 	if s.storageErr != nil {
 		return s.storageErr
 	}
-	before := cloneSnapshot(s.state)
+	before := cloneDiskState(s.state)
 	a := s.state.Agents[id]
 	update(&a.Agent.Workspace)
 	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
