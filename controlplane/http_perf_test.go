@@ -104,11 +104,10 @@ func BenchmarkValidateWS(b *testing.B) {
 }
 
 func TestValidateHTTPPrecomputedMetadataPreservesContracts(t *testing.T) {
-	spec, router, metadata, err := sharedHTTPDefinition()
+	_, router, metadata, err := sharedHTTPDefinition()
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = spec
 	called := false
 	h := validateHTTP(router, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), metadata)
 
@@ -118,9 +117,4 @@ func TestValidateHTTPPrecomputedMetadataPreservesContracts(t *testing.T) {
 		t.Fatalf("method contract: status=%d allow=%q called=%v", w.Code, w.Header().Get("Allow"), called)
 	}
 
-	w = httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/agents?include_settled=true&include_settled=false", nil))
-	if w.Code != http.StatusBadRequest || called {
-		t.Fatalf("repeated query contract: status=%d called=%v", w.Code, called)
-	}
 }

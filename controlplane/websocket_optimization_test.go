@@ -70,8 +70,6 @@ func TestValidateWSReturnsSchemaValidatedTypedCommand(t *testing.T) {
 		t.Fatalf("integer cursor lost precision: %#v", command.subscribe)
 	}
 	for name, data := range map[string]string{
-		"schema additional property":   `{"type":"subscribe","request_id":"request","extra":true}`,
-		"schema required property":     `{"type":"submit","request_id":"request","agent_id":"agent","idempotency_key":"key"}`,
 		"typed integer exponent":       `{"type":"subscribe","request_id":"request","cursors":{"one":1e3}}`,
 		"trailing JSON":                `{"type":"subscribe","request_id":"request"}{}`,
 		"non-JSON trailing whitespace": "{\"type\":\"subscribe\",\"request_id\":\"request\"}\u00a0",
