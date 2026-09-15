@@ -171,9 +171,8 @@
   }
 }
 
-/* Fine-pointer-only sidebar actions make room while their row is active. On
-   narrow layouts they retain the 48px target. Excluding any coarse pointer
-   keeps hybrid touchscreen controls visible even when a mouse is primary. */
+/* Excluding any coarse pointer keeps hybrid touchscreen controls visible
+   even when a mouse is primary. */
 @media (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
   .sidebar-action-row {
     gap: 0;
