@@ -179,12 +179,6 @@ func (c *Content) UnmarshalJSON(data []byte) error {
 // costs the model its reasoning chain across a sequence of tool calls.
 type ReasoningDetails []json.RawMessage
 
-// BotNotification carries caller-supplied provenance, not authenticated identity.
-type BotNotification struct {
-	Text          string
-	SenderAgentID string
-}
-
 type Message struct {
 	// SourceModel preserves reasoning provenance in exported checkpoints. It is
 	// removed from provider requests by messagesForModel.

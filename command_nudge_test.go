@@ -20,10 +20,6 @@ func TestNudgeCommand(t *testing.T) {
 			t.Setenv("TED_THREAD_ID", sender)
 			posts := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == "GET" && r.URL.Path == "/health" {
-					fmt.Fprint(w, `{"api_version":"1"}`)
-					return
-				}
 				posts++
 				if r.Method != "POST" || r.URL.Path != "/v1/agents/other-chat/messages" {
 					t.Errorf("unexpected request: %s %s", r.Method, r.URL)
@@ -124,7 +120,7 @@ func TestNudgeCommandUnavailableServerAndCancellation(t *testing.T) {
 		}
 		err := cmd.ExecuteContext(ctx)
 		cancel()
-		if err == nil || !strings.Contains(err.Error(), "connect to server") || out.Len() != 0 {
+		if err == nil || out.Len() != 0 {
 			t.Fatalf("expected connection failure without receipt: %v, %q", err, out.String())
 		}
 	}

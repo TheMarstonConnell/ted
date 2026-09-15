@@ -16,6 +16,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/TheMarstonConnell/ted/agent"
 	"github.com/TheMarstonConnell/ted/commands"
+	"github.com/TheMarstonConnell/ted/remote"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -153,11 +154,28 @@ type tuiAgent interface {
 	Turn(string) error
 }
 
-func formatTUIBotNotification(notification agent.BotNotification) string {
+func formatTUIBotNotification(notification remote.QueuedMessage) string {
 	if notification.SenderAgentID == "" {
 		return "Bot notification: " + notification.Text
 	}
 	return "Bot notification from chat " + notification.SenderAgentID + ": " + notification.Text
+}
+
+func responseTranscriptEntry(response agent.AgentResponse) (transcriptEntry, bool) {
+	switch response.ResponseType {
+	case "user":
+		return transcriptEntry{kind: userMessage, content: response.Content}, true
+	case "bot":
+		return transcriptEntry{kind: toolCallMessage, content: response.Content}, true
+	case "usage", "tool_result":
+		return transcriptEntry{}, false
+	case "status":
+		return transcriptEntry{kind: commandMessage, content: response.Content}, true
+	case "tool":
+		return transcriptEntry{kind: toolCallMessage, content: response.Content}, true
+	default:
+		return transcriptEntry{kind: agentMessage, content: response.Content}, true
+	}
 }
 
 func (m model) acceptsQueuedInput() bool {
@@ -204,43 +222,56 @@ func initialModel(client tuiAgent) model {
 
 	directory := client.WorkingDir()
 	entries := []transcriptEntry{{kind: bannerMessage, content: "Ted Coding Agent"}}
-	for _, message := range client.Messages() {
-		switch message.Role {
-		case "user":
-			text := message.Content.Text()
-			if text == "" {
-				text = "[Image attachment]"
-			}
-			kind := userMessage
-			if message.Kind == "bot" {
-				kind = toolCallMessage
-				text = formatTUIBotNotification(agent.BotNotification{Text: text, SenderAgentID: message.SenderAgentID})
-			}
-			entries = append(entries, transcriptEntry{kind: kind, content: text})
-		case "tool":
-			// Results stay in server history, not the visible transcript.
-			continue
-		case "assistant":
-			if text := message.Content.Text(); text != "" {
-				entries = append(entries, transcriptEntry{kind: agentMessage, content: text})
-			}
-			for _, call := range message.ToolCalls {
-				text := call.Function.Name + " " + call.Function.Arguments
-				var args struct {
-					Command string `json:"command"`
+	var replayed bool
+	if source, ok := client.(interface {
+		InitialUpdates() ([]remote.Update, bool)
+	}); ok {
+		var initial []remote.Update
+		initial, replayed = source.InitialUpdates()
+		if replayed {
+			for _, update := range initial {
+				if update.Bot != nil {
+					entries = append(entries, transcriptEntry{kind: toolCallMessage, content: formatTUIBotNotification(*update.Bot)})
 				}
-				if call.Function.Name == "bash" && json.Unmarshal([]byte(call.Function.Arguments), &args) == nil {
-					text = fmt.Sprintf("Ran shell command - %q", args.Command)
+				if update.Output != nil {
+					if entry, visible := responseTranscriptEntry(*update.Output); visible {
+						entries = append(entries, entry)
+					}
 				}
-				entries = append(entries, transcriptEntry{kind: toolCallMessage, content: text})
 			}
 		}
 	}
-	if queued, ok := client.(interface {
-		InFlightBotNotifications() []agent.BotNotification
-	}); ok {
-		for _, notification := range queued.InFlightBotNotifications() {
-			entries = append(entries, transcriptEntry{kind: toolCallMessage, content: formatTUIBotNotification(notification)})
+	if !replayed {
+		for _, message := range client.Messages() {
+			switch message.Role {
+			case "user":
+				text := message.Content.Text()
+				if text == "" {
+					text = "[Image attachment]"
+				}
+				kind := userMessage
+				if message.Kind == "bot" {
+					kind = toolCallMessage
+					text = formatTUIBotNotification(remote.QueuedMessage{Text: text, SenderAgentID: message.SenderAgentID})
+				}
+				entries = append(entries, transcriptEntry{kind: kind, content: text})
+			case "tool":
+				continue
+			case "assistant":
+				if text := message.Content.Text(); text != "" {
+					entries = append(entries, transcriptEntry{kind: agentMessage, content: text})
+				}
+				for _, call := range message.ToolCalls {
+					text := call.Function.Name + " " + call.Function.Arguments
+					var args struct {
+						Command string `json:"command"`
+					}
+					if call.Function.Name == "bash" && json.Unmarshal([]byte(call.Function.Arguments), &args) == nil {
+						text = fmt.Sprintf("Ran shell command - %q", args.Command)
+					}
+					entries = append(entries, transcriptEntry{kind: toolCallMessage, content: text})
+				}
+			}
 		}
 	}
 
@@ -540,24 +571,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.renderTranscript()
 		}
 		m.viewport.GotoBottom()
-	case agent.BotNotification:
+	case remote.QueuedMessage:
 		m.appendMessage(toolCallMessage, formatTUIBotNotification(msg))
 		return m, nil
 	case agent.AgentResponse:
-		if msg.ResponseType == "user" {
-			m.appendMessage(userMessage, msg.Content)
-		} else if msg.ResponseType == "bot" {
-			m.appendMessage(toolCallMessage, msg.Content)
-		} else if msg.ResponseType == "usage" {
-			return m, nil // Usage changed; redraw the toolbar without transcript noise.
-		} else if msg.ResponseType == "status" {
-			m.appendMessage(commandMessage, msg.Content)
-		} else if msg.ResponseType == "tool_result" {
-			return m, nil // Keep results in the session without displaying them.
-		} else if msg.ResponseType == "tool" {
-			m.appendMessage(toolCallMessage, msg.Content)
-		} else {
-			m.appendMessage(agentMessage, msg.Content)
+		if entry, visible := responseTranscriptEntry(msg); visible {
+			m.appendMessage(entry.kind, entry.content)
 		}
 		return m, nil
 	case remoteDeletedMsg:

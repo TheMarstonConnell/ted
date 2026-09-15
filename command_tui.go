@@ -227,7 +227,14 @@ func prepareRemoteAgent(ctx context.Context, c *remote.Client, modelID, effort, 
 			}
 		}
 	}
-	instance := remote.NewAgent(ctx, c, snapshot, project.Root, models)
+	events, err := c.EventsThrough(ctx, snapshot.ID, snapshot.Cursor)
+	if err != nil {
+		return nil, fmt.Errorf("load agent events: %w", err)
+	}
+	instance, err := remote.NewAgentWithEvents(ctx, c, snapshot, project.Root, models, events)
+	if err != nil {
+		return nil, err
+	}
 	if err := applyTUISettings(instance, modelID, effort); err != nil {
 		return nil, err
 	}

@@ -13,18 +13,44 @@ import (
 // Agent is a synchronized rendering/settings adapter, not an execution engine.
 // The server queues Turn input and owns tools, transcripts and credentials.
 type Agent struct {
-	client   *Client
-	ctx      context.Context
-	mu       sync.RWMutex
-	snapshot Snapshot
-	id       string
-	root     string
-	models   []agent.ModelInfo
-	cursor   uint64 // consumed event cursor, never advanced by inventory snapshots
+	client         *Client
+	ctx            context.Context
+	mu             sync.RWMutex
+	snapshot       Snapshot
+	id             string
+	root           string
+	models         []agent.ModelInfo
+	cursor         uint64 // consumed event cursor, never advanced by inventory snapshots
+	initialUpdates []Update
+	replayed       bool
 }
 
 func NewAgent(ctx context.Context, c *Client, s Snapshot, root string, models []agent.ModelInfo) *Agent {
 	return &Agent{client: c, ctx: ctx, snapshot: s, id: s.ID, root: root, models: models, cursor: s.Cursor}
+}
+
+// NewAgentWithEvents reconstructs display updates from retained events.
+func NewAgentWithEvents(ctx context.Context, c *Client, s Snapshot, root string, models []agent.ModelInfo, events []Event) (*Agent, error) {
+	a := &Agent{client: c, ctx: ctx, snapshot: s, id: s.ID, root: root, models: models}
+	a.snapshot.Messages = nil
+	for _, event := range events {
+		if event.Cursor != a.cursor+1 {
+			return nil, fmt.Errorf("event replay gap: got cursor %d after %d", event.Cursor, a.cursor)
+		}
+		if err := a.consume(event, func(update Update) {
+			if update.Output != nil || update.Bot != nil {
+				a.initialUpdates = append(a.initialUpdates, update)
+			}
+		}); err != nil {
+			return nil, fmt.Errorf("replay event %d: %w", event.Cursor, err)
+		}
+	}
+	if a.cursor != s.Cursor {
+		return nil, fmt.Errorf("event replay ended at cursor %d, want %d", a.cursor, s.Cursor)
+	}
+	a.snapshot = s
+	a.replayed = true
+	return a, nil
 }
 func (a *Agent) AcceptsQueuedInput() bool { return true }
 
@@ -143,21 +169,15 @@ func (a *Agent) Continue() error {
 // Update keeps bot provenance structured until the terminal presentation boundary.
 type Update struct {
 	Output *agent.AgentResponse
-	Bot    *agent.BotNotification
+	Bot    *QueuedMessage
 	Busy   *bool
 	Err    error
 }
 
-func (a *Agent) InFlightBotNotifications() []agent.BotNotification {
+func (a *Agent) InitialUpdates() ([]Update, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	var notifications []agent.BotNotification
-	for _, q := range a.snapshot.Queue {
-		if q.Kind == "bot" && (q.Status == "pending" || q.Status == "running") {
-			notifications = append(notifications, agent.BotNotification{Text: q.Text, SenderAgentID: q.SenderAgentID})
-		}
-	}
-	return notifications
+	return append([]Update(nil), a.initialUpdates...), a.replayed
 }
 
 func (a *Agent) consume(e Event, notify func(Update)) error {
@@ -167,7 +187,7 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 		return nil
 	}
 	var output *agent.AgentResponse
-	var bot *agent.BotNotification
+	var bot *QueuedMessage
 	var busy *bool
 	switch e.Type {
 	case "agent.updated":
@@ -204,7 +224,7 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 		}
 		if q.Text != "" {
 			if q.Kind == "bot" {
-				bot = &agent.BotNotification{Text: q.Text, SenderAgentID: q.SenderAgentID}
+				bot = &q
 			} else {
 				output = &agent.AgentResponse{ResponseType: "user", Content: q.Text}
 			}

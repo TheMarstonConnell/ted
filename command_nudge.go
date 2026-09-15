@@ -25,9 +25,6 @@ func newNudgeCommand() *cobra.Command {
 			if cmd.Flags().Changed("idempotency-key") && strings.TrimSpace(key) == "" {
 				return fmt.Errorf("idempotency key cannot be empty")
 			}
-			if err := checkServer(cmd.Context(), server); err != nil {
-				return fmt.Errorf("connect to server %s: %w", server, err)
-			}
 			m, err := remote.New(server).Nudge(cmd.Context(), args[0], args[1], os.Getenv("TED_THREAD_ID"), key)
 			if err != nil {
 				return err
