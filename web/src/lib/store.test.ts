@@ -989,6 +989,62 @@ describe("sidebar branch refresh", () => {
       vi.useRealTimers();
     }
   });
+  it("reruns a PR lookup immediately when its branch changes in flight", async () => {
+    let resolveFirst!: (response: Response) => void;
+    const first = new Promise<Response>((resolve) => {
+      resolveFirst = resolve;
+    });
+    let requests = 0;
+    const initial = agent("a", {
+      workspace: {
+        mode: "worktree",
+        locked: true,
+        status: "ready",
+        path: "/srv/worktree",
+        branch: "branch-a",
+      },
+    });
+    const fetcher = vi.fn(async (path: string) => {
+      if (path.endsWith("/pull-request")) {
+        requests++;
+        return requests === 1
+          ? first
+          : Response.json({ branch: "branch-b", number: 52 });
+      }
+      if (path.startsWith("/v1/agents")) return Response.json([initial]);
+      if (path === "/v1/projects") return Response.json(projects);
+      if (path === "/v1/models") return Response.json([]);
+      return Response.json(projects[0]);
+    });
+    const client = prepare(fetcher);
+    try {
+      await client.start();
+      expect(requests).toBe(1);
+      (WebSocket as any).instances[0].onmessage({
+        data: JSON.stringify({
+          type: "inventory",
+          agent: {
+            ...initial,
+            workspace: { ...initial.workspace, branch: "branch-b" },
+          },
+        }),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(client.state.agents.a.workspace?.branch).toBe("branch-b");
+      expect(requests).toBe(1);
+
+      resolveFirst(Response.json({ branch: "branch-a", number: 51 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(requests).toBe(2);
+      expect(client.state.pullRequests.a).toEqual({
+        branch: "branch-b",
+        number: 52,
+      });
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
+  });
   it("never renders a PR for a missing, changed, or unavailable branch", () => {
     const association = { branch: "ted/feature", number: 42 };
     expect(branchPullRequest(association, "ted/feature")).toBe(42);

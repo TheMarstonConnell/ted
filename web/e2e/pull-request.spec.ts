@@ -122,6 +122,48 @@ for (const [width, theme] of [
   });
 }
 
+for (const width of [1440, 390]) {
+  test(`inherited worktree drafts show their recorded PR and keep workspace controls (${width}px)`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const fixture = await setup(page);
+    fixture.setWorkspace("a1", {
+      mode: "worktree",
+      locked: false,
+      shared: true,
+      status: "draft",
+      path: "/var/lib/ted/worktrees/parent",
+      branch,
+      base_branch: "origin/main",
+    });
+
+    const footer = page.getByRole("group", {
+      name: "Composer footer",
+      exact: true,
+    });
+    await expect(
+      footer.getByRole("combobox", { name: "Workspace", exact: true }),
+    ).toBeVisible();
+    await expect(
+      footer.getByLabel("Pull request #42", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      footer.getByRole("group", { name: "Git branch", exact: true }),
+    ).toHaveText(branch);
+    await expect(
+      footer.getByRole("combobox", { name: "Start from", exact: true }),
+    ).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("inherited-worktree-draft.png"),
+    });
+    await testInfo.attach("Inherited worktree draft PR", {
+      path: testInfo.outputPath("inherited-worktree-draft.png"),
+      contentType: "image/png",
+    });
+  });
+}
+
 test("PR metadata refreshes after creation and never follows a different or unstarted branch", async ({
   page,
 }) => {

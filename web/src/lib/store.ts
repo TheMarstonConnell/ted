@@ -210,6 +210,7 @@ export class ControlPlane {
   private poll?: ReturnType<typeof setInterval>;
   private pullRequestPoll?: ReturnType<typeof setInterval>;
   private pullRequestRequests = new Map<string, number>();
+  private pullRequestReruns = new Map<string, number>();
   private branchPoll?: ReturnType<typeof setInterval>;
   private branchRequests = new Map<string, number>();
   private failures = 0;
@@ -478,34 +479,47 @@ export class ControlPlane {
     const generation = this.generation;
     await Promise.allSettled(
       ids.map(async (id) => {
-        if (
-          !this.state.agents[id]?.project_id ||
-          this.pullRequestRequests.get(id) === generation
-        )
+        if (!this.state.agents[id]?.project_id) return;
+        if (this.pullRequestRequests.get(id) === generation) {
+          this.pullRequestReruns.set(id, generation);
           return;
+        }
         this.pullRequestRequests.set(id, generation);
         try {
-          const pullRequest = await api<AgentPullRequest>(
-            `${agentPath(id)}/pull-request`,
+          do {
+            if (this.pullRequestReruns.get(id) === generation)
+              this.pullRequestReruns.delete(id);
+            try {
+              const pullRequest = await api<AgentPullRequest>(
+                `${agentPath(id)}/pull-request`,
+              );
+              if (
+                this.stopped ||
+                this.generation !== generation ||
+                !this.state.agents[id]
+              )
+                return;
+              this.set({
+                pullRequests: { ...this.state.pullRequests, [id]: pullRequest },
+              });
+            } catch {
+              // Optional GitHub metadata must not interrupt chat or event replay.
+              if (!this.stopped && this.generation === generation)
+                this.set({
+                  pullRequests: { ...this.state.pullRequests, [id]: {} },
+                });
+            }
+          } while (
+            !this.stopped &&
+            this.generation === generation &&
+            this.state.agents[id]?.project_id &&
+            this.pullRequestReruns.get(id) === generation
           );
-          if (
-            this.stopped ||
-            this.generation !== generation ||
-            !this.state.agents[id]
-          )
-            return;
-          this.set({
-            pullRequests: { ...this.state.pullRequests, [id]: pullRequest },
-          });
-        } catch {
-          // Optional GitHub metadata must not interrupt chat or event replay.
-          if (!this.stopped && this.generation === generation)
-            this.set({
-              pullRequests: { ...this.state.pullRequests, [id]: {} },
-            });
         } finally {
           if (this.pullRequestRequests.get(id) === generation)
             this.pullRequestRequests.delete(id);
+          if (this.pullRequestReruns.get(id) === generation)
+            this.pullRequestReruns.delete(id);
         }
       }),
     );

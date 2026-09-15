@@ -860,7 +860,7 @@ function ChatWorkspace() {
                   ) : (
                     <WorkspaceFields
                       compact
-                      gitBranch={project.git_branch}
+                      gitBranch={gitBranch}
                       prNumber={prNumber}
                       projectId={project.id}
                       value={workspaceSelection}

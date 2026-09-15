@@ -6,10 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +33,6 @@ type pullRequestCacheKey struct {
 
 type pullRequestCacheEntry struct {
 	number    int
-	err       error
 	expiresAt time.Time
 	ready     chan struct{}
 }
@@ -54,34 +50,12 @@ type pullRequestResolver struct {
 func newPullRequestResolver() *pullRequestResolver {
 	return &pullRequestResolver{
 		cache:   map[pullRequestCacheKey]*pullRequestCacheEntry{},
-		run:     runPullRequestCommand,
+		run:     runWorkspaceCommand,
 		now:     time.Now,
 		ttl:     pullRequestCacheTTL,
 		timeout: pullRequestCommandTimeout,
 		limit:   make(chan struct{}, pullRequestConcurrency),
 	}
-}
-
-func runPullRequestCommand(ctx context.Context, directory, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = directory
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GH_PROMPT_DISABLED=1")
-	cmd.WaitDelay = time.Second
-	output, err := cmd.CombinedOutput()
-	if err == nil {
-		return output, nil
-	}
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	detail := strings.TrimSpace(string(output))
-	if len(detail) > 2000 {
-		detail = detail[:2000]
-	}
-	if detail == "" {
-		return nil, err
-	}
-	return nil, fmt.Errorf("%s: %w: %s", name, err, detail)
 }
 
 func (r *pullRequestResolver) currentBranch(ctx context.Context, directory string) string {
@@ -100,7 +74,7 @@ func (r *pullRequestResolver) currentBranch(ctx context.Context, directory strin
 	return strings.TrimSpace(string(output))
 }
 
-func (r *pullRequestResolver) lookup(ctx context.Context, repositoryRoot, directory, branch string) (int, error) {
+func (r *pullRequestResolver) lookup(ctx context.Context, repositoryRoot, directory, branch string) int {
 	key := pullRequestCacheKey{repository: filepath.Clean(repositoryRoot), branch: branch}
 	now := r.now()
 	r.mu.Lock()
@@ -113,67 +87,48 @@ func (r *pullRequestResolver) lookup(ctx context.Context, repositoryRoot, direct
 	if entry := r.cache[key]; entry != nil {
 		ready := entry.ready
 		if ready == nil {
-			number, err := entry.number, entry.err
+			number := entry.number
 			r.mu.Unlock()
-			return number, err
+			return number
 		}
 		r.mu.Unlock()
 		select {
 		case <-ready:
-			return r.entryResult(entry)
+			r.mu.Lock()
+			number := entry.number
+			r.mu.Unlock()
+			return number
 		case <-ctx.Done():
-			return 0, ctx.Err()
+			return 0
 		}
 	}
 	entry := &pullRequestCacheEntry{ready: make(chan struct{})}
 	r.cache[key] = entry
 	r.mu.Unlock()
 
-	ready := entry.ready
-	go r.populate(key, entry, repositoryRoot, directory, branch)
-	select {
-	case <-ready:
-		return r.entryResult(entry)
-	case <-ctx.Done():
-		return 0, ctx.Err()
-	}
-}
-
-func (r *pullRequestResolver) entryResult(entry *pullRequestCacheEntry) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if entry.ready != nil {
-		return 0, errors.New("pull request lookup did not complete")
-	}
-	return entry.number, entry.err
-}
-
-func (r *pullRequestResolver) populate(key pullRequestCacheKey, entry *pullRequestCacheEntry, repositoryRoot, directory, branch string) {
-	ctx, cancel := context.WithTimeout(context.Background(), r.timeout)
+	lookupCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
+	number := 0
 	select {
 	case r.limit <- struct{}{}:
-		defer func() { <-r.limit }()
-	case <-ctx.Done():
-		r.finish(key, entry, 0, ctx.Err())
-		return
+		resolved, err := r.lookupUncached(lookupCtx, repositoryRoot, directory, branch)
+		<-r.limit
+		if err == nil {
+			number = resolved
+		}
+	case <-lookupCtx.Done():
 	}
-	number, err := r.lookupUncached(ctx, repositoryRoot, directory, branch)
-	r.finish(key, entry, number, err)
-}
 
-func (r *pullRequestResolver) finish(key pullRequestCacheKey, entry *pullRequestCacheEntry, number int, err error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.cache[key] != entry {
-		return
+	if r.cache[key] == entry {
+		ready := entry.ready
+		entry.number = number
+		entry.expiresAt = r.now().Add(r.ttl)
+		entry.ready = nil
+		close(ready)
 	}
-	ready := entry.ready
-	entry.number = number
-	entry.err = err
-	entry.expiresAt = r.now().Add(r.ttl)
-	entry.ready = nil
-	close(ready)
+	r.mu.Unlock()
+	return number
 }
 
 func (r *pullRequestResolver) lookupUncached(ctx context.Context, repositoryRoot, directory, branch string) (int, error) {
@@ -251,32 +206,35 @@ func selectPullRequest(data []byte, repository, branch string) (int, error) {
 	if err := json.Unmarshal(data, &candidates); err != nil {
 		return 0, fmt.Errorf("decode gh pull requests: %w", err)
 	}
-	filtered := candidates[:0]
-	for _, candidate := range candidates {
+	var selected *githubPullRequest
+	for i := range candidates {
+		candidate := &candidates[i]
 		if candidate.Number < 1 || candidate.HeadRefName != branch || candidate.IsCrossRepository {
 			continue
 		}
-		if head := pullRequestHeadRepository(candidate); head != "" && !sameRepository(head, repository) {
+		if head := pullRequestHeadRepository(*candidate); head != "" && !sameRepository(head, repository) {
 			continue
 		}
-		filtered = append(filtered, candidate)
+		if selected == nil {
+			selected = candidate
+			continue
+		}
+		open, selectedOpen := strings.EqualFold(candidate.State, "open"), strings.EqualFold(selected.State, "open")
+		if open != selectedOpen {
+			if open {
+				selected = candidate
+			}
+			continue
+		}
+		latest, selectedLatest := pullRequestTime(*candidate), pullRequestTime(*selected)
+		if latest.After(selectedLatest) || latest.Equal(selectedLatest) && candidate.Number > selected.Number {
+			selected = candidate
+		}
 	}
-	sort.SliceStable(filtered, func(i, j int) bool {
-		openI := strings.EqualFold(filtered[i].State, "open")
-		openJ := strings.EqualFold(filtered[j].State, "open")
-		if openI != openJ {
-			return openI
-		}
-		timeI, timeJ := pullRequestTime(filtered[i]), pullRequestTime(filtered[j])
-		if !timeI.Equal(timeJ) {
-			return timeI.After(timeJ)
-		}
-		return filtered[i].Number > filtered[j].Number
-	})
-	if len(filtered) == 0 {
+	if selected == nil {
 		return 0, nil
 	}
-	return filtered[0].Number, nil
+	return selected.Number, nil
 }
 
 func pullRequestTime(candidate githubPullRequest) time.Time {
@@ -346,8 +304,7 @@ func (s *Service) AgentPullRequest(ctx context.Context, id string) (AgentPullReq
 		}
 	}
 	result := AgentPullRequest{Branch: branch}
-	number, lookupErr := s.pullRequests.lookup(ctx, project.Root, directory, branch)
-	if lookupErr == nil && number > 0 {
+	if number := s.pullRequests.lookup(ctx, project.Root, directory, branch); number > 0 {
 		result.Number = number
 	}
 	return result, nil

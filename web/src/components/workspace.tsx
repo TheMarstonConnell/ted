@@ -159,7 +159,7 @@ export function WorkspaceFields({
           </Select>
         </div>
       </div>
-      {compact && value.mode === "current_checkout" && gitBranch && (
+      {compact && gitBranch && (
         <WorkspaceBranch branch={gitBranch} prNumber={prNumber} />
       )}
       {value.mode === "worktree" && (

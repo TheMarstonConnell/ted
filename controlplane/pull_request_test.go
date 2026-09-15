@@ -76,9 +76,9 @@ func TestPullRequestLookupUsesExactBranchAndRepository(t *testing.T) {
 		}
 	})
 
-	number, err := resolver.lookup(context.Background(), "/repo", "/repo/worktree", "ted/exact")
-	if err != nil || number != 42 {
-		t.Fatalf("lookup = %d, %v; want 42", number, err)
+	number := resolver.lookup(context.Background(), "/repo", "/repo/worktree", "ted/exact")
+	if number != 42 {
+		t.Fatalf("lookup = %d; want 42", number)
 	}
 	want := [][]string{
 		{"/repo", "git", "config", "--get", "remote.origin.url"},
@@ -109,31 +109,30 @@ func TestPullRequestLookupDeduplicatesAndCachesFailures(t *testing.T) {
 	resolver.now = func() time.Time { return clock }
 
 	const callers = 8
-	results := make(chan error, callers)
+	results := make(chan int, callers)
 	for range callers {
 		go func() {
-			_, err := resolver.lookup(context.Background(), "/repo", "/repo", "feature")
-			results <- err
+			results <- resolver.lookup(context.Background(), "/repo", "/repo", "feature")
 		}()
 	}
 	<-started
 	close(release)
 	for range callers {
-		if err := <-results; err == nil {
-			t.Fatal("failed lookup unexpectedly succeeded")
+		if number := <-results; number != 0 {
+			t.Fatalf("failed lookup = %d; want 0", number)
 		}
 	}
-	if _, err := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); err == nil {
-		t.Fatal("cached failure unexpectedly succeeded")
+	if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 0 {
+		t.Fatalf("cached failure = %d; want 0", number)
 	}
 	if got := ghCalls.Load(); got != 1 {
 		t.Fatalf("gh calls during cache lifetime = %d; want 1", got)
 	}
 
 	clock = clock.Add(pullRequestCacheTTL + time.Second)
-	number, err := resolver.lookup(context.Background(), "/repo", "/repo", "feature")
-	if err != nil || number != 8 {
-		t.Fatalf("lookup after expiry = %d, %v; want 8", number, err)
+	number := resolver.lookup(context.Background(), "/repo", "/repo", "feature")
+	if number != 8 {
+		t.Fatalf("lookup after expiry = %d; want 8", number)
 	}
 	if got := ghCalls.Load(); got != 2 {
 		t.Fatalf("gh calls after expiry = %d; want 2", got)
@@ -150,9 +149,8 @@ func TestPullRequestLookupCachesMisses(t *testing.T) {
 		return []byte(`[]`), nil
 	})
 	for range 2 {
-		number, err := resolver.lookup(context.Background(), "/repo", "/repo", "feature")
-		if err != nil || number != 0 {
-			t.Fatalf("miss = %d, %v", number, err)
+		if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 0 {
+			t.Fatalf("miss = %d", number)
 		}
 	}
 	if got := ghCalls.Load(); got != 1 {
@@ -173,11 +171,10 @@ func TestPullRequestLookupBoundsConcurrency(t *testing.T) {
 	})
 
 	const lookups = pullRequestConcurrency + 4
-	done := make(chan error, lookups)
+	done := make(chan int, lookups)
 	for i := range lookups {
 		go func() {
-			_, err := resolver.lookup(context.Background(), "/repo", "/repo", fmt.Sprintf("feature-%d", i))
-			done <- err
+			done <- resolver.lookup(context.Background(), "/repo", "/repo", fmt.Sprintf("feature-%d", i))
 		}()
 	}
 	for range pullRequestConcurrency {
@@ -190,9 +187,46 @@ func TestPullRequestLookupBoundsConcurrency(t *testing.T) {
 	}
 	close(release)
 	for range lookups {
-		if err := <-done; err != nil {
-			t.Fatal(err)
+		if number := <-done; number != 0 {
+			t.Fatalf("lookup = %d; want miss", number)
 		}
+	}
+}
+
+func TestPullRequestLookupCancelsWithRequestAndCachesFailure(t *testing.T) {
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	var ghCalls atomic.Int32
+	resolver := testPullRequestResolver(func(ctx context.Context, _ string, name string, _ ...string) ([]byte, error) {
+		if name == "git" {
+			return []byte("https://github.com/acme/app.git"), nil
+		}
+		ghCalls.Add(1)
+		close(started)
+		<-ctx.Done()
+		close(stopped)
+		return nil, ctx.Err()
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() {
+		done <- resolver.lookup(ctx, "/repo", "/repo", "feature")
+	}()
+	<-started
+	cancel()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("command did not stop with its request")
+	}
+	if number := <-done; number != 0 {
+		t.Fatalf("cancelled lookup = %d; want 0", number)
+	}
+	if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 0 {
+		t.Fatalf("cached failure = %d; want 0", number)
+	}
+	if calls := ghCalls.Load(); calls != 1 {
+		t.Fatalf("gh calls = %d; want 1", calls)
 	}
 }
 
@@ -206,8 +240,8 @@ func TestPullRequestLookupCommandTimeout(t *testing.T) {
 	})
 	resolver.timeout = 20 * time.Millisecond
 	started := time.Now()
-	if _, err := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("lookup error = %v; want deadline exceeded", err)
+	if number := resolver.lookup(context.Background(), "/repo", "/repo", "feature"); number != 0 {
+		t.Fatalf("timed out lookup = %d; want 0", number)
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("bounded lookup took %v", elapsed)
