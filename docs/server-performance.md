@@ -139,9 +139,10 @@ messages, and 1,024 events.
 | Clone event page | 327.703 µs | 68.382 µs | -79.1% | 65,931 → 25,605 |
 | Decode unchanged 256 KiB recording frame | 229.553 µs | 0.003 µs | <−99.9% | 270,336 → 0 |
 
-The repeated-frame result measures only decoding a 256 KiB unchanged frame, not
-Chrome capture, ffmpeg, I/O, or full video generation; its one cached allocation
-is amortized. The WebSocket inventory result excludes socket writes/replay.
+The repeated-frame result calls the production `frameDecoder` but measures only
+decoding a 256 KiB unchanged frame, not Chrome capture, ffmpeg, I/O, or full
+video generation; its one cached allocation is amortized. The WebSocket
+inventory result excludes socket writes/replay.
 Tree settling deliberately stubs persistence to isolate traversal/copy cost.
 
 HTTP validation and direct WebSocket mapping also have standalone
@@ -149,21 +150,15 @@ HTTP validation and direct WebSocket mapping also have standalone
 `BenchmarkValidateWS` benchmarks. Repeated handler construction benefits from
 shared setup; the first process-wide schema load still has a cold-start cost.
 
-Post-review simplification removed generic clone and settings-selector façades,
-a one-use JSON-whitespace helper, manual shallow clone loops, and manual
-`sync.Once` result storage. A standards review superseded the minimalism request
-to inline the frame cache: the small production `frameDecoder` remains so the
-benchmark invokes real code instead of duplicating its branch. All standalone clone,
-HTTP-validation/handler, WebSocket mapping/validation, and recording benchmarks
-were rerun for five samples, as were all 26 route scenarios because clone calls
-span route paths. Raw output is in `docs/performance/review-simplification.txt`,
+Final five-sample helper and all-26-route verification output is in
+`docs/performance/review-simplification.txt`,
 `docs/performance/recording-benchmark.txt`, and
 `docs/performance/routes-review-after.txt`. The clone and recording rows above
-now use these final results. The later route run is a separate shared-host
-observation and is not substituted into the sequential route table; it retains
-every sample, including every durable-write sample (the final DELETE project run ranged from
-68.192 to 75.943 ms). WebSocket command validation and internal conversion's
-final median was 5.560 µs; clone allocation counts were unchanged.
+use these final results. The later route run is a separate shared-host observation
+and is not substituted into the sequential route table; it retains every sample,
+including DELETE project results from 68.192 to 75.943 ms. WebSocket command
+validation and internal conversion's final median was 5.560 µs; clone allocation
+counts were unchanged.
 
 ## Additional review findings and deliberate limits
 
