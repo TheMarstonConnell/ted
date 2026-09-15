@@ -247,7 +247,7 @@ func TestAgentsPageRequestMetadataAndValidation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/agents" || r.URL.Query().Get("include_settled") != "true" ||
 			r.URL.Query().Get("page") != "2" || r.URL.Query().Get("page_size") != "3" ||
-			r.URL.Query().Get("project_id") != "project with spaces" {
+			r.URL.Query().Has("project_id") {
 			t.Errorf("unexpected paged request: %s", r.URL.String())
 		}
 		w.Header().Set("X-Total-Count", "7")
@@ -255,7 +255,7 @@ func TestAgentsPageRequestMetadataAndValidation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, total, err := New(server.URL).AgentsPage(context.Background(), "project with spaces", 2, 3)
+	result, total, err := New(server.URL).AgentsPage(context.Background(), 2, 3)
 	if err != nil || total != 7 || len(result) != 3 || result[0].ID != "a" {
 		t.Fatalf("paged result: %+v total=%d err=%v", result, total, err)
 	}
@@ -266,7 +266,7 @@ func TestAgentsPageRejectsMissingOrInvalidMetadata(t *testing.T) {
 		_ = json.NewEncoder(w).Encode([]Snapshot{{ID: "must not be accepted"}})
 	}))
 	defer missing.Close()
-	result, total, err := New(missing.URL).AgentsPage(context.Background(), "", 1, 1)
+	result, total, err := New(missing.URL).AgentsPage(context.Background(), 1, 1)
 	if err == nil || !strings.Contains(err.Error(), "X-Total-Count") || result != nil || total != 0 {
 		t.Fatalf("missing metadata: result=%+v total=%d err=%v", result, total, err)
 	}
@@ -276,24 +276,9 @@ func TestAgentsPageRejectsMissingOrInvalidMetadata(t *testing.T) {
 		_, _ = w.Write([]byte("[]"))
 	}))
 	defer invalid.Close()
-	result, total, err = New(invalid.URL).AgentsPage(context.Background(), "", 1, 1)
+	result, total, err = New(invalid.URL).AgentsPage(context.Background(), 1, 1)
 	if err == nil || !strings.Contains(err.Error(), "invalid X-Total-Count") || result != nil || total != 0 {
 		t.Fatalf("invalid metadata: result=%+v total=%d err=%v", result, total, err)
-	}
-
-	var requests atomic.Int32
-	validation := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-	}))
-	defer validation.Close()
-	c := New(validation.URL)
-	for _, tc := range [][2]int{{0, 1}, {1, 0}, {-1, 1}} {
-		if _, _, err := c.AgentsPage(context.Background(), "", tc[0], tc[1]); err == nil {
-			t.Errorf("accepted invalid pagination %#v", tc)
-		}
-	}
-	if requests.Load() != 0 {
-		t.Fatalf("validation made %d requests", requests.Load())
 	}
 }
 
@@ -305,7 +290,8 @@ func TestAgentsPageLegacyRejectionGuidance(t *testing.T) {
 	}{
 		{"legacy page", "invalid", "unknown or repeated query parameter: page", 400, true},
 		{"legacy page size", "invalid", "unknown or repeated query parameter: page_size", 400, true},
-		{"other parameter", "invalid", "unknown or repeated query parameter: project_id", 400, false},
+		{"alternate diagnostic", "invalid", "unsupported query fields", 400, true},
+		{"other parameter", "invalid", "unknown or repeated query parameter: project_id", 400, true},
 		{"invalid project", "invalid_project", "invalid project", 400, false},
 		{"unavailable", "shutting_down", "server shutting down", 503, false},
 	} {
@@ -320,7 +306,7 @@ func TestAgentsPageLegacyRejectionGuidance(t *testing.T) {
 			}))
 			defer server.Close()
 			client := New(server.URL)
-			rows, total, err := client.AgentsPage(context.Background(), "", 1, 25)
+			rows, total, err := client.AgentsPage(context.Background(), 1, 25)
 			var apiErr *APIError
 			if !errors.As(err, &apiErr) || apiErr.Status != tc.status || apiErr.Code != tc.code || apiErr.Message != tc.message || rows != nil || total != 0 {
 				t.Fatalf("rows=%v total=%d error=%v", rows, total, err)

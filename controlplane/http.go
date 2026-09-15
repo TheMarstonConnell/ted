@@ -294,12 +294,7 @@ func (h *httpAPI) ListAgents(w http.ResponseWriter, r *http.Request, p api.ListA
 			pageSize = *p.PageSize
 		}
 		var total int
-		var err error
-		result, total, err = h.service.AgentsPage(value(p.IncludeSettled), value(p.ProjectId), page, pageSize)
-		if err != nil {
-			writeRuntimeError(w, err)
-			return
-		}
+		result, total = h.service.AgentsPage(value(p.IncludeSettled), value(p.ProjectId), page, pageSize)
 		w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	} else {
 		result = h.service.Agents(value(p.IncludeSettled), value(p.ProjectId))

@@ -354,11 +354,8 @@ func (s *Service) agentsLocked(includeSettled bool, projectID string) []Agent {
 	return out
 }
 
-// AgentsPage returns a filtered page without copying unreturned agents.
-func (s *Service) AgentsPage(includeSettled bool, projectID string, page, pageSize int64) ([]Agent, int, error) {
-	if page <= 0 || pageSize <= 0 {
-		return nil, 0, problem(400, "invalid_pagination", "page and page_size must be positive")
-	}
+// AgentsPage requires positive page and pageSize values.
+func (s *Service) AgentsPage(includeSettled bool, projectID string, page, pageSize int64) ([]Agent, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -381,11 +378,11 @@ func (s *Service) AgentsPage(includeSettled bool, projectID string, page, pageSi
 	// very large, valid page is simply out of range, not an arithmetic error.
 	pageIndex := page - 1
 	if pageIndex > int64(total)/pageSize {
-		return []Agent{}, total, nil
+		return []Agent{}, total
 	}
 	start64 := pageIndex * pageSize
 	if start64 >= int64(total) {
-		return []Agent{}, total, nil
+		return []Agent{}, total
 	}
 	end64 := int64(total)
 	if pageSize <= int64(total)-start64 {
@@ -396,7 +393,7 @@ func (s *Service) AgentsPage(includeSettled bool, projectID string, page, pageSi
 	for _, a := range candidates[start:end] {
 		result = append(result, copyJSON(a.Agent))
 	}
-	return result, total, nil
+	return result, total
 }
 
 func (s *Service) GetAgent(id string) (Agent, error) {

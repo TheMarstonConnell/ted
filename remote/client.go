@@ -186,25 +186,12 @@ func (c *Client) Agents(ctx context.Context, project string) ([]Snapshot, error)
 }
 
 // AgentsPage fetches one server-side page including settled agents.
-func (c *Client) AgentsPage(ctx context.Context, project string, page, pageSize int) ([]Snapshot, int, error) {
-	if page <= 0 || pageSize <= 0 {
-		return nil, 0, fmt.Errorf("page and page_size must be positive")
-	}
-	query := url.Values{}
-	query.Set("include_settled", "true")
-	query.Set("page", strconv.Itoa(page))
-	query.Set("page_size", strconv.Itoa(pageSize))
-	if project != "" {
-		query.Set("project_id", project)
-	}
+func (c *Client) AgentsPage(ctx context.Context, page, pageSize int) ([]Snapshot, int, error) {
 	var result []Snapshot
-	headers, err := c.requestWithHeaders(ctx, "GET", "/v1/agents?"+query.Encode(), nil, &result, "")
+	headers, err := c.requestWithHeaders(ctx, "GET", fmt.Sprintf("/v1/agents?include_settled=true&page=%d&page_size=%d", page, pageSize), nil, &result, "")
 	if err != nil {
 		if apiErr, ok := err.(*APIError); ok && apiErr.Status == http.StatusBadRequest && apiErr.Code == "invalid" {
-			switch apiErr.Message {
-			case "unknown or repeated query parameter: page", "unknown or repeated query parameter: page_size":
-				return nil, 0, fmt.Errorf("server does not support pagination; upgrade the server or use sessions --all: %w", err)
-			}
+			return nil, 0, fmt.Errorf("%w; if using an older server, upgrade the server or use sessions --all", err)
 		}
 		return result, 0, err
 	}

@@ -45,7 +45,7 @@ func (p *listPagination) bounds(total int) (int, int) {
 	return start, start + min(p.pageSize, total-start)
 }
 
-func (p *listPagination) report(cmd *cobra.Command, args []string, total int, noun string) error {
+func (p *listPagination) report(cmd *cobra.Command, total int, noun string) error {
 	if p.all || (p.page == 1 && total <= p.pageSize) {
 		return nil
 	}
@@ -58,7 +58,7 @@ func (p *listPagination) report(cmd *cobra.Command, args []string, total int, no
 		return err
 	}
 	if end < total {
-		_, err := fmt.Fprintf(cmd.ErrOrStderr(), "Next: %s\n", p.nextCommand(cmd, args))
+		_, err := fmt.Fprintf(cmd.ErrOrStderr(), "Next: %s\n", p.nextCommand(cmd))
 		return err
 	}
 	return nil
@@ -73,12 +73,12 @@ func quoteShellWord(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
-func (p *listPagination) nextCommand(cmd *cobra.Command, args []string) string {
+func (p *listPagination) nextCommand(cmd *cobra.Command) string {
 	parts := strings.Fields(cmd.CommandPath())
 	if parts[0] != "ted" {
 		parts = append([]string{"ted"}, parts...)
 	}
-	for _, arg := range args {
+	for _, arg := range cmd.Flags().Args() {
 		parts = append(parts, quoteShellWord(arg))
 	}
 	flags := map[string]*pflag.Flag{}
@@ -106,18 +106,18 @@ func (p *listPagination) nextCommand(cmd *cobra.Command, args []string) string {
 	return strings.Join(parts, " ")
 }
 
-func (p *listPagination) browserData(cmd *cobra.Command, key string, data any) (any, error) {
+func (p *listPagination) browserData(cmd *cobra.Command, key string, data any) error {
 	fields, ok := data.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("browser response is not an object")
+		return fmt.Errorf("browser response is not an object")
 	}
 	raw, ok := fields[key]
 	if !ok {
-		return nil, fmt.Errorf("browser response is missing %q", key)
+		return fmt.Errorf("browser response is missing %q", key)
 	}
 	items, ok := raw.([]any)
 	if raw != nil && !ok {
-		return nil, fmt.Errorf("browser %s is not a list", key)
+		return fmt.Errorf("browser %s is not a list", key)
 	}
 	if items == nil {
 		items = []any{}
@@ -134,8 +134,8 @@ func (p *listPagination) browserData(cmd *cobra.Command, key string, data any) (
 	}{Page: p.page, PageSize: p.pageSize, Total: len(items), HasMore: end < len(items)}
 	if metadata.HasMore {
 		metadata.NextPage = p.page + 1
-		metadata.NextCommand = p.nextCommand(cmd, nil)
+		metadata.NextCommand = p.nextCommand(cmd)
 	}
 	fields["pagination"] = metadata
-	return fields, nil
+	return nil
 }

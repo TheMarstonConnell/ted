@@ -29,7 +29,7 @@ func newSessionsCommand() *cobra.Command {
 			sessions, err = c.Agents(cmd.Context(), "")
 			total = len(sessions)
 		} else {
-			sessions, total, err = c.AgentsPage(cmd.Context(), "", pagination.page, pagination.pageSize)
+			sessions, total, err = c.AgentsPage(cmd.Context(), pagination.page, pagination.pageSize)
 		}
 		if err != nil {
 			return err
@@ -39,7 +39,7 @@ func newSessionsCommand() *cobra.Command {
 			return err
 		}
 		if len(sessions) == 0 {
-			return pagination.report(cmd, nil, total, "sessions")
+			return pagination.report(cmd, total, "sessions")
 		}
 		projects, err := c.Projects(cmd.Context())
 		if err != nil {
@@ -65,7 +65,7 @@ func newSessionsCommand() *cobra.Command {
 		if err := w.Flush(); err != nil {
 			return err
 		}
-		return pagination.report(cmd, nil, total, "sessions")
+		return pagination.report(cmd, total, "sessions")
 	}
 	return cmd
 }

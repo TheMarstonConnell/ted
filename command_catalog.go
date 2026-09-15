@@ -50,7 +50,7 @@ func newModelsCommand(load catalogAgentLoader) *cobra.Command {
 					return err
 				}
 			}
-			return pagination.report(cmd, args, len(models), "models")
+			return pagination.report(cmd, len(models), "models")
 		},
 	}
 	pagination = addListPagination(cmd)
@@ -79,7 +79,7 @@ func newProvidersCommand(load catalogAgentLoader) *cobra.Command {
 					return err
 				}
 			}
-			return pagination.report(cmd, args, len(providers), "providers")
+			return pagination.report(cmd, len(providers), "providers")
 		},
 	}
 	pagination = addListPagination(cmd)
@@ -114,7 +114,7 @@ func newEffortsCommand(load catalogAgentLoader) *cobra.Command {
 					return err
 				}
 			}
-			return pagination.report(cmd, args, len(efforts), "efforts")
+			return pagination.report(cmd, len(efforts), "efforts")
 		},
 	}
 	pagination = addListPagination(cmd)

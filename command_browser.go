@@ -66,8 +66,7 @@ func newBrowserCommand(call browserCaller) *cobra.Command {
 			if action == "status" {
 				key = "projects"
 			}
-			response.Data, err = page.browserData(cmd, key, response.Data)
-			if err != nil {
+			if err := page.browserData(cmd, key, response.Data); err != nil {
 				return err
 			}
 		}
