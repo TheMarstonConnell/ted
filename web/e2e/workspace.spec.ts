@@ -327,11 +327,14 @@ for (const colorScheme of ["light", "dark"] as const) {
     await page
       .getByRole("button", { name: "Open sidebar", exact: true })
       .click();
-    await expect(
-      page.getByRole("dialog", { name: "Workspace", exact: true }),
-    ).toBeVisible();
+    const workspaceDrawer = page.getByRole("dialog", {
+      name: "Workspace",
+      exact: true,
+    });
+    await expect(workspaceDrawer).toBeVisible();
     await capture(`mobile-sidebar-${colorScheme}`);
-    await page
+    await workspaceDrawer.locator('[data-project-id="p"]').hover();
+    await workspaceDrawer
       .getByRole("button", { name: "Settings for harness", exact: true })
       .click();
     await expect(page.getByRole("dialog")).toHaveCount(1);
@@ -354,10 +357,9 @@ test("mobile project options dismiss back to the same chat without leaving a blo
   const composer = page.getByRole("textbox", { name: "Message", exact: true });
   await composer.fill("Keep this draft and chat");
   await page.getByRole("button", { name: "Open sidebar", exact: true }).click();
-  await page
-    .getByRole("dialog")
-    .getByLabel("Settings for harness", { exact: true })
-    .click();
+  const drawer = page.getByRole("dialog");
+  await drawer.locator('[data-project-id="p"]').hover();
+  await drawer.getByLabel("Settings for harness", { exact: true }).click();
   await expect(
     page.getByRole("dialog", { name: "harness defaults" }),
   ).toBeVisible();
