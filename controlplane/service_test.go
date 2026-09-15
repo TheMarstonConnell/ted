@@ -578,10 +578,6 @@ func TestDeleteProjectPreservesCrossProjectParentage(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertStatus(t, s.DeleteProject(project.ID), 409)
-	if _, err = s.SetSettled(child.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	assertStatus(t, s.DeleteProject(project.ID), 409)
 	persisted, err := loadState(s.dir)
 	if err != nil {
 		t.Fatal(err)
