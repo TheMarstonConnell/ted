@@ -62,6 +62,23 @@ func TestSelectPullRequestPrefersOpenThenLatestClosed(t *testing.T) {
 	}
 }
 
+func TestPullRequestCommandKeepsSuccessfulStderrOutOfJSON(t *testing.T) {
+	output, err := runWorkspaceCommand(
+		context.Background(),
+		t.TempDir(),
+		"sh",
+		"-c",
+		`printf '%s' '[{"number":42,"headRefName":"feature","state":"OPEN"}]'; printf '%s' 'upgrade available' >&2`,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	number, err := selectPullRequest(output, "acme/app", "feature")
+	if err != nil || number != 42 {
+		t.Fatalf("selection from successful command = %d, %v; want 42", number, err)
+	}
+}
+
 func TestPullRequestLookupUsesExactBranchAndRepository(t *testing.T) {
 	var commands [][]string
 	resolver := testPullRequestResolver(func(_ context.Context, directory, name string, args ...string) ([]byte, error) {

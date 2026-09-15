@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,14 +26,19 @@ func runWorkspaceCommand(ctx context.Context, root, name string, args ...string)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GH_PROMPT_DISABLED=1")
 	cmd.WaitDelay = time.Second
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err == nil {
 		return output, nil
 	}
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	detail := strings.TrimSpace(string(output))
+	detail := string(output)
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) {
+		detail += "\n" + string(exitError.Stderr)
+	}
+	detail = strings.TrimSpace(detail)
 	if len(detail) > 2000 {
 		detail = detail[:2000]
 	}
