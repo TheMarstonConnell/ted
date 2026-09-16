@@ -18,10 +18,11 @@ import {
 
 export type TranscriptItem = {
   id: string;
-  kind: "user" | "agent" | "tool" | "tool_result" | "status";
+  kind: "user" | "bot" | "agent" | "tool" | "tool_result" | "status";
   text: string;
   toolName?: string;
   toolCallId?: string;
+  senderAgentId?: string;
   output?: string;
   time: string;
 };
@@ -124,8 +125,9 @@ export function reduceEvent(state: State, event: Event): State {
     if (type === "turn.started")
       item = {
         id: String(cursor),
-        kind: "user",
+        kind: q.kind === "bot" ? "bot" : "user",
         text: q.text,
+        senderAgentId: q.sender_agent_id,
         time: event.created_at,
       };
     if (["turn.failed", "turn.interrupted", "turn.cancelled"].includes(type)) {

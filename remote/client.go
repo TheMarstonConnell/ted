@@ -54,10 +54,12 @@ type Project struct {
 	Defaults          Settings           `json:"defaults"`
 }
 type QueuedMessage struct {
-	ID     string `json:"id"`
-	Text   string `json:"text"`
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
+	Kind          string `json:"kind,omitempty"`
+	SenderAgentID string `json:"sender_agent_id,omitempty"`
+	ID            string `json:"id"`
+	Text          string `json:"text"`
+	Status        string `json:"status"`
+	Error         string `json:"error,omitempty"`
 }
 type Snapshot struct {
 	ParentAgentID string             `json:"parent_agent_id,omitempty"`
@@ -210,6 +212,7 @@ func (c *Client) GetAgent(ctx context.Context, id string) (Snapshot, error) {
 	err := c.request(ctx, "GET", agentPath(id), nil, &result, "")
 	return result, err
 }
+
 func (c *Client) CreateAgent(ctx context.Context, project string, workspace ...WorkspaceSelection) (Snapshot, error) {
 	if len(workspace) > 1 {
 		return Snapshot{}, fmt.Errorf("only one workspace selection may be specified")
@@ -263,4 +266,16 @@ func (c *Client) Models(ctx context.Context) ([]agent.ModelInfo, error) {
 		result = append(result, agent.ModelInfo{ID: m.ID, Name: m.Name, Provider: m.Provider, ContextWindow: m.ContextWindow, Efforts: m.Efforts, DefaultEffort: m.DefaultEffort})
 	}
 	return result, nil
+}
+
+// Nudge returns after the server has durably accepted the notification.
+func (c *Client) Nudge(ctx context.Context, id, text, senderAgentID, key string) (QueuedMessage, error) {
+	body := struct {
+		Text          string `json:"text"`
+		Kind          string `json:"kind"`
+		SenderAgentID string `json:"sender_agent_id,omitempty"`
+	}{text, "bot", senderAgentID}
+	var message QueuedMessage
+	err := c.request(ctx, "POST", agentPath(id)+"/messages", body, &message, key)
+	return message, err
 }

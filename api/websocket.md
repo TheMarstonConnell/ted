@@ -89,16 +89,29 @@ exists, rather than retrying forever; start or select another agent.
 {"type":"submit","request_id":"send-12","agent_id":"agent-a","idempotency_key":"durable-unique-key","text":"Please fix the failing tests"}
 ```
 
-All fields are required. `request_id` correlates the response only; it is not an
+The fields above are required. `request_id` correlates the response only; it is not an
 idempotency key. `idempotency_key` (1–256 characters) deduplicates durably in the
-same per-agent namespace as HTTP `Idempotency-Key`. Retry the **same text and
-key**, with any request ID, after a disconnect. A different text with that key
+same per-agent namespace as HTTP `Idempotency-Key`. Retry the **same text, kind, sender, and
+key**, with any request ID, after a disconnect. A different payload with that key
 returns `idempotency_conflict` (HTTP 409). Submission needs no subscription.
 
 ```json
 {"type":"ack","request_id":"send-12","agent_id":"agent-a","message_id":"turn-m","status":"pending"}
 {"type":"error","request_id":"send-12","code":"settled","message":"restore agent before submitting messages"}
 ```
+
+Bot notifications use the same command with optional `kind: "bot"` and
+`sender_agent_id`:
+
+```json
+{"type":"submit","request_id":"notify-1","agent_id":"agent-a","idempotency_key":"review-job-42","text":"All review comments are complete.","kind":"bot","sender_agent_id":"child-b"}
+```
+
+Omitting `kind` is equivalent to `kind: "user"`. Sender attribution is optional
+and bot-only; it is untrusted provenance, not an authorization check. Bot messages
+use the normal FIFO and wake-up behavior, one turn per notification. Queue events
+and committed history retain kind and sender so clients can render tool-style bot
+activity instead of a user bubble.
 
 An ack means the queue entry was durably accepted, not that execution completed.
 Observe events or HTTP queue inspection for the outcome. `message_id` is also
