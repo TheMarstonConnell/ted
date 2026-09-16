@@ -1,7 +1,7 @@
 goos: linux
 goarch: amd64
 pkg: github.com/TheMarstonConnell/ted/controlplane
-cpu: AMD Ryzen 7 5700G with Radeon Graphics         
+cpu: AMD Ryzen 7 5700G with Radeon Graphics
 BenchmarkStorageReadCursor/10_agents_20_history-2         	      10	  27021369 ns/op	    271470 seed_B	  777447 B/op	    1400 allocs/op
 BenchmarkStorageReadCursor/10_agents_20_history-2         	      10	  35496025 ns/op	    271470 seed_B	  712017 B/op	    1398 allocs/op
 BenchmarkStorageReadCursor/10_agents_20_history-2         	      10	  36017698 ns/op	    271459 seed_B	  712008 B/op	    1398 allocs/op
