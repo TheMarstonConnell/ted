@@ -518,3 +518,128 @@ func TestSQLiteFileURL(t *testing.T) {
 		}
 	}
 }
+
+func TestSQLiteRejectsEmptyLegacySeed(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		name := "ordinary JSON"
+		if pending {
+			name = "pending backup"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			seedName := "state.json"
+			if pending {
+				if err := writeGuard(dir, "pending", true); err != nil {
+					t.Fatal(err)
+				}
+				seedName = sqliteBackupName
+			}
+			if err := os.WriteFile(filepath.Join(dir, seedName), []byte{}, 0600); err != nil {
+				t.Fatal(err)
+			}
+			original, err := os.ReadFile(filepath.Join(dir, "state.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				if store, _, err := openSQLiteStore(dir); err == nil {
+					store.close()
+					t.Fatal("empty legacy seed was activated as a fresh store")
+				}
+				after, err := os.ReadFile(filepath.Join(dir, "state.json"))
+				if err != nil || string(after) != string(original) {
+					t.Fatalf("failed migration replaced source/guard: %q, %v", after, err)
+				}
+			}
+		})
+	}
+}
+
+func TestSQLiteInitializedStoreRejectsEmptyOrdinaryJSON(t *testing.T) {
+	dir := t.TempDir()
+	store, _, err := openSQLiteStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "state.json")
+	if err = os.WriteFile(path, []byte{}, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if store, _, err := openSQLiteStore(dir); err == nil {
+		store.close()
+		t.Fatal("initialized database accepted conflicting empty state.json")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || len(after) != 0 {
+		t.Fatalf("conflicting JSON was replaced: %q, %v", after, err)
+	}
+}
+
+func TestSQLiteDeferredForeignKeyFailureRollsBackAllRows(t *testing.T) {
+	store, _, err := openSQLiteStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.close()
+	state := backendState()
+	replaceSQLiteState(t, store, state)
+	original, err := store.readState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state = cloneDiskState(original)
+	changes := newStateChanges()
+	changes.queued(state, "a1", 0)
+	changes.receipt(state, "invalid")
+	a := state.Agents["a1"]
+	a.Agent.Title = "must roll back"
+	a.Agent.Queue[0].Status = "completed"
+	a.Agent.Messages = append(a.Agent.Messages, agent.Message{Role: "assistant", Content: agent.TextContent("must roll back")})
+	a.Agent.Cursor++
+	a.Events = append(a.Events, Event{AgentID: "a1", Cursor: 1, Type: "output", Data: json.RawMessage(`{}`), CreatedAt: a.Agent.UpdatedAt})
+	state.Receipts["invalid"] = receipt{AgentID: "a1", MessageID: "a2-message"}
+	if err = store.apply(state, changes); err == nil || !strings.Contains(err.Error(), "FOREIGN KEY") {
+		t.Fatalf("expected deferred receipt-owner FK failure, got %v", err)
+	}
+	changes.rollback(&state)
+	after, err := store.readState()
+	if err != nil {
+		t.Fatalf("connection unusable after failed COMMIT: %v", err)
+	}
+	requireDiskState(t, original, after)
+	requireDiskState(t, original, state)
+}
+
+func TestSQLiteFileURIUsesLiteralDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state # %3f &mode=memory")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	store, state, err := openSQLiteStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes := newStateChanges()
+	changes.project(state, "p")
+	state.Projects["p"] = Project{ID: "p", Root: dir}
+	if err = store.apply(state, changes); err != nil {
+		store.close()
+		t.Fatal(err)
+	}
+	if err = store.close(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(dir, sqliteFilename))
+	if err != nil || info.Size() == 0 {
+		t.Fatalf("database not written at literal path: %v", err)
+	}
+	store, restored, err := openSQLiteStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.close()
+	requireDiskState(t, state, restored)
+}

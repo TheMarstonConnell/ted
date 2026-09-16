@@ -139,7 +139,7 @@ func openSQLiteStore(dir string) (_ *sqliteStore, _ diskState, retErr error) {
 		return nil, diskState{}, err
 	}
 	// A crash while SQLite first creates its header must retain the empty seed.
-	if guard == nil && len(stateJSON) == 0 && (!dbExisted || dbEmpty) {
+	if guard == nil && stateJSON == nil && (!dbExisted || dbEmpty) {
 		if err = writeGuard(dir, "pending", false); err != nil {
 			return nil, diskState{}, err
 		}
@@ -187,7 +187,7 @@ func openSQLiteStore(dir string) (_ *sqliteStore, _ diskState, retErr error) {
 		if err != nil {
 			return nil, diskState{}, err
 		}
-		if guard == nil && len(stateJSON) > 0 {
+		if guard == nil && stateJSON != nil {
 			return nil, diskState{}, errors.New("initialized SQLite state conflicts with an ordinary state.json")
 		}
 		if guard == nil || guard.Phase != "active" {
@@ -210,12 +210,12 @@ func openSQLiteStore(dir string) (_ *sqliteStore, _ diskState, retErr error) {
 	if objects {
 		return nil, diskState{}, errors.New("SQLite control-plane state has no valid schema authority marker")
 	}
-	if dbExisted && !dbEmpty && guard == nil && len(stateJSON) == 0 {
+	if dbExisted && !dbEmpty && guard == nil && stateJSON == nil {
 		return nil, diskState{}, errors.New("uninitialized SQLite control-plane state cannot be recovered")
 	}
 
 	legacyBytes := stateJSON
-	hasLegacy := len(legacyBytes) > 0
+	hasLegacy := legacyBytes != nil
 	if guard != nil {
 		if guard.Phase != "pending" {
 			return nil, diskState{}, fmt.Errorf("invalid SQLite migration phase %q", guard.Phase)
@@ -233,7 +233,7 @@ func openSQLiteStore(dir string) (_ *sqliteStore, _ diskState, retErr error) {
 		}
 	}
 	legacy := emptyState()
-	if len(legacyBytes) != 0 {
+	if hasLegacy {
 		legacy, err = decodeLegacyState(legacyBytes)
 		if err != nil {
 			return nil, diskState{}, err
@@ -243,7 +243,7 @@ func openSQLiteStore(dir string) (_ *sqliteStore, _ diskState, retErr error) {
 		}
 	}
 	if err = s.initialize(legacy, func() error {
-		if guard == nil && len(legacyBytes) > 0 {
+		if guard == nil && hasLegacy {
 			if err := preserveBackup(dir, legacyBytes); err != nil {
 				return err
 			}
