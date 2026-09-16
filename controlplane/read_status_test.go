@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -134,6 +135,13 @@ func TestReadStatusMutationRollsBackOnStorageFailure(t *testing.T) {
 	if got.ReadCursor != 0 || got.Cursor != a.Cursor {
 		t.Fatalf("failed read acknowledgement mutated state: %+v", got)
 	}
+	if err := s.Close(context.Background()); err == nil {
+		t.Fatal("close hid storage failure")
+	}
+	persisted := readClosedSQLiteState(t, s.dir).Agents[a.ID].Agent
+	if persisted.ReadCursor != 0 || persisted.Cursor != a.Cursor {
+		t.Fatalf("failed read acknowledgement reached disk: %+v", persisted)
+	}
 }
 
 func TestPreReadStatusStateMigratesOnce(t *testing.T) {
@@ -171,6 +179,7 @@ func TestPreReadStatusStateMigratesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	originalLegacy := append([]byte(nil), data...)
 	s, err := NewService(dir, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -186,24 +195,16 @@ func TestPreReadStatusStateMigratesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data, err = os.ReadFile(filepath.Join(dir, "state.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var persisted diskState
-	if err = json.Unmarshal(data, &persisted); err != nil {
-		t.Fatal(err)
-	}
+	persisted := readClosedSQLiteState(t, dir)
 	if persisted.Version != storeVersion {
 		t.Fatalf("migration version was not persisted: %d", persisted.Version)
 	}
-	persisted.Agents["agent"].Agent.LastResponseCursor = 5
-	persisted.Agents["agent"].Agent.ReadCursor = 3
-	persisted.Agents["agent"].Agent.Cursor = 5
-	persisted.Agents["agent"].Events = append(persisted.Agents["agent"].Events, Event{AgentID: "agent", Cursor: 5, Type: "output", Data: json.RawMessage(`{"ResponseType":"agent"}`), CreatedAt: now})
-	if err = saveState(dir, persisted); err != nil {
-		t.Fatal(err)
-	}
+	editClosedSQLiteState(t, dir, func(persisted diskState) {
+		persisted.Agents["agent"].Agent.LastResponseCursor = 5
+		persisted.Agents["agent"].Agent.ReadCursor = 3
+		persisted.Agents["agent"].Agent.Cursor = 5
+		persisted.Agents["agent"].Events = append(persisted.Agents["agent"].Events, Event{AgentID: "agent", Cursor: 5, Type: "output", Data: json.RawMessage(`{"ResponseType":"agent"}`), CreatedAt: now})
+	})
 	restarted, err := NewService(dir, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -215,5 +216,68 @@ func TestPreReadStatusStateMigratesOnce(t *testing.T) {
 	}
 	if unread.LastResponseCursor != 5 || unread.ReadCursor != 3 {
 		t.Fatalf("restart repeated migration over unread state: %+v", unread)
+	}
+	backup, err := os.ReadFile(filepath.Join(dir, "state.json.pre-sqlite"))
+	if err != nil || !bytes.Equal(backup, originalLegacy) {
+		t.Fatalf("legacy backup changed: %q, %v", backup, err)
+	}
+	info, err := os.Stat(filepath.Join(dir, "state.json.pre-sqlite"))
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("backup permissions: %v %v", info, err)
+	}
+	if _, err := loadState(dir); err == nil {
+		t.Fatal("old JSON reader accepted SQLite authority marker")
+	}
+}
+
+func TestSQLiteReadCursorRecoveryDoesNotMarkLaterResponseRead(t *testing.T) {
+	s, p, _, a := serviceFixture(t)
+	if _, err := s.Submit(a.ID, "first response", ""); err != nil {
+		t.Fatal(err)
+	}
+	awaitCall(t, p)
+	p.results <- nil
+	first := awaitAgent(t, s, a.ID, func(a Agent) bool { return a.State == "idle" && a.LastResponseCursor > 0 })
+	read, err := s.ReadAgent(a.ID, first.LastResponseCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Submit(a.ID, "second response", ""); err != nil {
+		t.Fatal(err)
+	}
+	awaitCall(t, p)
+	p.results <- nil
+	second := awaitAgent(t, s, a.ID, func(a Agent) bool { return a.State == "idle" && a.LastResponseCursor > first.LastResponseCursor })
+	if err = s.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	disk := readClosedSQLiteState(t, s.dir)
+	persisted := disk.Agents[a.ID].Agent
+	if persisted.ReadCursor != read.ReadCursor || persisted.LastResponseCursor != second.LastResponseCursor || persisted.ReadCursor >= persisted.LastResponseCursor {
+		t.Fatalf("unread state not durable: %+v", persisted)
+	}
+	reopened, err := NewService(s.dir, nil, []agent.Provider{p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close(context.Background())
+	got, err := reopened.GetAgent(a.ID)
+	if err != nil || got.ReadCursor != read.ReadCursor || got.LastResponseCursor != second.LastResponseCursor {
+		t.Fatalf("read recovery: %+v %v", got, err)
+	}
+	lower, err := reopened.ReadAgent(a.ID, first.LastResponseCursor)
+	if err != nil || lower.Cursor != got.Cursor {
+		t.Fatalf("repeated cursor emitted event: %+v %v", lower, err)
+	}
+	final, err := reopened.ReadAgent(a.ID, second.LastResponseCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = reopened.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	finalDisk := readClosedSQLiteState(t, s.dir)
+	if finalDisk.Agents[a.ID].Agent.ReadCursor != second.LastResponseCursor || finalDisk.Agents[a.ID].Agent.Cursor != final.Cursor {
+		t.Fatal("second acknowledgement not durable")
 	}
 }

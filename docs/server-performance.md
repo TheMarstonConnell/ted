@@ -1,5 +1,9 @@
 # Server performance review
 
+> Historical JSON-store measurements from PR #22. The subsequent
+> [SQLite migration](sqlite-storage.md) changes persistence and write costs;
+> these figures are not measurements of the SQLite backend.
+
 Baseline: `d0a764d5e9ff4cacccb68e5f422978c1242b697a` (before this PR).
 Reviewed every one of the **24 OpenAPI operations**, shared persistence/settings/
 workspace helpers, WebSocket commands, static serving, and browser-daemon hot paths.

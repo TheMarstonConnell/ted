@@ -55,9 +55,7 @@ type routeBenchmarkFixture struct {
 
 // newRouteBenchmarkFixture builds a stable, moderately large checkpoint: ten
 // agents, each with 100 transcript messages, 100 queue records, and 100 events.
-// State resets decode this JSON rather than using snapshot-cloning, and occur with the
-// benchmark timer stopped. Mutating routes still run the production saveState,
-// including file and directory fsyncs, while timed.
+// Resets run outside timing; requests use the production SQLite transaction path.
 func newRouteBenchmarkFixture(b *testing.B) *routeBenchmarkFixture {
 	b.Helper()
 	base := b.TempDir()
@@ -190,6 +188,15 @@ func newRouteBenchmarkFixture(b *testing.B) *routeBenchmarkFixture {
 		b.Fatal(err)
 	}
 
+	store, decoded, err := openSQLiteStore(dataDir)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() {
+		if err := store.close(); err != nil {
+			b.Error(err)
+		}
+	})
 	logger := zap.NewNop()
 	providers := []agent.Provider{routeBenchmarkProvider{}}
 	s := &Service{
@@ -201,7 +208,7 @@ func newRouteBenchmarkFixture(b *testing.B) *routeBenchmarkFixture {
 		running:      map[string]*runningTurn{},
 		instances:    map[string]*agent.Agent{},
 		changed:      make(chan struct{}),
-		save:         saveState,
+		store:        store,
 		pullRequests: newPullRequestResolver(),
 	}
 	return &routeBenchmarkFixture{
@@ -232,6 +239,7 @@ func (f *routeBenchmarkFixture) reset(b *testing.B, prepare func(*Service)) {
 	if prepare != nil {
 		prepare(f.service)
 	}
+	replaceSQLiteState(b, f.service.store, f.service.state)
 	f.service.mu.Unlock()
 }
 
@@ -273,7 +281,7 @@ func benchmarkHandlerRoute(b *testing.B, fixture *routeBenchmarkFixture, route r
 // BenchmarkRoutes exercises every OpenAPI HTTP operation through the real
 // validated handler. HTTP requests use httptest directly, so their timings are
 // local handler processing rather than client or network latency. Mutations
-// include the production durable checkpoint write and fsync. The WebSocket case
+// include the production SQLite commit with synchronous=FULL. The WebSocket case
 // is separate because a genuine upgrade necessarily uses a loopback socket.
 func BenchmarkRoutes(b *testing.B) {
 	fixture := newRouteBenchmarkFixture(b)

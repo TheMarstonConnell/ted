@@ -333,6 +333,7 @@ func (h *httpAPI) ListAgents(w http.ResponseWriter, r *http.Request, p api.ListA
 		}
 	}
 	var result []Agent
+	var err error
 	if p.Page != nil || p.PageSize != nil {
 		page, pageSize := int64(1), int64(25)
 		if p.Page != nil {
@@ -342,10 +343,18 @@ func (h *httpAPI) ListAgents(w http.ResponseWriter, r *http.Request, p api.ListA
 			pageSize = *p.PageSize
 		}
 		var total int
-		result, total = h.service.AgentsPage(value(p.IncludeSettled), value(p.ProjectId), page, pageSize)
+		result, total, err = h.service.listAgents(value(p.IncludeSettled), value(p.ProjectId), page, pageSize)
+		if err != nil {
+			writeRuntimeError(w, err)
+			return
+		}
 		w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	} else {
-		result = h.service.Agents(value(p.IncludeSettled), value(p.ProjectId))
+		result, _, err = h.service.listAgents(value(p.IncludeSettled), value(p.ProjectId), 0, 0)
+		if err != nil {
+			writeRuntimeError(w, err)
+			return
+		}
 	}
 	agents := make([]httpAgent, 0, len(result))
 	for _, a := range result {

@@ -575,12 +575,20 @@ func TestHTTPAgentPaginationOrderingFilteringAndLegacyList(t *testing.T) {
 	// changes the in-memory test state; the list operation must use UpdatedAt,
 	// not creation order or map iteration order.
 	f.s.mu.Lock()
+	before := newStateChanges()
+	for _, id := range []string{a1.ID, a2.ID, a3.ID, a4.ID} {
+		before.agent(f.s.state, id)
+	}
 	tie := time.Unix(100, 0)
 	f.s.state.Agents[a1.ID].Agent.UpdatedAt = tie
 	f.s.state.Agents[a2.ID].Agent.UpdatedAt = tie
 	f.s.state.Agents[a3.ID].Agent.UpdatedAt = tie.Add(-time.Hour)
 	f.s.state.Agents[a4.ID].Agent.UpdatedAt = tie.Add(-2 * time.Hour)
 	f.s.state.Agents[a4.ID].Agent.Settled = true
+	if err := f.s.store.apply(f.s.state, before); err != nil {
+		f.s.mu.Unlock()
+		t.Fatal(err)
+	}
 	f.s.mu.Unlock()
 
 	get := func(path string) (*http.Response, []byte) {

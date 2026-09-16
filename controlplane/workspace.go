@@ -186,7 +186,8 @@ func (s *Service) updateWorkspace(id string, selection WorkspaceSelection, norma
 	if a.Agent.Workspace.Locked {
 		return Agent{}, problem(409, "workspace_locked", "workspace choices are permanently locked after the first message")
 	}
-	before := cloneDiskState(s.state)
+	before := newStateChanges()
+	before.agent(s.state, id)
 	a.Agent.Workspace = Workspace{WorkspaceSelection: selection, Status: "draft"}
 	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
 	if err := s.commitLocked(before); err != nil {
@@ -242,7 +243,8 @@ func (s *Service) saveWorkspace(id string, update func(*Workspace)) error {
 	if s.storageErr != nil {
 		return s.storageErr
 	}
-	before := cloneDiskState(s.state)
+	before := newStateChanges()
+	before.agent(s.state, id)
 	a := s.state.Agents[id]
 	update(&a.Agent.Workspace)
 	s.eventLocked(a, "agent.updated", s.summaryLocked(a))

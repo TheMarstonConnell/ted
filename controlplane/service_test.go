@@ -250,16 +250,11 @@ func TestCrashRecoveryOfDurableReservation(t *testing.T) {
 	if err := s.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	state, err := loadState(s.dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	record := state.Agents[a.ID]
-	record.Agent.State = "running"
-	record.Agent.Queue = append(record.Agent.Queue, QueuedMessage{ID: "crashed", Text: "must not replay", Status: "running", CreatedAt: time.Now()})
-	if err = saveState(s.dir, state); err != nil {
-		t.Fatal(err)
-	}
+	editClosedSQLiteState(t, s.dir, func(state diskState) {
+		record := state.Agents[a.ID]
+		record.Agent.State = "running"
+		record.Agent.Queue = append(record.Agent.Queue, QueuedMessage{ID: "crashed", Text: "must not replay", Status: "running", CreatedAt: time.Now()})
+	})
 	recovered, err := NewService(s.dir, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -363,11 +358,13 @@ func TestReturnedSnapshotsAreDetachedAndStoreIsPrivate(t *testing.T) {
 	if again.Settings.Model == "changed" || string(replay[0].Data) == "null" {
 		t.Fatal("caller mutated store")
 	}
-	info, err := os.Stat(filepath.Join(s.dir, "state.json"))
-	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("state permissions %v %v", info, err)
+	for _, name := range []string{"state.json", "state.sqlite", "state.sqlite-wal", "state.sqlite-shm"} {
+		info, err := os.Stat(filepath.Join(s.dir, name))
+		if err != nil || info.Mode().Perm() != 0600 {
+			t.Fatalf("%s permissions %v %v", name, info, err)
+		}
 	}
-	_, err = NewService(s.dir, nil, nil)
+	_, err := NewService(s.dir, nil, nil)
 	if err == nil {
 		t.Fatal("two writers opened the same store")
 	}
@@ -491,7 +488,7 @@ func TestDeleteProjectWithSettledAgents(t *testing.T) {
 	if _, err = s.GetAgent(otherAgent.ID); err != nil {
 		t.Fatal(err)
 	}
-	state, err := loadState(s.dir)
+	state, err := s.store.readState()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,6 +499,18 @@ func TestDeleteProjectWithSettledAgents(t *testing.T) {
 		t.Fatal("project directory removed", err)
 	}
 	assertStatus(t, s.DeleteProject(project.ID), 404)
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	withClosedSQLiteStore(t, s.dir, func(store *sqliteStore, reopened diskState) {
+		requireDiskState(t, state, reopened)
+		if _, found, err := store.projectByRoot(project.Root); err != nil || found {
+			t.Fatalf("deleted root retained in index: found=%t err=%v", found, err)
+		}
+		if ids, total, err := store.agentIDs(true, project.ID, false, 0, -1); err != nil || total != 0 || len(ids) != 0 {
+			t.Fatalf("deleted agents retained in index: %v total=%d err=%v", ids, total, err)
+		}
+	})
 }
 
 func TestDeleteSettledProjectRollsBackOnStorageFailure(t *testing.T) {
@@ -578,7 +587,7 @@ func TestDeleteProjectPreservesCrossProjectParentage(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertStatus(t, s.DeleteProject(project.ID), 409)
-	persisted, err := loadState(s.dir)
+	persisted, err := s.store.readState()
 	if err != nil {
 		t.Fatal(err)
 	}

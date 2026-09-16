@@ -167,14 +167,21 @@ artifacts are isolated under that directory's `runtime` subdirectory. Credential
 are not stored in the control-plane snapshot. Transcripts and outputs may contain
 secrets, however: **the state files are private-permission plaintext**.
 
-The initial storage implementation keeps lifetime events and queue receipts in a
-single atomically replaced, synced JSON checkpoint. It favors a simple coherent
-transaction over large-scale throughput: state is loaded in memory and checkpoint
-cost increases with retained history. Full tool output is buffered until tool
-completion. There is no automatic pruning, compression, or per-project quota.
-Plan disk and memory accordingly; this is not yet a high-volume hosted backend.
+The control plane uses normalized SQLite tables in `state.sqlite`, with WAL,
+`synchronous=FULL`, and transactional queue/event/idempotency updates. Mutations
+write only affected rows; unrelated history is no longer rewritten. The runtime
+still loads retained state into memory. Full tool output is buffered until tool
+completion, and there is no automatic pruning, compression, or per-project quota.
 Storage errors fail closed: new work is rejected and active work is cancelled
 rather than acknowledging non-durable mutations.
+
+Existing JSON checkpoints migrate automatically once, retaining an exact private
+`state.json.pre-sqlite` backup. `state.json` then becomes a downgrade guard, not a
+live checkpoint. The backup predates every subsequent SQLite write. Use local
+storage with reliable locking/syncing; WAL on network filesystems is unsupported.
+See [SQLite storage](sqlite-storage.md) for migration recovery, backup/restore,
+indexing, and operational limits. Do not copy only the main database while WAL
+is live or replace the guard to run an old binary.
 
 No legacy session migration is performed. The embedded `agent` package can still
 use its standalone persistence API, but control-plane agents have their own store.
