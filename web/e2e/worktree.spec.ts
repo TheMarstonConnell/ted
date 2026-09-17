@@ -94,6 +94,147 @@ test("project settings save workspace defaults for newly created chats", async (
   );
 });
 
+test("new projects can choose a remote starting branch before creation", async ({
+  page,
+}) => {
+  await workspace(page);
+  const lookups: string[] = [];
+  let releaseLookup: (() => void) | undefined;
+  const lookupPaused = new Promise<void>((resolve) => {
+    releaseLookup = resolve;
+  });
+  await page.route("**/v1/projects/branches?*", async (route) => {
+    lookups.push(new URL(route.request().url()).searchParams.get("root")!);
+    await lookupPaused;
+    await route.fallback();
+  });
+  await page.goto("/?dialog=new-project");
+  const dialog = page.getByRole("dialog", { name: "Create a project" });
+  const root = "/srv/new project & repo";
+  await dialog.getByRole("textbox", { name: "Server directory" }).fill(root);
+  await expect.poll(() => lookups).toEqual([root]);
+  await expect(dialog.getByRole("status")).toHaveText(
+    "Loading remote branches…",
+  );
+  releaseLookup!();
+  await choose(dialog.getByRole("combobox", { name: "Workspace" }), "worktree");
+  const branch = dialog.getByRole("combobox", { name: "Start from" });
+  await expect(branch).toHaveText("origin/main");
+  await branch.click();
+  await expect(
+    page.getByRole("option", { name: "upstream/trunk", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("option", { name: "origin/release", exact: true })
+    .click();
+  const saved = page.waitForRequest(
+    (request) =>
+      new URL(request.url()).pathname === "/v1/projects" &&
+      request.method() === "POST",
+  );
+  await dialog
+    .getByRole("button", { name: "Create project", exact: true })
+    .click();
+  expect((await saved).postDataJSON()).toMatchObject({
+    root,
+    workspace_defaults: { mode: "worktree", base_branch: "origin/release" },
+  });
+  await expect(page).toHaveURL(/dialog=new-agent/);
+});
+
+test("changing a new project's directory clears its base and ignores stale branch results", async ({
+  page,
+}) => {
+  await workspace(page);
+  let releaseOld: (() => Promise<void>) | undefined;
+  await page.route("**/v1/projects/branches?*", async (route) => {
+    const root = new URL(route.request().url()).searchParams.get("root");
+    if (root === "/srv/slow") {
+      releaseOld = () =>
+        route.fulfill({
+          json: {
+            is_git: true,
+            branches: ["origin/stale"],
+            default_branch: "origin/stale",
+          },
+        });
+    } else if (root === "/srv/other") {
+      await route.fulfill({
+        json: {
+          is_git: true,
+          branches: ["upstream/next"],
+          default_branch: "",
+        },
+      });
+    } else await route.fallback();
+  });
+  await page.goto("/?dialog=new-project");
+  const dialog = page.getByRole("dialog", { name: "Create a project" });
+  const directory = dialog.getByRole("textbox", { name: "Server directory" });
+  const branch = dialog.getByRole("combobox", { name: "Start from" });
+  await directory.fill("/srv/first");
+  await choose(dialog.getByRole("combobox", { name: "Workspace" }), "worktree");
+  await choose(branch, "origin/release");
+  await directory.fill("/srv/slow");
+  await expect.poll(() => !!releaseOld).toBe(true);
+  await expect(branch).toBeDisabled();
+  await expect(
+    dialog.getByRole("button", { name: "Create project", exact: true }),
+  ).toBeDisabled();
+  await directory.fill("/srv/other");
+  await expect(branch).toHaveText("upstream/next");
+  await expect(
+    dialog.getByRole("button", { name: "Create project", exact: true }),
+  ).toBeEnabled();
+  await releaseOld!();
+  await branch.click();
+  await expect(
+    page.getByRole("option", { name: "upstream/next", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("option", { name: /origin\/(stale|release)/ }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  const saved = page.waitForRequest(
+    (request) =>
+      new URL(request.url()).pathname === "/v1/projects" &&
+      request.method() === "POST",
+  );
+  await dialog
+    .getByRole("button", { name: "Create project", exact: true })
+    .click();
+  expect((await saved).postDataJSON().workspace_defaults).toEqual({
+    mode: "worktree",
+    base_branch: "upstream/next",
+  });
+  await expect(page).toHaveURL(/dialog=new-agent/);
+});
+
+test("new project branch preview handles lookup failure", async ({ page }) => {
+  await workspace(page);
+  await page.route("**/v1/projects/branches?*", (route) =>
+    route.fulfill({
+      status: 400,
+      json: { error: { message: "Directory does not exist" } },
+    }),
+  );
+  await page.goto("/?dialog=new-project");
+  const dialog = page.getByRole("dialog", { name: "Create a project" });
+  await dialog
+    .getByRole("textbox", { name: "Server directory" })
+    .fill("/srv/example");
+  await expect(
+    dialog.getByText("Could not load remote branches.", { exact: false }),
+  ).toBeVisible();
+  await dialog.getByRole("combobox", { name: "Workspace" }).click();
+  await expect(
+    page.getByRole("option", { name: "Worktree", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("option", { name: "Local", exact: true }),
+  ).toBeEnabled();
+});
+
 test("workspace setup progress and terminal failure lock and block the chat", async ({
   page,
 }) => {

@@ -284,6 +284,18 @@ func (h *httpAPI) GetHealth(w http.ResponseWriter, r *http.Request) {
 func (h *httpAPI) ListProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, nonnil(h.service.Projects()))
 }
+func (h *httpAPI) ListDirectoryBranches(w http.ResponseWriter, r *http.Request, p api.ListDirectoryBranchesParams) {
+	root, err := validateProjectRoot(p.Root)
+	if err != nil {
+		respond(w, 200, ProjectBranches{}, err)
+		return
+	}
+	branches, err := projectBranches(root)
+	if err != nil {
+		err = problem(400, "invalid_workspace", err.Error())
+	}
+	respond(w, 200, branches, err)
+}
 func (h *httpAPI) CreateProject(w http.ResponseWriter, r *http.Request) {
 	b, ok := decodeBody[api.CreateProjectJSONRequestBody](w, r)
 	if !ok {

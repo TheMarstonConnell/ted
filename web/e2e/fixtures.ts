@@ -67,7 +67,10 @@ export async function workspace(page: Page) {
     if (url.pathname === "/v1/projects") {
       if (method === "POST") project = { ...project, ...body };
       result = method === "POST" ? project : [project];
-    } else if (url.pathname === "/v1/projects/p/branches") {
+    } else if (
+      url.pathname === "/v1/projects/p/branches" ||
+      url.pathname === "/v1/projects/branches"
+    ) {
       result = projectBranches;
     } else if (url.pathname === "/v1/projects/p") {
       if (method === "PATCH") project = { ...project, ...body };

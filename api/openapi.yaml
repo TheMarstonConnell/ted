@@ -121,6 +121,34 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateProjectRequest'
+  /v1/projects/branches:
+    get:
+      operationId: ListDirectoryBranches
+      description: List remote-qualified Git branches already known in an existing server directory before creating a project. No project is created and no network fetch is performed.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectBranches'
+        '400': *id001
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '410': *id005
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
+      parameters:
+      - name: root
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 4096
   /v1/projects/{project_id}:
     get:
       operationId: GetProject
