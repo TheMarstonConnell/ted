@@ -661,9 +661,24 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 	if a.Agent.Settled {
 		return QueuedMessage{}, problem(409, "settled", "restore agent before submitting messages")
 	}
-	mergeIndex := pendingBotMergeIndex(a.Agent.Queue, req)
-	if mergeIndex >= 0 && utf8.RuneCountInString(a.Agent.Queue[mergeIndex].Text)+2+utf8.RuneCountInString(req.Text) > 1<<20 {
-		return QueuedMessage{}, problem(413, "too_large", "merged bot message must not exceed 1048576 characters")
+	mergeIndex := -1
+	if req.Kind == "bot" && strings.TrimSpace(req.SenderAgentID) != "" {
+		for i := len(a.Agent.Queue) - 1; i >= 0; i-- {
+			m := a.Agent.Queue[i]
+			if m.Status == "cancelled" {
+				continue
+			}
+			if m.Status != "pending" || m.Kind != "bot" {
+				break
+			}
+			if m.SenderAgentID == req.SenderAgentID {
+				if utf8.RuneCountInString(m.Text)+2+utf8.RuneCountInString(req.Text) > 1<<20 {
+					return QueuedMessage{}, problem(413, "too_large", "merged bot message must not exceed 1048576 characters")
+				}
+				mergeIndex = i
+				break
+			}
+		}
 	}
 	before := newStateChanges()
 	before.agent(s.state, id)
@@ -696,26 +711,6 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 		return QueuedMessage{}, err
 	}
 	return m, nil
-}
-
-func pendingBotMergeIndex(queue []QueuedMessage, req SubmitMessageRequest) int {
-	if req.Kind != "bot" || strings.TrimSpace(req.SenderAgentID) == "" {
-		return -1
-	}
-	for i := len(queue) - 1; i >= 0; i-- {
-		m := queue[i]
-		if m.Status == "cancelled" {
-			continue
-		}
-		// Never change active/history entries or move new reports ahead of human input.
-		if m.Status != "pending" || m.Kind != "bot" {
-			break
-		}
-		if m.SenderAgentID == req.SenderAgentID {
-			return i
-		}
-	}
-	return -1
 }
 
 func validateSubmitMessage(req SubmitMessageRequest) error {

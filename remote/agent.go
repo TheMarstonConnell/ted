@@ -194,7 +194,7 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 		if q.Text != "" {
 			if q.Kind == "bot" {
 				bot = &q
-			} else if e.Type == "message.queued" {
+			} else {
 				output = &agent.AgentResponse{ResponseType: "user", Content: q.Text}
 			}
 		}

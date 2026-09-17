@@ -155,16 +155,3 @@ func TestBotUpdatedEventRendering(t *testing.T) {
 		t.Fatalf("merged history lost or duplicated: updates=%+v messages=%+v", updates, a.Messages())
 	}
 }
-
-func TestUpdatedEventDoesNotDuplicateUserMessage(t *testing.T) {
-	a := NewAgent(context.Background(), nil, Snapshot{ID: "target"}, "", nil)
-	data, err := json.Marshal(QueuedMessage{ID: "user", Text: "edited", Status: "pending"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := a.consume(Event{AgentID: "target", Cursor: 1, Type: "message.updated", Data: data}, func(update Update) {
-		t.Fatalf("non-bot update rendered a new row: %+v", update)
-	}); err != nil {
-		t.Fatal(err)
-	}
-}

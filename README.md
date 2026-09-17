@@ -142,12 +142,9 @@ acceptance, without waiting for the receiving agent's response. Delivery errors
 return a nonzero exit status. Like `sessions`, it connects to an existing server
 (default `http://localhost:8281`) and never starts a fallback server.
 
-Notifications use the same queue as user input. When a named sender already has
-an eligible pending bot message, a new nudge appends its text (separated by a blank
-line) to that entry instead of adding another turn. The ID, creation time, and
-queue position stay the same. Merging never crosses a pending human message;
-anonymous, running, and terminal messages are not merged. Combined text is limited
-to 1,048,576 characters; an overflow is rejected without changing the queue.
+Notifications use the same queue as user input. Named bot reports merge into an
+eligible pending entry from the same sender; see the
+[merge and delivery rules](docs/control-plane.md) for boundaries and size limits.
 A nudge wakes an idle chat, waits behind active work, and releases held work just
 like new user input. It does not interrupt an active turn. Settled chats must be
 restored before receiving notifications. The target UI need not be open, but the
