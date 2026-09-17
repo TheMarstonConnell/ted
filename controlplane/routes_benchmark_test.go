@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -303,6 +304,7 @@ func BenchmarkRoutes(b *testing.B) {
 		{name: "GET_Health", method: http.MethodGet, path: "/health", status: http.StatusOK},
 		{name: "GET_ListProjects", method: http.MethodGet, path: "/v1/projects", status: http.StatusOK},
 		{name: "POST_CreateProject", method: http.MethodPost, path: "/v1/projects", body: createProjectBody, status: http.StatusCreated, mutates: true},
+		{name: "GET_ListDirectoryBranches", method: http.MethodGet, path: "/v1/projects/branches?root=" + url.QueryEscape(fixture.projectRoot), status: http.StatusOK},
 		{name: "GET_GetProject", method: http.MethodGet, path: projectPath, status: http.StatusOK},
 		{name: "PATCH_PatchProject", method: http.MethodPatch, path: projectPath, body: []byte(`{"name":"renamed benchmark project"}`), status: http.StatusOK, mutates: true},
 		{name: "DELETE_DeleteProject", method: http.MethodDelete, path: "/v1/projects/" + routeBenchmarkDeleteProjectID, status: http.StatusNoContent, mutates: true},

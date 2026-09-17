@@ -27,6 +27,7 @@ generated. Edit the YAML, then regenerate; never edit `generated.go` manually.
 | --- | --- | --- |
 | GET | `/health` | `{ "api_version": "1" }` |
 | GET, POST | `/v1/projects` | List or create projects |
+| GET | `/v1/projects/branches?root=...` | Preview known remote Git branches for an existing server directory without creating a project or fetching |
 | GET, PATCH, DELETE | `/v1/projects/{project_id}` | Read, update name/defaults, delete a project and its settled agents |
 | GET, POST | `/v1/agents` | List or create durable agents |
 | GET, PATCH | `/v1/agents/{agent_id}` | Read an agent, update `settled`, or advance `read_cursor` |
