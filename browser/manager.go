@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -216,7 +217,7 @@ func (m *manager) dispatch(serverCtx context.Context, req Request) (any, error) 
 		m.cancelLive(lifecycle)
 		lifecycle.gate.Lock()
 		defer lifecycle.gate.Unlock()
-		return m.closeSession(key, req.Thread), nil
+		return m.closeSession(key, req.Thread)
 	}
 	if !knownAction(action) {
 		return nil, fail("unknown_action", "unknown browser action %q", req.Action)
@@ -299,30 +300,35 @@ func (m *manager) status() map[string]any {
 	return map[string]any{"daemon": true, "projects": items}
 }
 
-func (m *manager) closeSession(key, thread string) map[string]any {
+func (m *manager) closeSession(key, thread string) (map[string]any, error) {
 	m.mu.Lock()
 	p := m.projects[key]
 	m.mu.Unlock()
 	if p == nil {
-		return map[string]any{"closed": false, "tabs": 0}
+		return map[string]any{"closed": false, "tabs": 0}, nil
 	}
 	p.mu.Lock()
 	s := p.sessions[thread]
-	if s != nil {
-		delete(p.sessions, thread)
-	}
 	p.mu.Unlock()
 	if s == nil {
-		return map[string]any{"closed": false, "tabs": 0}
+		return map[string]any{"closed": false, "tabs": 0}, nil
 	}
 	s.mu.Lock()
 	s.structureMu.Lock()
 	n := len(s.tabs)
 	s.structureMu.Unlock()
 	s.writeTrace("session-close", time.Now(), nil)
-	s.closeLocked()
+	err := s.closeLocked()
 	s.mu.Unlock()
-	return map[string]any{"closed": true, "tabs": n}
+	if err != nil {
+		return nil, fail("action_failed", "close browser session: %v", err)
+	}
+	p.mu.Lock()
+	if p.sessions[thread] == s {
+		delete(p.sessions, thread)
+	}
+	p.mu.Unlock()
+	return map[string]any{"closed": true, "tabs": n}, nil
 }
 
 func (p *projectBrowser) ensureStarted(ctx context.Context) error {
@@ -593,10 +599,11 @@ func (s *session) selectedTab() (*browserTab, error) {
 	return t, nil
 }
 
-func (s *session) closeLocked() {
+func (s *session) closeLocked() error {
 	s.recordMu.Lock()
+	var recordingErr error
 	if s.recording != nil {
-		_, _ = s.stopRecordingLocked(context.Background())
+		_, recordingErr = s.stopRecordingLocked(context.Background())
 	}
 	s.recordMu.Unlock()
 
@@ -629,7 +636,7 @@ func (s *session) closeLocked() {
 		s.ownerCancel()
 		s.ownerCancel = nil
 	}
-	s.closeOwnedTargets(owned)
+	return errors.Join(recordingErr, s.closeOwnedTargets(owned))
 }
 
 func boolParam(params map[string]any, key string, fallback bool) (bool, error) {

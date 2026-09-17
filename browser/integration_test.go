@@ -62,7 +62,10 @@ func TestChromeIntegration(t *testing.T) {
 	if !strings.Contains(string(manifest), path) {
 		t.Fatalf("manifest does not register screenshot: %s", manifest)
 	}
-	closed := mgr.closeSession(projectKey(canonicalPath(project)), "integration-1")
+	closed, err := mgr.closeSession(projectKey(canonicalPath(project)), "integration-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if closed["closed"] != true {
 		t.Fatalf("session close = %#v", closed)
 	}

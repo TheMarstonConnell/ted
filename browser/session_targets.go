@@ -2,6 +2,8 @@ package browser
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/chromedp/cdproto/cdp"
@@ -214,34 +216,59 @@ func (s *session) removeDestroyedTarget(id target.ID) {
 	t.cancel()
 }
 
-func (s *session) closeOwnedTargets(seeds map[target.ID]struct{}) {
-	if len(seeds) == 0 || s.parentCtx == nil || s.parentCtx.Err() != nil {
-		return
+func (s *session) closeOwnedTargets(seeds map[target.ID]struct{}) error {
+	if len(seeds) == 0 && !s.isolated {
+		return nil
 	}
-	for attempt := 0; attempt < 3; attempt++ {
+	if s.parentCtx == nil {
+		return fmt.Errorf("browser context unavailable during session cleanup")
+	}
+	if err := s.parentCtx.Err(); err != nil {
+		return err
+	}
+	// Keep descendants discovered during a failed cleanup available to the retry.
+	defer func() {
+		s.structureMu.Lock()
+		defer s.structureMu.Unlock()
+		if s.ownedTargets == nil {
+			s.ownedTargets = make(map[target.ID]struct{})
+		}
+		for id := range seeds {
+			s.ownedTargets[id] = struct{}{}
+		}
+	}()
+	var closeErr error
+	for attempt := 0; ; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		infos, err := s.targetInfos(ctx)
 		if err != nil {
 			cancel()
-			return
+			return fmt.Errorf("query remaining browser targets: %w", err)
 		}
 		claimed := s.claimedPageTargets(infos, seeds)
-		closed := 0
-		browser := chromedp.FromContext(s.parentCtx).Browser
+		remaining := make([]target.ID, 0)
 		for _, info := range infos {
-			if _, ok := claimed[info.TargetID]; !ok || info.TargetID == s.ownerTarget {
-				continue
-			}
-			if _, original := seeds[info.TargetID]; !original {
+			_, owned := claimed[info.TargetID]
+			if owned || (s.isolated && info.TargetID == s.ownerTarget) {
 				seeds[info.TargetID] = struct{}{}
+				remaining = append(remaining, info.TargetID)
 			}
-			_ = target.CloseTarget(info.TargetID).Do(cdp.WithExecutor(ctx, browser))
-			closed++
+		}
+		if len(remaining) == 0 {
+			cancel()
+			return nil
+		}
+		if attempt == 3 {
+			cancel()
+			return errors.Join(fmt.Errorf("%d browser targets remain after cleanup", len(remaining)), closeErr)
+		}
+		browser := chromedp.FromContext(s.parentCtx).Browser
+		for _, id := range remaining {
+			if err := target.CloseTarget(id).Do(cdp.WithExecutor(ctx, browser)); err != nil {
+				closeErr = fmt.Errorf("close browser target %s: %w", id, err)
+			}
 		}
 		cancel()
-		if closed == 0 {
-			return
-		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }

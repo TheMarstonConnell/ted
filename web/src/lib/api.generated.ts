@@ -340,7 +340,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Upgrade to multiplexed WebSocket. Same-host browser Origin only (or absent Origin); forbidden origins return 403. See websocket.md for protocol; client frames are WSSubscribe or WSSubmit. No query parameters. */
+        /** @description Upgrade to multiplexed WebSocket. Browser Origin must match the request scheme and host unless the operator configures --public-origin for a trusted TLS-terminating proxy, in which case that public origin is required. Absent Origin is allowed; forwarded headers are not trusted. Forbidden origins return 403. See websocket.md for protocol; client frames are WSSubscribe or WSSubmit. No query parameters. */
         get: operations["WebSocket"];
         put?: never;
         post?: never;
