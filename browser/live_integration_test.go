@@ -131,6 +131,13 @@ func TestLiveSharedChromeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var screen struct{ Width, Height int }
+	if err := liveRun(ctx, tab, chromedp.Evaluate(`({width:screen.width,height:screen.height})`, &screen)); err != nil {
+		t.Fatal(err)
+	}
+	if screen.Width != 1440 || screen.Height != 900 {
+		t.Fatalf("default screen does not match desktop viewport: %+v", screen)
+	}
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		var value string

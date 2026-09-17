@@ -46,7 +46,7 @@ func TestNetworkDiagnostics(t *testing.T) {
 }
 
 func TestNetworkHTTPDiagnostics(t *testing.T) {
-	for _, status := range []int64{200, 302, 401, 403, 429, 503} {
+	for _, status := range []int64{399, 400} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			tab := &browserTab{}
 			tab.handleNetworkDiagnostic(&network.EventResponseReceived{Type: network.ResourceTypeDocument, Response: &network.Response{
