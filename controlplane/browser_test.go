@@ -314,13 +314,14 @@ func TestBrowserCommandsEventsAndRecoverableValidation(t *testing.T) {
 
 func TestBrowserStrictCommandValidation(t *testing.T) {
 	invalid := []string{
+		`{"type":"watch","tab_id":"` + strings.Repeat("😀", 65) + `"}`,
 		`{"type":"mouse","tab_id":"tab","event":"mouseMoved","x":100001,"y":2}`,
 		`{"type":"mouse","tab_id":"tab","event":"mouseMoved","x":1,"y":100001}`,
 		`{"type":"mouse","tab_id":"tab","event":"mouseWheel","x":1,"y":2,"delta_x":-100001}`,
 		`{"type":"mouse","tab_id":"tab","event":"mouseMoved","x":1,"y":2,"button":""}`,
 		`{"type":"key","tab_id":"tab","event":"keyDown","key":"","code":"KeyA"}`,
-		`{"type":"key","tab_id":"tab","event":"keyDown","key":"` + strings.Repeat("😀", 129) + `"}`,
-		`{"type":"key","tab_id":"tab","event":"keyDown","code":"` + strings.Repeat("😀", 129) + `"}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","key":"` + strings.Repeat("😀", 33) + `"}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","code":"` + strings.Repeat("😀", 33) + `"}`,
 		`{"type":"text","tab_id":"tab","text":"` + strings.Repeat("é", 16385) + `"}`,
 		`{"type":"new","url":"data:,` + strings.Repeat("😀", 8193-6) + `"}`,
 
@@ -357,8 +358,8 @@ func TestBrowserStrictCommandValidation(t *testing.T) {
 
 	valid := []string{
 		`{"type":"mouse","tab_id":"tab","event":"mouseWheel","x":100000,"y":100000,"delta_x":-100000,"delta_y":100000}`,
-		`{"type":"key","tab_id":"tab","event":"keyDown","key":"` + strings.Repeat("😀", 128) + `","code":"` + strings.Repeat("😀", 128) + `"}`,
-		`{"type":"watch","tab_id":"` + strings.Repeat("😀", 256) + `"}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","key":"` + strings.Repeat("😀", 32) + `","code":"` + strings.Repeat("😀", 32) + `"}`,
+		`{"type":"watch","tab_id":"` + strings.Repeat("😀", 64) + `"}`,
 		`{"type":"text","tab_id":"tab","text":"` + strings.Repeat("é", 16384) + `"}`,
 		`{"type":"new","url":"data:,` + strings.Repeat("😀", 8192-6) + `"}`,
 	}
