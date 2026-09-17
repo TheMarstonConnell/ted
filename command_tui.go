@@ -110,6 +110,9 @@ func runRemoteTUISession(ctx context.Context, server, prompt, modelID, effort, r
 		if update.Output != nil {
 			p.Send(*update.Output)
 		}
+		if update.Bot != nil {
+			p.Send(*update.Bot)
+		}
 		if update.Busy != nil {
 			p.Send(remoteStateMsg(*update.Busy))
 		}
@@ -224,6 +227,8 @@ func prepareRemoteAgent(ctx context.Context, c *remote.Client, modelID, effort, 
 			}
 		}
 	}
+	snapshot.Messages = nil
+	snapshot.Cursor = 0
 	instance := remote.NewAgent(ctx, c, snapshot, project.Root, models)
 	if err := applyTUISettings(instance, modelID, effort); err != nil {
 		return nil, err

@@ -26,6 +26,7 @@ type Agent struct {
 func NewAgent(ctx context.Context, c *Client, s Snapshot, root string, models []agent.ModelInfo) *Agent {
 	return &Agent{client: c, ctx: ctx, snapshot: s, id: s.ID, root: root, models: models, cursor: s.Cursor}
 }
+
 func (a *Agent) AcceptsQueuedInput() bool { return true }
 
 // WorkingDir reports the execution directory from the latest server snapshot.
@@ -140,9 +141,10 @@ func (a *Agent) Continue() error {
 	return a.action("POST", "/continue", nil)
 }
 
-// Update carries completed outputs (including full tool results), not deltas.
+// Update keeps bot provenance structured until the terminal presentation boundary.
 type Update struct {
 	Output *agent.AgentResponse
+	Bot    *QueuedMessage
 	Busy   *bool
 	Err    error
 }
@@ -154,6 +156,7 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 		return nil
 	}
 	var output *agent.AgentResponse
+	var bot *QueuedMessage
 	var busy *bool
 	switch e.Type {
 	case "agent.updated":
@@ -189,7 +192,11 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 			return err
 		}
 		if q.Text != "" {
-			output = &agent.AgentResponse{ResponseType: "user", Content: q.Text}
+			if q.Kind == "bot" {
+				bot = &q
+			} else {
+				output = &agent.AgentResponse{ResponseType: "user", Content: q.Text}
+			}
 		}
 
 	case "turn.failed", "turn.interrupted", "turn.cancelled":
@@ -203,8 +210,8 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 	}
 	a.cursor = e.Cursor
 	a.mu.Unlock()
-	if output != nil || busy != nil {
-		notify(Update{Output: output, Busy: busy})
+	if output != nil || bot != nil || busy != nil {
+		notify(Update{Output: output, Bot: bot, Busy: busy})
 	}
 	return nil
 }

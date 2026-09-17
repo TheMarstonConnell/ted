@@ -60,9 +60,13 @@ func TestSQLiteOpaquePayloadMigrationAndIncrementalPersistence(t *testing.T) {
 			ReasoningDetails: agent.ReasoningDetails{json.RawMessage(`{"type":"reasoning.encrypted","data":"ciphertext","signature":"opaque-signature","future_field":{"number":9007199254740993}}`)},
 			ToolCalls:        []agent.ToolCall{{Id: "tool", ToolCallType: "function", Function: agent.FunctionCall{Name: "bash", Arguments: `{"command":"echo \"unchanged\""}`}}}},
 		{Role: "tool", ToolCallId: "tool", Content: agent.TextContent("result")},
+		{Role: "user", Kind: "bot", SenderAgentID: "external-source", Content: agent.TextContent("imported bot report")},
 	}
 	record := &storedAgent{Agent: Agent{ID: "a", ProjectID: "p", State: "idle", Held: true, Messages: messages, Queue: []QueuedMessage{}, Cursor: 1, CreatedAt: now, UpdatedAt: now}, ManifestOffset: 712,
 		Events: []Event{{AgentID: "a", Cursor: 1, Type: "output", Data: json.RawMessage(`{"number":9007199254740993,"nested":[null,{"text":"<value>"}]}`), CreatedAt: now}}}
+	record.Agent.Queue = []QueuedMessage{{ID: "imported-bot", Text: "imported bot report", Kind: "bot", SenderAgentID: "external-source", Status: "completed", CreatedAt: now}}
+	req := SubmitMessageRequest{Text: "imported bot report", Kind: "bot", SenderAgentID: "external-source"}
+	state.Receipts["message:a:bot-key"] = receipt{Fingerprint: fingerprint(req), AgentID: "a", MessageID: "imported-bot"}
 	state.Agents["a"] = record
 	if err := saveState(dir, state); err != nil {
 		t.Fatal(err)
@@ -72,6 +76,10 @@ func TestSQLiteOpaquePayloadMigrationAndIncrementalPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close(context.Background()) })
+	repeated, err := s.SubmitMessage("a", req, "bot-key")
+	if err != nil || repeated.ID != "imported-bot" || repeated.Kind != "bot" || repeated.SenderAgentID != "external-source" {
+		t.Fatalf("imported bot receipt: %+v %v", repeated, err)
+	}
 	if _, err := s.ReadAgent("a", 1); err != nil {
 		t.Fatal(err)
 	}
