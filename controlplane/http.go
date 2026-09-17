@@ -293,8 +293,6 @@ func (h *httpAPI) ListDirectoryBranches(w http.ResponseWriter, r *http.Request, 
 	branches, err := projectBranches(root)
 	if err != nil {
 		err = problem(400, "invalid_workspace", err.Error())
-	} else {
-		branches.Branches = nonnil(branches.Branches)
 	}
 	respond(w, 200, branches, err)
 }

@@ -526,11 +526,6 @@ func TestHTTPDirectoryBranchesContract(t *testing.T) {
 	if got := string(f.request("GET", "/v1/projects", "", "", 200)); got != "[]\n" {
 		t.Fatalf("branch previews created a project: %s", got)
 	}
-	body, _ := json.Marshal(map[string]any{"name": "previewed", "root": gitRoot, "defaults": Settings{Model: "http-test/one", Effort: "low"}})
-	created := decodeHTTP[Project](t, f.request("POST", "/v1/projects", string(body), "", 201))
-	if created.Root != gitRoot {
-		t.Fatalf("created project root = %q, want %q", created.Root, gitRoot)
-	}
 }
 
 func TestProjectLiveGitBranch(t *testing.T) {

@@ -96,7 +96,7 @@ test("project settings save workspace defaults for newly created chats", async (
 
 test("new projects can choose a remote starting branch before creation", async ({
   page,
-}, testInfo) => {
+}) => {
   await workspace(page);
   const lookups: string[] = [];
   let releaseLookup: (() => void) | undefined;
@@ -124,10 +124,6 @@ test("new projects can choose a remote starting branch before creation", async (
   await expect(
     page.getByRole("option", { name: "upstream/trunk", exact: true }),
   ).toBeVisible();
-  await testInfo.attach("new-project-starting-branches", {
-    body: await page.screenshot(),
-    contentType: "image/png",
-  });
   await page
     .getByRole("option", { name: "origin/release", exact: true })
     .click();
