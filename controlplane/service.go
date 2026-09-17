@@ -234,6 +234,21 @@ func (s *Service) GetProject(id string) (Project, error) {
 	}
 	return p, nil
 }
+func validateProjectRoot(root string) (string, error) {
+	if !filepath.IsAbs(root) {
+		return "", problem(400, "invalid_project", "root must be an absolute server-local directory")
+	}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", problem(400, "invalid_project", err.Error())
+	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return "", problem(400, "invalid_project", "root must be an existing directory")
+	}
+	return filepath.Clean(root), nil
+}
+
 func (s *Service) CreateProject(req CreateProjectRequest) (Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -243,18 +258,10 @@ func (s *Service) CreateProject(req CreateProjectRequest) (Project, error) {
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Root) == "" {
 		return Project{}, problem(400, "invalid_project", "name and root are required")
 	}
-	if !filepath.IsAbs(req.Root) {
-		return Project{}, problem(400, "invalid_project", "root must be an absolute server-local directory")
-	}
-	root, err := filepath.EvalSymlinks(req.Root)
+	root, err := validateProjectRoot(req.Root)
 	if err != nil {
-		return Project{}, problem(400, "invalid_project", err.Error())
+		return Project{}, err
 	}
-	info, err := os.Stat(root)
-	if err != nil || !info.IsDir() {
-		return Project{}, problem(400, "invalid_project", "root must be an existing directory")
-	}
-	root = filepath.Clean(root)
 	if _, exists, err := s.projectByRootLocked(root); err != nil {
 		return Project{}, s.failStorageLocked(err)
 	} else if exists {

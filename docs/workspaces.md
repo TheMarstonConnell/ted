@@ -8,8 +8,10 @@ branch such as `origin/main` or `upstream/develop`.
 
 Project settings provide the defaults for newly created chats. Current checkout
 is the initial default; the base branch is taken from the remote's local `HEAD`
-reference, preferring `origin`. If no default is known, choose a branch explicitly.
-Branch discovery lists locally known remote-tracking branches and excludes
+reference, preferring `origin`. While creating a project in the web interface, the
+first known remote branch is selected when no remote `HEAD` exists; other clients
+must choose a branch explicitly. Branch discovery lists locally known
+remote-tracking branches and excludes
 symbolic `HEAD` entries and local-only branches. Non-Git projects cannot use
 Worktree mode. Discovery does not contact the network.
 

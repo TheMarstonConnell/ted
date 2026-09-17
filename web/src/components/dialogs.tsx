@@ -200,7 +200,12 @@ function ProjectForm() {
             placeholder="/path/to/your/project"
             value={root}
             readOnly={!!project}
-            onChange={(event) => setRoot(event.target.value)}
+            onChange={(event) => {
+              const nextRoot = event.target.value;
+              setRoot(nextRoot);
+              if (nextRoot.trim() !== root.trim())
+                setWorkspaceDefaults({ mode: workspaceDefaults.mode });
+            }}
           />
           <p className="text-xs text-muted-foreground">
             Project name:{" "}
@@ -236,13 +241,23 @@ function ProjectForm() {
           </p>
           <WorkspaceFields
             projectId={project?.id}
+            root={root}
             value={workspaceDefaults}
             onChange={setWorkspaceDefaults}
             disabled={busy}
           />
         </div>
         <div className="flex justify-end gap-2">
-          <Button type="submit" disabled={busy || !model || !name}>
+          <Button
+            type="submit"
+            disabled={
+              busy ||
+              !model ||
+              !name ||
+              (workspaceDefaults.mode === "worktree" &&
+                !workspaceDefaults.base_branch)
+            }
+          >
             {busy ? "Saving…" : project ? "Save defaults" : "Create project"}
           </Button>
         </div>
