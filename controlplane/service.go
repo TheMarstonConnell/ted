@@ -668,16 +668,44 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 	if a.Agent.Settled {
 		return QueuedMessage{}, problem(409, "settled", "restore agent before submitting messages")
 	}
+	mergeIndex := -1
+	if req.Kind == "bot" && strings.TrimSpace(req.SenderAgentID) != "" {
+		for i := len(a.Agent.Queue) - 1; i >= 0; i-- {
+			m := a.Agent.Queue[i]
+			if m.Status == "cancelled" {
+				continue
+			}
+			if m.Status != "pending" || m.Kind != "bot" {
+				break
+			}
+			if m.SenderAgentID == req.SenderAgentID {
+				if utf8.RuneCountInString(m.Text)+2+utf8.RuneCountInString(req.Text) > 1<<20 {
+					return QueuedMessage{}, problem(413, "too_large", "merged bot message must not exceed 1048576 characters")
+				}
+				mergeIndex = i
+				break
+			}
+		}
+	}
 	before := newStateChanges()
 	before.agent(s.state, id)
 	if key != "" {
 		before.receipt(s.state, scope)
 	}
 	s.lockWorkspaceLocked(a)
-	m := QueuedMessage{ID: newID(), Text: req.Text, Kind: req.Kind, SenderAgentID: req.SenderAgentID, Status: "pending", CreatedAt: time.Now().UTC()}
-	a.Agent.Queue = append(a.Agent.Queue, m)
+	var m QueuedMessage
+	eventType := "message.queued"
+	if mergeIndex >= 0 {
+		before.queued(s.state, id, mergeIndex)
+		a.Agent.Queue[mergeIndex].Text += "\n\n" + req.Text
+		m = a.Agent.Queue[mergeIndex]
+		eventType = "message.updated"
+	} else {
+		m = QueuedMessage{ID: newID(), Text: req.Text, Kind: req.Kind, SenderAgentID: req.SenderAgentID, Status: "pending", CreatedAt: time.Now().UTC()}
+		a.Agent.Queue = append(a.Agent.Queue, m)
+	}
 	a.Agent.Held = false
-	s.eventLocked(a, "message.queued", m)
+	s.eventLocked(a, eventType, m)
 	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
 	if key != "" {
 		s.state.Receipts[scope] = receipt{hash, id, m.ID}

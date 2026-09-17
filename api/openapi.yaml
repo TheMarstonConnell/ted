@@ -988,6 +988,11 @@ components:
     SubmitMessageRequest:
       description: sender_agent_id is optional bot-only caller-supplied provenance,
         not authenticated identity. Destinations are not restricted to parent chats.
+        Named bot submissions append to the latest pending bot message from that
+        sender unless a pending user message intervenes. The existing ID and queue
+        position are retained; message.updated carries the full merged record.
+        Anonymous, running, and terminal messages are never merged. Merged text is
+        limited to 1048576 characters; overflow is rejected with 413 too_large.
       type: object
       additionalProperties: false
       properties:
@@ -1392,6 +1397,7 @@ components:
           - agent.created
           - agent.updated
           - message.queued
+          - message.updated
           - message.cancelled
           - turn.started
           - turn.completed
@@ -1415,6 +1421,7 @@ components:
         agent.created: '#/components/schemas/AgentUpdate'
         agent.updated: '#/components/schemas/AgentUpdate'
         message.queued: '#/components/schemas/QueuedMessage'
+        message.updated: '#/components/schemas/QueuedMessage'
         message.cancelled: '#/components/schemas/QueuedMessage'
         turn.started: '#/components/schemas/QueuedMessage'
         turn.completed: '#/components/schemas/QueuedMessage'

@@ -109,9 +109,14 @@ Bot notifications use the same command with optional `kind: "bot"` and
 
 Omitting `kind` is equivalent to `kind: "user"`. Sender attribution is optional
 and bot-only; it is untrusted provenance, not an authorization check. Bot messages
-use the normal FIFO and wake-up behavior, one turn per notification. Queue events
-and committed history retain kind and sender so clients can render tool-style bot
-activity instead of a user bubble.
+use normal wake-up behavior. Named reports merge into the latest pending bot entry
+from the same sender unless a pending human message intervenes, keeping its ID and
+queue position. Anonymous, running, and terminal entries never merge. The text is
+appended with a blank line; `message.updated` carries the full replacement entry.
+Combined text exceeding 1,048,576 Unicode characters is rejected with `too_large`.
+Each resulting queue entry gets one turn. Queue events and committed history retain
+kind and sender so clients can render tool-style bot activity instead of a user bubble.
+Multiple submission keys can acknowledge the same ID; retries never append again.
 
 An ack means the queue entry was durably accepted, not that execution completed.
 Observe events or HTTP queue inspection for the outcome. `message_id` is also
@@ -168,7 +173,7 @@ The Event schema's `x-event-data-schemas` extension records this mapping, and
 | Event type | `data` schema | Meaning |
 | --- | --- | --- |
 | `agent.created`, `agent.updated` | `AgentUpdate` | Settings/state/settled/usage and shared read-cursor metadata. Cursor and event timestamp are in the outer Event; these partial updates contain neither history nor queue. |
-| `message.queued`, `message.cancelled` | `QueuedMessage` | Durable queue acceptance or pending deletion. |
+| `message.queued`, `message.updated`, `message.cancelled` | `QueuedMessage` | Durable queue acceptance, merged pending bot text, or pending deletion. Upsert by ID using the complete record. |
 | `turn.started`, `turn.completed`, `turn.failed`, `turn.interrupted`, `turn.cancelled` | `QueuedMessage` | Turn queue entry and its status; its `id` is the HTTP stop `turn_id`. |
 | `output` | `AgentOutput` | Existing runtime fields `Content`, `ResponseType`, `ToolCallID`, `ToolName`, `FullToolOutput` (intentionally PascalCase). Response types are `agent`, `tool`, `tool_result`, `status`, `usage`. |
 | `conversation` | `ConversationDelta` (`Message[]`) | New committed messages appended since the previous delta. HTTP history is the full current conversation. |

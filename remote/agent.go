@@ -185,7 +185,7 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 			return err
 		}
 		a.snapshot.Messages = append(a.snapshot.Messages, messages...)
-	case "message.queued":
+	case "message.queued", "message.updated":
 		var q QueuedMessage
 		if err := json.Unmarshal(e.Data, &q); err != nil {
 			a.mu.Unlock()

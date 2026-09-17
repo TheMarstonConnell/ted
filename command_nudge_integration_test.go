@@ -74,7 +74,13 @@ func TestNudgeCommandRealQueueAndRetry(t *testing.T) {
 	if err := remote.NewAgent(ctx, c, target, project.Root, nil).Turn("Human follow-up"); err != nil {
 		t.Fatal(err)
 	}
-	run("second", "Second child report")
+	second := run("second", "Second child report")
+	if merged := run("third", "Child work fully complete"); merged != second {
+		t.Fatalf("pending nudges did not share an ID: %q != %q", merged, second)
+	}
+	if retry := run("third", "Child work fully complete"); retry != second {
+		t.Fatalf("merged retry changed receipt: %q != %q", retry, second)
+	}
 	snapshot, err := c.GetAgent(ctx, target.ID)
 	if err != nil || len(snapshot.Queue) != 3 {
 		t.Fatalf("expected one active bot, queued user, queued bot: %+v, %v", snapshot.Queue, err)
@@ -82,10 +88,16 @@ func TestNudgeCommandRealQueueAndRetry(t *testing.T) {
 	if snapshot.Queue[0].Status != "running" || snapshot.Queue[1].Status != "pending" || snapshot.Queue[2].Status != "pending" {
 		t.Fatalf("CLI should acknowledge without waiting for execution: %+v", snapshot.Queue)
 	}
+	if snapshot.Queue[2].Text != "Second child report\n\nChild work fully complete" {
+		t.Fatalf("merged CLI text: %q", snapshot.Queue[2].Text)
+	}
 	for _, text := range []string{"First child report", "Human follow-up", "Second child report"} {
 		select {
 		case r := <-p.started:
 			input := r.Messages[len(r.Messages)-1]
+			if text == "Second child report" && !strings.Contains(input.Content.Text(), "Child work fully complete") {
+				t.Fatalf("model missed merged completion: %+v", input)
+			}
 			if input.Role != "user" || !strings.Contains(input.Content.Text(), text) {
 				t.Fatalf("FIFO/model input mismatch, expected %q, got %+v", text, input)
 			}

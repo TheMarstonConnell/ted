@@ -410,7 +410,7 @@ export interface components {
          * @enum {string}
          */
         MessageKind: "user" | "bot";
-        /** @description sender_agent_id is optional bot-only caller-supplied provenance, not authenticated identity. Destinations are not restricted to parent chats. */
+        /** @description sender_agent_id is optional bot-only caller-supplied provenance, not authenticated identity. Destinations are not restricted to parent chats. Named bot submissions append to the latest pending bot message from that sender unless a pending user message intervenes. The existing ID and queue position are retained; message.updated carries the full merged record. Anonymous, running, and terminal messages are never merged. Merged text is limited to 1048576 characters; overflow is rejected with 413 too_large. */
         SubmitMessageRequest: {
             text: string;
             kind?: components["schemas"]["MessageKind"];
@@ -596,7 +596,7 @@ export interface components {
             /** Format: int64 */
             cursor: number;
             /** @enum {string} */
-            type: "agent.created" | "agent.updated" | "message.queued" | "message.cancelled" | "turn.started" | "turn.completed" | "turn.failed" | "turn.interrupted" | "turn.cancelled" | "output" | "conversation";
+            type: "agent.created" | "agent.updated" | "message.queued" | "message.updated" | "message.cancelled" | "turn.started" | "turn.completed" | "turn.failed" | "turn.interrupted" | "turn.cancelled" | "output" | "conversation";
             data: components["schemas"]["EventData"];
             /** Format: date-time */
             created_at: string;

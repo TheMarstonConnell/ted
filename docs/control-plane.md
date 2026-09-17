@@ -62,13 +62,24 @@ a conflict. Retrying an accepted request does not implicitly continue held work.
 
 `ted nudge <chat-id> "<message>"` submits a bot notification through the same
 queue. HTTP and WebSocket submissions accept optional `kind` (`user` or `bot`,
-default `user`) and `sender_agent_id` (bot only). Each bot message gets its own
-turn and identical wake-up, FIFO, held-work, and settled-agent behavior. Kind
-and sender persist in queue records, events, and committed conversation history.
+default `user`) and `sender_agent_id` (bot only). A named bot submission appends
+its text, separated by a blank line, to the latest pending bot entry from the same
+sender, provided no pending human message intervenes. Other senders' bot entries
+can intervene. The existing ID, creation time, and queue position are retained;
+`message.updated` carries the full replacement queue record. Anonymous, running,
+and terminal entries are never merged. Combined text is capped at 1,048,576 Unicode
+characters; overflow returns `413 too_large` without mutation or a receipt.
+Existing backlogs are not retroactively consolidated.
+
+Each resulting entry gets one turn and normal wake-up, held-work, and settled-agent
+behavior. Kind and sender persist in queue records, events, and committed history.
 The model sees a clearly attributed external bot report; the interfaces render
 it as tool-style activity rather than human input. Sender IDs are caller-supplied
 provenance, not authentication, and do not restrict destinations to parent chats.
-Idempotency compares kind and sender as well as text.
+Idempotency compares the submitted kind, sender, and text, not the merged text.
+Each accepted key points to the resulting queue ID; retrying either an original or
+merged submission returns that entry's current contents/status without appending
+again or releasing a hold. Cancellation cancels the whole merged entry.
 
 The message ID also identifies its turn. Queue inspection includes both pending
 and terminal records. Deleting a pending message marks it cancelled rather than
