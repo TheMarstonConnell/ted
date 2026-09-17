@@ -39,6 +39,11 @@ const composer = (page: Page) =>
 const send = (page: Page) =>
   page.getByRole("button", { name: "Send message", exact: true });
 
+const userMessages = (page: Page) =>
+  page
+    .getByRole("region", { name: "Messages", exact: true })
+    .getByRole("article", { name: "Your message", exact: true });
+
 async function start(page: Page) {
   const fixture = await workspace(page);
   await page.goto("/?dialog=new-agent");
@@ -161,9 +166,7 @@ test("selects, removes, reselects, and sends screenshots with text; transcript o
   await expect(previews(page).getByRole("img")).toHaveCount(2);
   await hold(page);
   await send(page).click();
-  const message = page
-    .getByRole("region", { name: "Messages", exact: true })
-    .getByRole("article", { name: "Your message", exact: true });
+  const message = userMessages(page);
   await expect(message).toContainText(
     "Compare the desktop and mobile composer.",
   );
@@ -213,11 +216,7 @@ for (const kind of ["paste", "drop"] as const) {
     await expect(send(page)).toBeEnabled();
     if (kind === "paste") await composer(page).press("Enter");
     else await send(page).click();
-    await expect(
-      page
-        .getByRole("article", { name: "Your message", exact: true })
-        .getByRole("img"),
-    ).toHaveCount(2);
+    await expect(userMessages(page).getByRole("img")).toHaveCount(2);
     expect(requests[0].body).toEqual({
       text: "",
       attachments: [
@@ -242,9 +241,7 @@ test("removing the last screenshot disables an empty send and leaves text-only s
   await expect(send(page)).toBeDisabled();
   await composer(page).fill("No screenshot needed");
   await send(page).click();
-  await expect(
-    page.getByRole("article", { name: "Your message", exact: true }),
-  ).toHaveText("No screenshot needed");
+  await expect(userMessages(page)).toHaveText("No screenshot needed");
   expect(requests[0].body).toEqual({ text: "No screenshot needed" });
 });
 
@@ -311,11 +308,10 @@ test("failed sends restore images and retry identity; changing images creates a 
   await input(page).setInputFiles(replacement);
   await page.unroute("**/v1/agents/a1/messages");
   await send(page).click();
-  await expect(
-    page
-      .getByRole("article", { name: "Your message", exact: true })
-      .getByRole("img"),
-  ).toHaveAttribute("src", attachment(replacement).url);
+  await expect(userMessages(page).getByRole("img")).toHaveAttribute(
+    "src",
+    attachment(replacement).url,
+  );
   expect(requests).toHaveLength(3);
   expect(requests[2].key).not.toBe(requests[0].key);
   expect(requests[2].body.attachments).toEqual([attachment(replacement)]);
@@ -388,9 +384,7 @@ test("queued Edit restores screenshots and escapes a literal slash before resend
       .attachments,
   ).toEqual([attachment()]);
   await send(page).click();
-  await expect(
-    page.getByRole("article", { name: "Your message", exact: true }),
-  ).toContainText("/help with this screenshot");
+  await expect(userMessages(page)).toContainText("/help with this screenshot");
   expect(requests[0].body).toEqual({
     text: "/help with this screenshot",
     attachments: [attachment()],
@@ -411,9 +405,10 @@ test("slash commands reject images without clearing the draft or making a reques
   expect(requests).toEqual([]);
   await composer(page).fill("//help");
   await send(page).click();
+  await expect(userMessages(page)).toContainText("/help");
   await expect(
-    page.getByRole("article", { name: "Your message", exact: true }),
-  ).toContainText("/help");
+    page.getByRole("region", { name: "Outgoing messages" }),
+  ).toHaveCount(0);
   expect(requests[0].body).toEqual({
     text: "/help",
     attachments: [attachment()],
@@ -530,10 +525,7 @@ for (const width of [320, 390]) {
       );
       await capture(page, info, `attachments-mobile-${width}`);
       await send(page).click();
-      const message = page.getByRole("article", {
-        name: "Your message",
-        exact: true,
-      });
+      const message = userMessages(page);
       await expect(message.getByRole("img")).toHaveCount(4);
       await hold(page, 1800);
       await message
@@ -600,11 +592,7 @@ test("accepts real PNG, JPEG, WebP and GIF bytes and preserves MIME types in the
     )
     .toBe(true);
   await send(page).click();
-  await expect(
-    page
-      .getByRole("article", { name: "Your message", exact: true })
-      .getByRole("img"),
-  ).toHaveCount(4);
+  await expect(userMessages(page).getByRole("img")).toHaveCount(4);
   expect(requests[0].body.attachments).toEqual(files.map(attachment));
 });
 
@@ -744,10 +732,7 @@ test("an unchanged restored image-only draft retries successfully with the origi
   );
   await expect(composer(page)).toHaveValue("");
   await send(page).click();
-  const messages = page.getByRole("article", {
-    name: "Your message",
-    exact: true,
-  });
+  const messages = userMessages(page);
   await expect(messages).toHaveCount(1);
   await expect(messages.getByRole("img")).toHaveAttribute(
     "src",

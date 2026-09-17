@@ -91,8 +91,9 @@ exists, rather than retrying forever; start or select another agent.
 
 The fields above are required. `request_id` correlates the response only; it is not an
 idempotency key. `idempotency_key` (1–256 characters) deduplicates durably in the
-same per-agent namespace as HTTP `Idempotency-Key`. Retry the **same text, kind, sender, and
-key**, with any request ID, after a disconnect. A different payload with that key
+same per-agent namespace as HTTP `Idempotency-Key`. Retry the **same text, kind,
+sender, attachment names/URLs in the same array order, and key**, with any request
+ID, after a disconnect. Changing any of these payload fields with the same key
 returns `idempotency_conflict` (HTTP 409). Submission needs no subscription.
 
 ```json
