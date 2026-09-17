@@ -1423,3 +1423,30 @@ func TestDeleteProjectWithMissingRootAndRunningDaemon(t *testing.T) {
 		t.Fatalf("cleanup started Chrome or created project storage: %v", err)
 	}
 }
+
+func TestShutdownReportsBrowserCleanupFailure(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewService(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := s.CreateProject(CreateProjectRequest{Name: "shutdown failure", Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateAgent(CreateAgentRequest{ProjectID: project.ID}, ""); err != nil {
+		t.Fatal(err)
+	}
+	cleanupFailure := errors.New("browser close rejected")
+	s.browserClose = func(context.Context, string, string, string) error { return cleanupFailure }
+	if err := s.Close(context.Background()); !errors.Is(err, cleanupFailure) {
+		t.Fatalf("shutdown hid browser cleanup failure: %v", err)
+	}
+	reopened, err := NewService(dir, nil, nil)
+	if err != nil {
+		t.Fatalf("cleanup failure leaked store lock: %v", err)
+	}
+	if err := reopened.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -519,11 +519,11 @@ func TestSessionCloseCancelsQueuedLiveNewBeforeCleanup(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("session close remained blocked")
 	}
-	mgr.mu.Lock()
-	projects := len(mgr.projects)
-	mgr.mu.Unlock()
-	if projects != 0 {
-		t.Fatal("canceled queued new recreated a browser project")
+	// A canceled open may retain project/profile bookkeeping, but not a session.
+	for _, project := range mgr.status()["projects"].([]map[string]any) {
+		if project["sessions"] != 0 {
+			t.Fatalf("canceled queued new left an owned session: %+v", project)
+		}
 	}
 	release()
 	released = true

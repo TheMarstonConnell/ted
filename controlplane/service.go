@@ -1159,6 +1159,7 @@ func (s *Service) BeginShutdown() error {
 func (s *Service) Close(ctx context.Context) error {
 	_ = s.BeginShutdown()
 	done := make(chan struct{})
+	var cleanupErr error
 	go func() {
 		s.workers.Wait()
 		s.mu.Lock()
@@ -1185,11 +1186,14 @@ func (s *Service) Close(ctx context.Context) error {
 		s.instances = map[string]*agent.Agent{}
 		s.mu.Unlock()
 		var cleanup sync.WaitGroup
+		failures := make(chan error, len(instances)+len(viewerIdentities))
 		for _, instance := range instances {
 			cleanup.Add(1)
 			go func(instance *agent.Agent) {
 				defer cleanup.Done()
-				_ = instance.Close()
+				if err := instance.Close(); err != nil {
+					failures <- err
+				}
 			}(instance)
 		}
 		for id, project := range viewerIdentities {
@@ -1198,10 +1202,16 @@ func (s *Service) Close(ctx context.Context) error {
 				defer cleanup.Done()
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 				defer cancel()
-				_ = closer(cleanupCtx, home, project, id)
+				if err := closer(cleanupCtx, home, project, id); err != nil {
+					failures <- err
+				}
 			}(id, project)
 		}
 		cleanup.Wait()
+		close(failures)
+		for err := range failures {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
 		close(done)
 	}()
 	select {
@@ -1219,6 +1229,6 @@ func (s *Service) Close(ctx context.Context) error {
 		err = errors.Join(err, s.releaseLock())
 		s.releaseLock = nil
 	}
-	return errors.Join(s.storageErr, err)
+	return errors.Join(cleanupErr, s.storageErr, err)
 }
 func (s *Service) String() string { return fmt.Sprintf("control plane (%s)", s.dir) }
