@@ -264,6 +264,14 @@ export function WorkspaceFields({
           )}
         </div>
       )}
+      {loading && !compact && (
+        <p
+          role="status"
+          className="col-span-full text-xs text-muted-foreground"
+        >
+          Loading remote branches…
+        </p>
+      )}
       {knownNonGit && (
         <p
           className={

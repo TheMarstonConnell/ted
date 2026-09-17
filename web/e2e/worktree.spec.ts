@@ -99,16 +99,25 @@ test("new projects can choose a remote starting branch before creation", async (
 }, testInfo) => {
   await workspace(page);
   const lookups: string[] = [];
+  let releaseLookup: (() => void) | undefined;
+  const lookupPaused = new Promise<void>((resolve) => {
+    releaseLookup = resolve;
+  });
   await page.route("**/v1/projects/branches?*", async (route) => {
     lookups.push(new URL(route.request().url()).searchParams.get("root")!);
+    await lookupPaused;
     await route.fallback();
   });
   await page.goto("/?dialog=new-project");
   const dialog = page.getByRole("dialog", { name: "Create a project" });
   const root = "/srv/new project & repo";
   await dialog.getByRole("textbox", { name: "Server directory" }).fill(root);
-  await choose(dialog.getByRole("combobox", { name: "Workspace" }), "worktree");
   await expect.poll(() => lookups).toEqual([root]);
+  await expect(dialog.getByRole("status")).toHaveText(
+    "Loading remote branches…",
+  );
+  releaseLookup!();
+  await choose(dialog.getByRole("combobox", { name: "Workspace" }), "worktree");
   const branch = dialog.getByRole("combobox", { name: "Start from" });
   await expect(branch).toHaveText("origin/main");
   await branch.click();
