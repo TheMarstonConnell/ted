@@ -201,7 +201,7 @@ func (h *httpAPI) bridgeBrowser(parent context.Context, c *websocket.Conn, live 
 				fail("invalid", "only JSON text messages are accepted", websocket.CloseUnsupportedData)
 				return
 			}
-			command, err := h.validateBrowserCommand(data)
+			command, err := browser.ParseLiveCommand(data)
 			if err != nil {
 				violations++
 				if violations >= 8 {
@@ -318,19 +318,4 @@ func (h *httpAPI) bridgeBrowser(parent context.Context, c *websocket.Conn, live 
 			}
 		}
 	}
-}
-
-func (h *httpAPI) validateBrowserCommand(data []byte) (browser.LiveCommand, error) {
-	command, err := browser.ParseLiveCommand(data)
-	if err != nil {
-		return command, err
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return command, err
-	}
-	if err := h.spec.Components.Schemas["BrowserLiveCommand"].Value.VisitJSON(raw); err != nil {
-		return command, errors.New("invalid browser command fields")
-	}
-	return command, nil
 }

@@ -313,12 +313,17 @@ func TestBrowserCommandsEventsAndRecoverableValidation(t *testing.T) {
 }
 
 func TestBrowserStrictCommandValidation(t *testing.T) {
-	spec, err := api.GetSwagger()
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := &httpAPI{spec: spec}
 	invalid := []string{
+		`{"type":"mouse","tab_id":"tab","event":"mouseMoved","x":100001,"y":2}`,
+		`{"type":"mouse","tab_id":"tab","event":"mouseMoved","x":1,"y":100001}`,
+		`{"type":"mouse","tab_id":"tab","event":"mouseWheel","x":1,"y":2,"delta_x":-100001}`,
+		`{"type":"mouse","tab_id":"tab","event":"mouseMoved","x":1,"y":2,"button":""}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","key":"","code":"KeyA"}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","key":"` + strings.Repeat("😀", 129) + `"}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","code":"` + strings.Repeat("😀", 129) + `"}`,
+		`{"type":"text","tab_id":"tab","text":"` + strings.Repeat("é", 16385) + `"}`,
+		`{"type":"new","url":"data:,` + strings.Repeat("😀", 8193-6) + `"}`,
+
 		`null`, `[]`, `true`, `{}`, `{"type":"watch"} {}`, `{"type":"watch","type":"new"}`,
 		`{"type":null}`, `{"type":"watch","project":"/tmp"}`, `{"type":"watch","thread":"other"}`, `{"type":"watch","home":"/tmp"}`,
 		`{"type":"cdp"}`, `{"type":"watch","tab_id":null}`, `{"type":"watch","url":"https://example.test"}`,
@@ -345,8 +350,21 @@ func TestBrowserStrictCommandValidation(t *testing.T) {
 		`{"type":"text","tab_id":"tab","text":"` + strings.Repeat("a", 16385) + `"}`,
 	}
 	for _, raw := range invalid {
-		if _, err := h.validateBrowserCommand([]byte(raw)); err == nil {
+		if _, err := browser.ParseLiveCommand([]byte(raw)); err == nil {
 			t.Errorf("accepted invalid command: %.200s", raw)
+		}
+	}
+
+	valid := []string{
+		`{"type":"mouse","tab_id":"tab","event":"mouseWheel","x":100000,"y":100000,"delta_x":-100000,"delta_y":100000}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","key":"` + strings.Repeat("😀", 128) + `","code":"` + strings.Repeat("😀", 128) + `"}`,
+		`{"type":"watch","tab_id":"` + strings.Repeat("😀", 256) + `"}`,
+		`{"type":"text","tab_id":"tab","text":"` + strings.Repeat("é", 16384) + `"}`,
+		`{"type":"new","url":"data:,` + strings.Repeat("😀", 8192-6) + `"}`,
+	}
+	for _, raw := range valid {
+		if _, err := browser.ParseLiveCommand([]byte(raw)); err != nil {
+			t.Errorf("rejected valid boundary command: %.200s: %v", raw, err)
 		}
 	}
 }

@@ -200,8 +200,10 @@ func ParseLiveCommand(data []byte) (LiveCommand, error) {
 	if command.Type == "mouse" && (raw["x"] == nil || raw["y"] == nil) {
 		return invalid("mouse coordinates are required")
 	}
-	if raw["url"] == "" {
-		return invalid("url must not be empty")
+	for _, key := range []string{"url", "key", "button"} {
+		if raw[key] == "" {
+			return invalid(key + " must not be empty")
+		}
 	}
 	if err := validateLiveCommand(command); err != nil {
 		return command, err
@@ -211,11 +213,11 @@ func ParseLiveCommand(data []byte) (LiveCommand, error) {
 
 func validateLiveCommand(c LiveCommand) error {
 	invalid := func(message string) error { return fail("invalid_params", "%s", message) }
-	if len(c.TabID) > 256 {
+	if utf8.RuneCountInString(c.TabID) > 256 {
 		return invalid("tab_id is too long")
 	}
 	for _, v := range []float64{c.X, c.Y, c.DeltaX, c.DeltaY} {
-		if math.IsNaN(v) || math.IsInf(v, 0) || math.Abs(v) > 1e7 {
+		if math.IsNaN(v) || math.IsInf(v, 0) || math.Abs(v) > 100000 {
 			return invalid("input coordinates must be finite and bounded")
 		}
 	}
@@ -225,7 +227,7 @@ func validateLiveCommand(c LiveCommand) error {
 	if c.Modifiers < 0 || c.Modifiers > 15 || c.Buttons < 0 || c.Buttons > 7 || c.ClickCount < 0 || c.ClickCount > 3 || c.KeyCode < 0 || c.KeyCode > 65535 {
 		return invalid("input flags are out of range")
 	}
-	if len(c.Key) > 128 || len(c.Code) > 128 || len(c.Text) > 64<<10 || len(c.URL) > 64<<10 {
+	if utf8.RuneCountInString(c.Key) > 128 || utf8.RuneCountInString(c.Code) > 128 || utf8.RuneCountInString(c.Text) > 16384 || utf8.RuneCountInString(c.URL) > 8192 {
 		return invalid("input string is too long")
 	}
 	switch c.Type {
