@@ -1310,13 +1310,28 @@ func TestConfiguredPublicOriginBehindTLSProxy(t *testing.T) {
 }
 
 func TestBrowserStorageFailureCancelsViewer(t *testing.T) {
+	s, err := NewService(t.TempDir(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
 	live := newFakeBrowserLive()
-	f := browserFixture(t, func(context.Context, browser.Request) (browserLiveConnection, error) { return live, nil })
-	a := f.agent(f.project())
+	server := httptest.NewServer(newHandler(s, func(context.Context, browser.Request) (browserLiveConnection, error) { return live, nil }))
+	t.Cleanup(server.Close)
+	project, err := s.CreateProject(CreateProjectRequest{Name: "storage", Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.CreateAgent(CreateAgentRequest{ProjectID: project.ID}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &httpFixture{s: s, server: server, t: t}
 	c := dialBrowser(t, f, a.ID)
 	defer c.Close()
-	f.s.mu.Lock()
-	_ = f.s.failStorageLocked(errors.New("disk full"))
-	f.s.mu.Unlock()
+	s.mu.Lock()
+	err = s.failStorageLocked(errors.New("disk full"))
+	s.mu.Unlock()
+	assertStatus(t, err, 503)
 	awaitBrowserClosed(t, live)
 }
