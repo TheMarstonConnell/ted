@@ -58,7 +58,9 @@ Each agent has one FIFO queue and at most one active turn. HTTP and WebSocket
 submission use the same durable transaction. A submission is acknowledged before
 completion, only after its queued record and event have been persisted. Creation
 and submission accept scoped idempotency keys: reuse with a different payload is
-a conflict. Retrying an accepted request does not implicitly continue held work.
+a conflict. Message retries must preserve text, kind, sender, and attachment
+names/URLs in the same array order. Changing an attachment requires a new key.
+Retrying an accepted request does not implicitly continue held work.
 
 `ted nudge <chat-id> "<message>"` submits a bot notification through the same
 queue. HTTP and WebSocket submissions accept optional `kind` (`user` or `bot`,
@@ -76,7 +78,8 @@ behavior. Kind and sender persist in queue records, events, and committed histor
 The model sees a clearly attributed external bot report; the interfaces render
 it as tool-style activity rather than human input. Sender IDs are caller-supplied
 provenance, not authentication, and do not restrict destinations to parent chats.
-Idempotency compares the submitted kind, sender, and text, not the merged text.
+For bot reports, idempotency compares the submitted kind, sender, and text, not
+the merged text; bots cannot include attachments.
 Each accepted key points to the resulting queue ID; retrying either an original or
 merged submission returns that entry's current contents/status without appending
 again or releasing a hold. Cancellation cancels the whole merged entry.

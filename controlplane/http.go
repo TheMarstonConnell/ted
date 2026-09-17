@@ -23,6 +23,7 @@ import (
 )
 
 const maxHTTPBody = 2 << 20
+const maxSubmitBody = 30 << 20
 
 // httpAPI adapts generated transport types to the durable runtime. The generated
 // ServerInterface and HandlerWithOptions are the only HTTP route implementation.
@@ -62,8 +63,12 @@ type httpDefinition struct {
 
 var (
 	emptyQuery            = url.Values{}
-	requestValidationOpts = &openapi3filter.Options{SkipSettingDefaults: true}
-	sharedHTTPDefinition  = sync.OnceValues(func() (httpDefinition, error) {
+	requestValidationOpts = func() *openapi3filter.Options {
+		options := &openapi3filter.Options{SkipSettingDefaults: true}
+		options.WithCustomSchemaErrorFunc(schemaErrorMessage)
+		return options
+	}()
+	sharedHTTPDefinition = sync.OnceValues(func() (httpDefinition, error) {
 		spec, err := api.GetSwagger()
 		if err != nil {
 			return httpDefinition{}, fmt.Errorf("load embedded API spec: %w", err)
@@ -149,12 +154,16 @@ func validateHTTP(router routers.Router, next http.Handler, metadata map[*openap
 
 		var body []byte
 		if r.Body != nil && r.Body != http.NoBody {
-			r.Body = http.MaxBytesReader(w, r.Body, maxHTTPBody)
+			limit := int64(maxHTTPBody)
+			if route.Operation.OperationID == "SubmitMessage" {
+				limit = maxSubmitBody
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 			body, err = io.ReadAll(r.Body)
 			if err != nil {
 				var large *http.MaxBytesError
 				if errors.As(err, &large) {
-					writeProblem(w, 413, "too_large", "request body exceeds 2 MiB")
+					writeProblem(w, 413, "too_large", fmt.Sprintf("request body exceeds %d MiB", limit>>20))
 				} else {
 					writeProblem(w, 400, "invalid", "cannot read request body")
 				}
@@ -437,7 +446,11 @@ func (h *httpAPI) SubmitMessage(w http.ResponseWriter, r *http.Request, id strin
 	if !ok {
 		return
 	}
-	m, err := h.service.SubmitMessage(id, SubmitMessageRequest{Text: b.Text, Kind: string(value(b.Kind)), SenderAgentID: value(b.SenderAgentId)}, value(p.IdempotencyKey))
+	var attachments []Attachment
+	for _, attachment := range value(b.Attachments) {
+		attachments = append(attachments, Attachment{Name: attachment.Name, URL: attachment.Url})
+	}
+	m, err := h.service.SubmitMessage(id, SubmitMessageRequest{Attachments: attachments, Text: b.Text, Kind: string(value(b.Kind)), SenderAgentID: value(b.SenderAgentId)}, value(p.IdempotencyKey))
 	respond(w, 202, m, err)
 }
 func (h *httpAPI) DeletePending(w http.ResponseWriter, r *http.Request, id, mid string) {
@@ -510,3 +523,6 @@ func (h *httpAPI) ListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, models)
 }
+
+// Do not echo submitted image data in schema errors.
+func schemaErrorMessage(err *openapi3.SchemaError) string { return err.Reason }

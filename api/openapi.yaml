@@ -5,7 +5,7 @@ info:
   description: Local unauthenticated control plane. Bind to loopback unless protected
     by a trusted proxy. All request objects reject unknown properties. IDs and cursors
     are opaque runtime identifiers; cursors are nonnegative integers. Bodies limited
-    to 2 MiB. JSON errors share one envelope. No wildcard CORS.
+    to 2 MiB, except message submission (30 MiB). JSON errors share one envelope. No wildcard CORS.
 paths:
   /health:
     get:
@@ -557,8 +557,10 @@ paths:
     post:
       operationId: SubmitMessage
       description: Queue a message. Optional Idempotency-Key deduplicates submissions
-        across HTTP and WebSocket; different text, kind, or sender with the same key
-        returns 409. Omitted kind and explicit user kind are equivalent.
+        across HTTP and WebSocket; different text, kind, sender, or attachment names/URLs
+        in array order with the same key returns 409. Omitted kind and explicit user
+        kind are equivalent. Empty text is allowed only with user attachments; bots
+        cannot include attachments. Request bodies are limited to 30 MiB.
       responses:
         '202':
           description: Success
@@ -571,7 +573,12 @@ paths:
         '405': *id003
         '409': *id004
         '410': *id005
-        '413': *id006
+        '413':
+          description: Request body exceeds 30 MiB, or merged bot text exceeds 1048576 characters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '415': *id007
         '500': *id008
         '503': *id009
@@ -1322,8 +1329,30 @@ components:
       enum:
       - user
       - bot
+    Attachment:
+      description: Inline image only. Decoded bytes must match the declared MIME and
+        decode successfully. At most 5 MiB per image, 20 MiB total, 16384 pixels per
+        side and 16777216 pixels per image. No remote URLs or local files.
+      type: object
+      additionalProperties: false
+      required: [name, url]
+      properties:
+        name:
+          type: string
+          maxLength: 256
+        url:
+          type: string
+          maxLength: 6990531
+          pattern: '^data:image/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]*={0,2}$'
+    Attachments:
+      type: array
+      maxItems: 4
+      items:
+        $ref: '#/components/schemas/Attachment'
     SubmitMessageRequest:
-      description: sender_agent_id is optional bot-only caller-supplied provenance,
+      description: User messages may include inline image attachments and may have
+        empty text only when attachments are present. Bots cannot include attachments.
+        sender_agent_id is optional bot-only caller-supplied provenance,
         not authenticated identity. Destinations are not restricted to parent chats.
         Named bot submissions append to the latest pending bot message from that
         sender unless a pending user message intervenes. The existing ID and queue
@@ -1333,7 +1362,11 @@ components:
       type: object
       additionalProperties: false
       properties:
-        text: *id015
+        attachments:
+          $ref: '#/components/schemas/Attachments'
+        text:
+          type: string
+          maxLength: 1048576
         kind:
           $ref: '#/components/schemas/MessageKind'
         sender_agent_id: *id010
@@ -1350,6 +1383,8 @@ components:
       type: object
       additionalProperties: false
       properties:
+        attachments:
+          $ref: '#/components/schemas/Attachments'
         id: *id010
         text:
           type: string
@@ -1907,9 +1942,13 @@ components:
       - type
       - request_id
     WSSubmit:
+      description: Same text and attachment contract as SubmitMessageRequest.
+        Submit frames are limited to 30 MiB.
       type: object
       additionalProperties: false
       properties:
+        attachments:
+          $ref: '#/components/schemas/Attachments'
         type:
           type: string
           enum:
@@ -1920,7 +1959,9 @@ components:
           type: string
           minLength: 1
           maxLength: 256
-        text: *id015
+        text:
+          type: string
+          maxLength: 1048576
         kind:
           $ref: '#/components/schemas/MessageKind'
         sender_agent_id: *id010

@@ -6,7 +6,7 @@ import (
 )
 
 // MaxRequestBytes is a conservative local safety budget, not a provider limit.
-const MaxRequestBytes = 8 << 20
+const MaxRequestBytes = 32 << 20
 
 func checkRequestSize(logger *zap.Logger, size int) error {
 	if size <= MaxRequestBytes {

@@ -36,7 +36,7 @@ func TestBotNudgesMergeIntoOnePendingTurn(t *testing.T) {
 		"complete": secondReq,
 	} {
 		retry, err := s.SubmitMessage(a.ID, req, key)
-		if err != nil || retry != merged {
+		if err != nil || !reflect.DeepEqual(retry, merged) {
 			t.Fatalf("retry %s: %+v %v", key, retry, err)
 		}
 	}
@@ -68,7 +68,7 @@ func TestBotNudgesMergeIntoOnePendingTurn(t *testing.T) {
 	var original, updated QueuedMessage
 	_ = json.Unmarshal(botEvents[0].Data, &original)
 	_ = json.Unmarshal(botEvents[1].Data, &updated)
-	if original.Text != first.Text || updated != merged {
+	if original.Text != first.Text || !reflect.DeepEqual(updated, merged) {
 		t.Fatalf("event snapshots mutated or incomplete: %+v %+v", original, updated)
 	}
 	p.results <- nil
@@ -210,7 +210,7 @@ func TestBotMergePersistsAndRetriesAcrossRestart(t *testing.T) {
 	defer recovered.Close(context.Background())
 	for key, req := range map[string]SubmitMessageRequest{"first": firstReq, "second": secondReq} {
 		retry, err := recovered.SubmitMessage(a.ID, req, key)
-		if err != nil || retry != merged || retry.ID != first.ID {
+		if err != nil || !reflect.DeepEqual(retry, merged) || retry.ID != first.ID {
 			t.Fatalf("persisted receipt: %+v %v", retry, err)
 		}
 	}

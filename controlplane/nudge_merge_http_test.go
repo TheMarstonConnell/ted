@@ -3,6 +3,7 @@ package controlplane
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -55,7 +56,7 @@ func TestHTTPAndWebSocketMergeBotNudges(t *testing.T) {
 			updates = append(updates, message)
 		}
 	}
-	if len(updates) != 1 || updates[0] != queue[1] {
+	if len(updates) != 1 || !reflect.DeepEqual(updates[0], queue[1]) {
 		t.Fatalf("merge replay: %+v", updates)
 	}
 	f.request("DELETE", base+"/"+first.ID, "", "", 204)

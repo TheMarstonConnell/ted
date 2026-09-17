@@ -191,11 +191,15 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 			a.mu.Unlock()
 			return err
 		}
-		if q.Text != "" {
+		if q.Text != "" || len(q.Attachments) > 0 {
 			if q.Kind == "bot" {
 				bot = &q
 			} else {
-				output = &agent.AgentResponse{ResponseType: "user", Content: q.Text}
+				text := q.Text
+				if text == "" {
+					text = "[Image attachment]"
+				}
+				output = &agent.AgentResponse{ResponseType: "user", Content: text}
 			}
 		}
 
