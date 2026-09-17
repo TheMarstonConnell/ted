@@ -183,7 +183,9 @@ The panel expands within the workspace, not over the whole application; below
 1024px it replaces chat content while preserving drafts. Closing restores toggle
 focus. Tabs and browser navigation use shared compact controls with the existing
 48px touch-target override. The address controls wrap rather than compress targets.
-The shared-control notice stays visible: interaction never requires takeover.
+The URL row also holds expand/narrow and close; it stays together when history
+controls wrap. There is no separate panel title bar or shared-control notice.
+Interaction never requires takeover.
 Frames retain their source aspect ratio with letterboxing; only the actual frame
 rectangle accepts page input. Keyboard focus is visibly outlined and accompanied
 by an Escape-to-release hint. Ted’s labeled pointer is pointer-events-none, with a

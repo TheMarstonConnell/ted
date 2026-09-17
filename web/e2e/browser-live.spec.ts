@@ -1,9 +1,4 @@
-import {
-  test,
-  expect,
-  type Page,
-  type WebSocketRoute,
-} from "@playwright/test";
+import { test, expect, type Page, type WebSocketRoute } from "@playwright/test";
 import { workspace } from "./fixtures";
 import type { LiveCommand, LiveTab } from "../src/lib/browser-live";
 
@@ -157,9 +152,31 @@ test("subscribes without starting; desktop split, expand, narrow and close prese
   await live.open();
   expect(live.commands).toEqual([{ type: "watch", tab_id: "" }]);
   await expect(composer).toBeVisible();
+  const panel = page.getByRole("region", { name: "Live browser" });
   await expect(
-    page.getByText("Shared with Ted", { exact: false }),
-  ).toBeVisible();
+    panel.getByText("Shared with Ted", { exact: false }),
+  ).toHaveCount(0);
+  await expect(
+    panel.getByRole("heading", { name: "Browser", exact: true }),
+  ).toHaveCount(0);
+  const navigation = panel.getByRole("form", { name: "Browser navigation" });
+  const address = navigation.getByRole("textbox", { name: "Browser address" });
+  const expand = navigation.getByRole("button", { name: "Expand browser" });
+  const close = navigation.getByRole("button", { name: "Close browser panel" });
+  for (const control of [expand, close]) {
+    const addressBox = (await address.boundingBox())!;
+    const controlBox = (await control.boundingBox())!;
+    expect(
+      Math.abs(
+        addressBox.y +
+          addressBox.height / 2 -
+          controlBox.y -
+          controlBox.height / 2,
+      ),
+    ).toBeLessThan(1);
+    expect(controlBox.x).toBeGreaterThan(addressBox.x + addressBox.width);
+  }
+  await address.fill("https://do-not-navigate.test");
   await page.getByRole("button", { name: "Expand browser" }).click();
   await expect(composer).toBeHidden();
   await page.getByRole("button", { name: "Narrow browser" }).click();
@@ -173,6 +190,42 @@ test("subscribes without starting; desktop split, expand, narrow and close prese
   ).toBeFocused();
   expect(live.commands.every((c) => c.type === "watch")).toBe(true);
 });
+
+for (const width of [1024, 1280]) {
+  test(`window controls stay with the URL in a desktop split (${width}px)`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const live = await liveBrowser(page);
+    await live.open();
+    const navigation = page.getByRole("form", { name: "Browser navigation" });
+    const addressBox = (await navigation
+      .getByRole("textbox", { name: "Browser address" })
+      .boundingBox())!;
+    for (const name of ["Expand browser", "Close browser panel"]) {
+      const box = (await navigation
+        .getByRole("button", { name, exact: true })
+        .boundingBox())!;
+      expect(
+        Math.abs(box.y + box.height / 2 - addressBox.y - addressBox.height / 2),
+      ).toBeLessThan(1);
+      expect(box.x).toBeGreaterThanOrEqual(addressBox.x + addressBox.width);
+    }
+    if (width === 1280) {
+      const backBox = (await navigation
+        .getByRole("button", { name: "Browser back" })
+        .boundingBox())!;
+      expect(
+        Math.abs(
+          backBox.y + backBox.height / 2 - addressBox.y - addressBox.height / 2,
+        ),
+      ).toBeLessThan(1);
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBe(width);
+  });
+}
 
 test("tabs follow agent or pin independently, navigation and tab lifecycle use explicit IDs", async ({
   page,
@@ -517,6 +570,20 @@ for (const width of [320, 390, 768]) {
     const box = (await live.viewport.boundingBox())!;
     expect(box.width).toBeGreaterThan(250);
     expect(box.x + box.width).toBeLessThanOrEqual(width);
+    const navigation = page.getByRole("form", { name: "Browser navigation" });
+    const addressBox = (await navigation
+      .getByRole("textbox", { name: "Browser address" })
+      .boundingBox())!;
+    const closeBox = (await navigation
+      .getByRole("button", { name: "Close browser panel" })
+      .boundingBox())!;
+    expect(
+      Math.abs(
+        addressBox.y + addressBox.height / 2 - closeBox.y - closeBox.height / 2,
+      ),
+    ).toBeLessThan(1);
+    expect(closeBox.width).toBeGreaterThanOrEqual(width < 768 ? 48 : 32);
+    expect(closeBox.height).toBeGreaterThanOrEqual(width < 768 ? 48 : 32);
     await page.getByRole("button", { name: "Close browser panel" }).click();
     await expect(
       page.getByRole("textbox", { name: "Message", exact: true }),

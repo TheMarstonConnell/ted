@@ -10,6 +10,8 @@ their conversation to inspect them.
 - Open **Browser** from a conversation. Opening the viewer does not start Chrome;
   an empty session offers an explicit **Open browser** action.
 - Watch beside chat, expand the panel, or use the full-width view on narrow screens.
+  Expand/narrow and close sit alongside the URL field; there is no separate title
+  bar or shared-control notice.
 - The viewport is always interactive. Clicking focuses it for keyboard input;
   Escape releases local focus. On touchscreens, a tap clicks the remote page and
   a drag scrolls it. The address bar, tab strip and history controls operate on

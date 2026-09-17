@@ -71,32 +71,6 @@ export function BrowserPanel({
       aria-label="Live browser"
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background lg:border-l"
     >
-      <div className="flex shrink-0 items-center gap-2 border-b p-2">
-        <Globe className="ml-2 size-4 shrink-0" aria-hidden="true" />
-        <h2 className="min-w-0 flex-1 text-sm font-semibold">Browser</h2>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="hidden lg:inline-flex"
-          aria-label={expanded ? "Narrow browser" : "Expand browser"}
-          onClick={onExpand}
-        >
-          {expanded ? <Minimize2 /> : <Maximize2 />}
-        </Button>
-        <Button
-          ref={closeRef}
-          variant="ghost"
-          size="icon"
-          aria-label="Close browser panel"
-          onClick={onClose}
-        >
-          <X />
-        </Button>
-      </div>
-      <p className="shrink-0 border-b px-4 py-2 text-xs text-muted-foreground">
-        Shared with Ted · Always interactive. Your actions don’t pause the
-        agent.
-      </p>
       <div
         className="flex shrink-0 items-center gap-2 overflow-x-auto border-b p-2"
         aria-label="Browser tabs"
@@ -204,9 +178,10 @@ export function BrowserPanel({
             <RotateCw />
           </Button>
         </div>
-        <div className="flex min-w-0 flex-[1_1_16rem] items-center gap-2">
+        <div className="flex min-w-0 flex-[1_1_20rem] items-center gap-2">
           <Input
             aria-label="Browser address"
+            className="min-w-0 flex-1"
             placeholder="Enter a URL"
             value={address}
             disabled={!connected}
@@ -225,6 +200,27 @@ export function BrowserPanel({
             disabled={!connected || !address.trim()}
           >
             Go
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="hidden shrink-0 lg:inline-flex"
+            aria-label={expanded ? "Narrow browser" : "Expand browser"}
+            onClick={onExpand}
+          >
+            {expanded ? <Minimize2 /> : <Maximize2 />}
+          </Button>
+          <Button
+            ref={closeRef}
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="shrink-0"
+            aria-label="Close browser panel"
+            onClick={onClose}
+          >
+            <X />
           </Button>
         </div>
       </form>
