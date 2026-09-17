@@ -1,0 +1,21 @@
+goos: linux
+goarch: amd64
+pkg: github.com/TheMarstonConnell/ted/controlplane
+cpu: AMD Ryzen 7 5700G with Radeon Graphics         
+BenchmarkParallelAgentRead-2            	     100	     32289 ns/op	   34452 B/op	     401 allocs/op
+BenchmarkParallelAgentRead-2            	     100	     25151 ns/op	   34448 B/op	     401 allocs/op
+BenchmarkParallelAgentRead-2            	     100	     35174 ns/op	   34456 B/op	     401 allocs/op
+BenchmarkParallelAgentRead-2            	     100	     27830 ns/op	   34458 B/op	     401 allocs/op
+BenchmarkParallelAgentRead-2            	     100	     36724 ns/op	   34459 B/op	     401 allocs/op
+BenchmarkSettleTree-2                   	     100	   7367466 ns/op	 3136516 B/op	   41037 allocs/op
+BenchmarkSettleTree-2                   	     100	   7345119 ns/op	 3136556 B/op	   41037 allocs/op
+BenchmarkSettleTree-2                   	     100	   7672348 ns/op	 3136418 B/op	   41037 allocs/op
+BenchmarkSettleTree-2                   	     100	   7729534 ns/op	 3136447 B/op	   41037 allocs/op
+BenchmarkSettleTree-2                   	     100	   7108271 ns/op	 3136536 B/op	   41037 allocs/op
+BenchmarkWebSocketInventorySnapshot-2   	     100	      2676 ns/op	    5480 B/op	       5 allocs/op
+BenchmarkWebSocketInventorySnapshot-2   	     100	      4812 ns/op	    5480 B/op	       5 allocs/op
+BenchmarkWebSocketInventorySnapshot-2   	     100	      2725 ns/op	    5480 B/op	       5 allocs/op
+BenchmarkWebSocketInventorySnapshot-2   	     100	      2584 ns/op	    5480 B/op	       5 allocs/op
+BenchmarkWebSocketInventorySnapshot-2   	     100	      2867 ns/op	    5480 B/op	       5 allocs/op
+PASS
+ok  	github.com/TheMarstonConnell/ted/controlplane	3.827s

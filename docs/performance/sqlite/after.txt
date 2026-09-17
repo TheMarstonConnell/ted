@@ -1,0 +1,31 @@
+goos: linux
+goarch: amd64
+pkg: github.com/TheMarstonConnell/ted/controlplane
+cpu: AMD Ryzen 7 5700G with Radeon Graphics
+BenchmarkStorageReadCursor/10_agents_20_history-2         	      10	   5889356 ns/op	    271470 seed_B	   26086 B/op	     153 allocs/op
+BenchmarkStorageReadCursor/10_agents_20_history-2         	      10	   5701665 ns/op	    271459 seed_B	   25846 B/op	     152 allocs/op
+BenchmarkStorageReadCursor/10_agents_20_history-2         	      10	   6075000 ns/op	    271470 seed_B	   25848 B/op	     152 allocs/op
+BenchmarkStorageReadCursor/10_agents_20_history-2         	      10	   5904679 ns/op	    271470 seed_B	   26454 B/op	     154 allocs/op
+BenchmarkStorageReadCursor/10_agents_20_history-2         	      10	   6310100 ns/op	    271470 seed_B	   25883 B/op	     153 allocs/op
+BenchmarkStorageReadCursor/1000_agents_20_history-2       	      10	   5876120 ns/op	  27120776 seed_B	   25939 B/op	     153 allocs/op
+BenchmarkStorageReadCursor/1000_agents_20_history-2       	      10	   6611656 ns/op	  27121777 seed_B	   25960 B/op	     153 allocs/op
+BenchmarkStorageReadCursor/1000_agents_20_history-2       	      10	   6473247 ns/op	  27121777 seed_B	   25929 B/op	     152 allocs/op
+BenchmarkStorageReadCursor/1000_agents_20_history-2       	      10	   8178880 ns/op	  27121777 seed_B	   25968 B/op	     153 allocs/op
+BenchmarkStorageReadCursor/1000_agents_20_history-2       	      10	   1544700 ns/op	  27121777 seed_B	   25955 B/op	     153 allocs/op
+BenchmarkStorageReadCursor/1_agent_2000_history-2         	      10	  13362935 ns/op	   2655711 seed_B	 1781191 B/op	    4129 allocs/op
+BenchmarkStorageReadCursor/1_agent_2000_history-2         	      10	  13121709 ns/op	   2655707 seed_B	 1780708 B/op	    4127 allocs/op
+BenchmarkStorageReadCursor/1_agent_2000_history-2         	      10	  13856421 ns/op	   2655711 seed_B	 1780672 B/op	    4127 allocs/op
+BenchmarkStorageReadCursor/1_agent_2000_history-2         	      10	  14847164 ns/op	   2655707 seed_B	 1780850 B/op	    4128 allocs/op
+BenchmarkStorageReadCursor/1_agent_2000_history-2         	      10	  13553090 ns/op	   2655709 seed_B	 1780884 B/op	    4128 allocs/op
+BenchmarkStorageAgentPage/10_agents-2                     	      10	    866730 ns/op	    271327 seed_B	  268854 B/op	     444 allocs/op
+BenchmarkStorageAgentPage/10_agents-2                     	      10	    771470 ns/op	    271338 seed_B	  268824 B/op	     444 allocs/op
+BenchmarkStorageAgentPage/10_agents-2                     	      10	    740739 ns/op	    271338 seed_B	  252773 B/op	     443 allocs/op
+BenchmarkStorageAgentPage/10_agents-2                     	      10	    836487 ns/op	    271338 seed_B	  268984 B/op	     444 allocs/op
+BenchmarkStorageAgentPage/10_agents-2                     	      10	    714024 ns/op	    271338 seed_B	  268941 B/op	     444 allocs/op
+BenchmarkStorageAgentPage/1000_agents-2                   	      10	   1368408 ns/op	  27109765 seed_B	  499464 B/op	     781 allocs/op
+BenchmarkStorageAgentPage/1000_agents-2                   	      10	   1632940 ns/op	  27108764 seed_B	  499489 B/op	     781 allocs/op
+BenchmarkStorageAgentPage/1000_agents-2                   	      10	   1223839 ns/op	  27109765 seed_B	  499489 B/op	     781 allocs/op
+BenchmarkStorageAgentPage/1000_agents-2                   	      10	   2131671 ns/op	  27109765 seed_B	  499489 B/op	     781 allocs/op
+BenchmarkStorageAgentPage/1000_agents-2                   	      10	   1188757 ns/op	  27108764 seed_B	  499489 B/op	     781 allocs/op
+PASS
+ok  	github.com/TheMarstonConnell/ted/controlplane	78.346s

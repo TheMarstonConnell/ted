@@ -71,8 +71,8 @@ func (v *browserViewers) release(id string) {
 }
 
 func (s *Service) browserIdentity(id string) (browser.Request, <-chan struct{}, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.closing {
 		return browser.Request{}, nil, problem(503, "shutting_down", "server is shutting down")
 	}

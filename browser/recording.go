@@ -197,6 +197,7 @@ func (r *recording) encodeFrames() {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	var firstErr error
+	var decoder frameDecoder
 	writeLatest := func() {
 		r.mu.Lock()
 		encoded := r.latestFrame
@@ -204,7 +205,7 @@ func (r *recording) encodeFrames() {
 		if encoded == "" || firstErr != nil {
 			return
 		}
-		data, err := base64.StdEncoding.DecodeString(encoded)
+		data, err := decoder.decode(encoded)
 		if err != nil {
 			firstErr = err
 			return
@@ -288,4 +289,21 @@ func (s *session) stopRecordingLocked(ctx context.Context) (any, error) {
 		return nil, fail("action_failed", "encode recording: %v: %s", encodeErr, strings.TrimSpace(r.stderr.String()))
 	}
 	return map[string]any{"recording": false, "path": r.path, "frames": frames, "silent": true}, nil
+}
+
+// Cache decoding, not writes: repeating frames preserves recording duration.
+type frameDecoder struct {
+	encoded string
+	data    []byte
+}
+
+func (d *frameDecoder) decode(encoded string) ([]byte, error) {
+	if encoded != d.encoded {
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return nil, err
+		}
+		d.encoded, d.data = encoded, data
+	}
+	return d.data, nil
 }

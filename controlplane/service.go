@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -29,7 +30,7 @@ type runningTurn struct {
 }
 
 type Service struct {
-	mu           sync.Mutex
+	mu           sync.RWMutex
 	dir          string
 	logger       *zap.Logger
 	providers    []agent.Provider
@@ -43,6 +44,7 @@ type Service struct {
 	workers      sync.WaitGroup
 	releaseLock  func() error
 	save         func(string, diskState) error
+	store        *sqliteStore
 	pullRequests *pullRequestResolver
 }
 
@@ -61,17 +63,19 @@ func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Se
 	if err != nil {
 		return nil, err
 	}
-	state, err := loadState(dir)
+	store, state, err := openSQLiteStore(dir)
 	if err != nil {
 		unlock()
 		return nil, err
 	}
-	s := &Service{dir: dir, logger: logger, providers: append([]agent.Provider(nil), providers...), catalog: agent.NewAgent(logger, providers), state: state, running: map[string]*runningTurn{}, instances: map[string]*agent.Agent{}, changed: make(chan struct{}), releaseLock: unlock, save: saveState, pullRequests: newPullRequestResolver()}
+	s := &Service{dir: dir, logger: logger, providers: append([]agent.Provider(nil), providers...), catalog: agent.NewAgent(logger, providers), state: state, running: map[string]*runningTurn{}, instances: map[string]*agent.Agent{}, changed: make(chan struct{}), releaseLock: unlock, store: store, pullRequests: newPullRequestResolver()}
 	// A durable "running" record is evidence of interrupted work, never a
 	// request to repeat tools. Even graceful shutdown follows this recovery rule.
-	for _, a := range s.state.Agents {
+	recovery := newStateChanges()
+	for id, a := range s.state.Agents {
 		interrupted := false
 		if a.Agent.Workspace.Status == "fetching" || a.Agent.Workspace.Status == "creating" {
+			recovery.agent(s.state, id)
 			a.Agent.Workspace.Status = "failed"
 			a.Agent.Workspace.Error = "Server stopped during workspace setup. Create a new chat to try again."
 			interrupted = true
@@ -79,6 +83,7 @@ func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Se
 		for i := range a.Agent.Queue {
 			m := &a.Agent.Queue[i]
 			if m.Status == "running" {
+				recovery.queued(s.state, id, i)
 				m.Status = "interrupted"
 				m.Error = "server stopped during turn"
 				interrupted = true
@@ -86,7 +91,11 @@ func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Se
 			}
 		}
 		if interrupted || a.Agent.State != "idle" {
+			recovery.agent(s.state, id)
 			a.Agent.Held = true
+		}
+		if a.Agent.ActiveSettings != nil {
+			recovery.agent(s.state, id)
 		}
 		a.Agent.State = "idle"
 		a.Agent.ActiveSettings = nil
@@ -94,7 +103,8 @@ func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Se
 			s.eventLocked(a, "agent.updated", s.summaryLocked(a))
 		}
 	}
-	if err = s.save(s.dir, s.state); err != nil {
+	if err = s.store.apply(s.state, recovery); err != nil {
+		store.close()
 		unlock()
 		return nil, err
 	}
@@ -128,21 +138,34 @@ func (s *Service) writableLocked() error {
 	return nil
 }
 func (s *Service) notifyLocked() { close(s.changed); s.changed = make(chan struct{}) }
-func (s *Service) commitLocked(before diskState) error {
-	if err := s.save(s.dir, s.state); err != nil {
-		s.state = before
-		s.storageErr = err
-		s.closing = true
-		for _, r := range s.running {
-			r.shutdown = true
-			r.cancel()
-		}
-		s.notifyLocked()
-		return problem(503, "storage_failed", "could not persist operation: "+err.Error())
+func (s *Service) commitLocked(before *stateChanges) error {
+	var err error
+	if s.save != nil {
+		err = s.save(s.dir, s.state)
+	} else if s.store != nil {
+		err = s.store.apply(s.state, before)
+	} else {
+		err = errors.New("control-plane storage is not initialized")
+	}
+	if err != nil {
+		before.rollback(&s.state)
+		return s.failStorageLocked(err)
 	}
 	s.notifyLocked()
 	return nil
 }
+
+func (s *Service) failStorageLocked(err error) error {
+	s.storageErr = err
+	s.closing = true
+	for _, r := range s.running {
+		r.shutdown = true
+		r.cancel()
+	}
+	s.notifyLocked()
+	return problem(503, "storage_failed", "could not persist operation: "+err.Error())
+}
+
 func (s *Service) eventLocked(a *storedAgent, typ string, data any) {
 	raw, err := json.Marshal(data)
 	if err != nil {
@@ -171,8 +194,8 @@ func (s *Service) recordLocked(id string) (*storedAgent, error) {
 }
 func (s *Service) Models() []agent.ModelInfo { return s.catalog.ListModels() }
 func (s *Service) normalizeSettings(settings Settings) (Settings, error) {
-	// Disposable catalog agent avoids changing the live runtime while a turn runs.
-	a := agent.NewAgent(s.logger, s.providers)
+	// Validate independently of the live runtime.
+	a := agent.NewSettingsSelector(s.providers)
 	if settings.Model != "" {
 		if _, err := a.SetModel(settings.Model); err != nil {
 			return Settings{}, problem(400, "invalid_settings", err.Error())
@@ -187,8 +210,8 @@ func (s *Service) normalizeSettings(settings Settings) (Settings, error) {
 	return Settings{current.Model, string(current.Effort)}, nil
 }
 func (s *Service) Projects() []Project {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	out := make([]Project, 0, len(s.state.Projects))
 	for _, p := range s.state.Projects {
 		out = append(out, p)
@@ -197,8 +220,8 @@ func (s *Service) Projects() []Project {
 	return out
 }
 func (s *Service) GetProject(id string) (Project, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	p, ok := s.state.Projects[id]
 	if !ok {
 		return Project{}, problem(404, "not_found", "project not found")
@@ -226,10 +249,10 @@ func (s *Service) CreateProject(req CreateProjectRequest) (Project, error) {
 		return Project{}, problem(400, "invalid_project", "root must be an existing directory")
 	}
 	root = filepath.Clean(root)
-	for _, p := range s.state.Projects {
-		if p.Root == root {
-			return Project{}, problem(409, "project_exists", "a project already uses this root")
-		}
+	if _, exists, err := s.projectByRootLocked(root); err != nil {
+		return Project{}, s.failStorageLocked(err)
+	} else if exists {
+		return Project{}, problem(409, "project_exists", "a project already uses this root")
 	}
 	defaults, err := s.normalizeSettings(req.Defaults)
 	if err != nil {
@@ -244,7 +267,8 @@ func (s *Service) CreateProject(req CreateProjectRequest) (Project, error) {
 		return Project{}, err
 	}
 	p := Project{ID: newID(), Name: req.Name, Root: root, Defaults: defaults, WorkspaceDefaults: selection}
-	before := copyJSON(s.state)
+	before := newStateChanges()
+	before.project(s.state, p.ID)
 	s.state.Projects[p.ID] = p
 	if err = s.commitLocked(before); err != nil {
 		return Project{}, err
@@ -281,7 +305,8 @@ func (s *Service) UpdateProject(id string, name *string, defaults *Settings, wor
 		}
 		p.WorkspaceDefaults = selection
 	}
-	before := copyJSON(s.state)
+	before := newStateChanges()
+	before.project(s.state, id)
 	s.state.Projects[id] = p
 	if err := s.commitLocked(before); err != nil {
 		return Project{}, err
@@ -312,14 +337,17 @@ func (s *Service) DeleteProject(id string) error {
 			return problem(409, "project_not_empty", "settled agents are still stopping; try deleting the project again shortly")
 		}
 	}
-	before := copyJSON(s.state)
+	before := newStateChanges()
+	before.project(s.state, id)
 	for agentID, a := range s.state.Agents {
 		if a.Agent.ProjectID == id {
+			before.agent(s.state, agentID)
 			delete(s.state.Agents, agentID)
 		}
 	}
 	for key, receipt := range s.state.Receipts {
-		if a := before.Agents[receipt.AgentID]; a != nil && a.Agent.ProjectID == id {
+		if a := before.agents[receipt.AgentID]; a != nil && a.Agent.ProjectID == id {
+			before.receipt(s.state, key)
 			delete(s.state.Receipts, key)
 		}
 	}
@@ -327,7 +355,7 @@ func (s *Service) DeleteProject(id string) error {
 	if err := s.commitLocked(before); err != nil {
 		return err
 	}
-	for agentID, a := range before.Agents {
+	for agentID, a := range before.agents {
 		if a.Agent.ProjectID == id {
 			delete(s.instances, agentID)
 		}
@@ -335,8 +363,8 @@ func (s *Service) DeleteProject(id string) error {
 	return nil
 }
 func (s *Service) Agents(includeSettled bool, projectID string) []Agent {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.agentsLocked(includeSettled, projectID)
 }
 func (s *Service) agentsLocked(includeSettled bool, projectID string) []Agent {
@@ -345,7 +373,7 @@ func (s *Service) agentsLocked(includeSettled bool, projectID string) []Agent {
 		if (!includeSettled && a.Agent.Settled) || (projectID != "" && a.Agent.ProjectID != projectID) {
 			continue
 		}
-		out = append(out, copyJSON(a.Agent))
+		out = append(out, cloneAgent(a.Agent))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
@@ -358,8 +386,8 @@ func (s *Service) agentsLocked(includeSettled bool, projectID string) []Agent {
 
 // AgentsPage requires positive page and pageSize values.
 func (s *Service) AgentsPage(includeSettled bool, projectID string, page, pageSize int64) ([]Agent, int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	candidates := make([]*storedAgent, 0)
 	for _, a := range s.state.Agents {
@@ -393,20 +421,54 @@ func (s *Service) AgentsPage(includeSettled bool, projectID string, page, pageSi
 	start, end := int(start64), int(end64)
 	result := make([]Agent, 0, end-start)
 	for _, a := range candidates[start:end] {
-		result = append(result, copyJSON(a.Agent))
+		result = append(result, cloneAgent(a.Agent))
 	}
 	return result, total
 }
 
 func (s *Service) GetAgent(id string) (Agent, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	a, err := s.recordLocked(id)
 	if err != nil {
 		return Agent{}, err
 	}
-	return copyJSON(a.Agent), nil
+	return cloneAgent(a.Agent), nil
 }
+
+// QueuedMessages returns the queue without copying conversation history.
+func (s *Service) QueuedMessages(id string) ([]QueuedMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	a, err := s.recordLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Clone(a.Agent.Queue), nil
+}
+
+// History copies only the requested page while holding the snapshot lock.
+func (s *Service) History(id string, after uint64, limit int) ([]agent.Message, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	a, err := s.recordLocked(id)
+	if err != nil {
+		return nil, 0, err
+	}
+	if after > uint64(len(a.Agent.Messages)) {
+		return nil, 0, problem(410, "cursor_invalid", "history cursor is ahead of conversation")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		return nil, 0, problem(400, "invalid_limit", "limit must not exceed 1000")
+	}
+	start := int(after)
+	end := start + min(limit, len(a.Agent.Messages)-start)
+	return cloneMessages(a.Agent.Messages[start:end]), end, nil
+}
+
 func (s *Service) ReadAgent(id string, cursor uint64) (Agent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -421,15 +483,16 @@ func (s *Service) ReadAgent(id string, cursor uint64) (Agent, error) {
 		return Agent{}, problem(410, "cursor_invalid", "read cursor is beyond current agent events")
 	}
 	if cursor <= a.Agent.ReadCursor {
-		return copyJSON(a.Agent), nil
+		return cloneAgent(a.Agent), nil
 	}
-	before := copyJSON(s.state)
+	before := newStateChanges()
+	before.agent(s.state, id)
 	a.Agent.ReadCursor = cursor
 	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
 	if err = s.commitLocked(before); err != nil {
 		return Agent{}, err
 	}
-	return copyJSON(a.Agent), nil
+	return cloneAgent(a.Agent), nil
 }
 func (s *Service) CreateAgent(req CreateAgentRequest, key string) (Agent, error) {
 	s.mu.Lock()
@@ -438,13 +501,14 @@ func (s *Service) CreateAgent(req CreateAgentRequest, key string) (Agent, error)
 		return Agent{}, err
 	}
 	scope := "create:" + key
-	hash := fingerprint(req)
+	var hash string
 	if key != "" {
+		hash = fingerprint(req)
 		if r, ok := s.state.Receipts[scope]; ok {
 			if r.Fingerprint != hash {
 				return Agent{}, problem(409, "idempotency_conflict", "key already used with different request")
 			}
-			return copyJSON(s.state.Agents[r.AgentID].Agent), nil
+			return cloneAgent(s.state.Agents[r.AgentID].Agent), nil
 		}
 	}
 	p, ok := s.state.Projects[req.ProjectID]
@@ -472,7 +536,11 @@ func (s *Service) CreateAgent(req CreateAgentRequest, key string) (Agent, error)
 	now := time.Now().UTC()
 	id := newID()
 	a := &storedAgent{Agent: Agent{ParentAgentID: req.ParentAgentID, Workspace: workspace, ID: id, ProjectID: p.ID, Title: req.Title, Settings: settings, State: "idle", Queue: []QueuedMessage{}, Messages: []agent.Message{}, CreatedAt: now, UpdatedAt: now}, Events: []Event{}}
-	before := copyJSON(s.state)
+	before := newStateChanges()
+	before.agent(s.state, id)
+	if key != "" {
+		before.receipt(s.state, scope)
+	}
 	s.state.Agents[id] = a
 	s.eventLocked(a, "agent.created", s.summaryLocked(a))
 	if strings.TrimSpace(req.Prompt) != "" {
@@ -491,7 +559,7 @@ func (s *Service) CreateAgent(req CreateAgentRequest, key string) (Agent, error)
 	if err = s.writableLocked(); err != nil {
 		return Agent{}, err
 	}
-	return copyJSON(s.state.Agents[id].Agent), nil
+	return cloneAgent(s.state.Agents[id].Agent), nil
 }
 func (s *Service) UpdateSettings(id string, patch SettingsPatch) (Agent, error) {
 	s.mu.Lock()
@@ -510,7 +578,7 @@ func (s *Service) UpdateSettings(id string, patch SettingsPatch) (Agent, error) 
 		}
 		settings.Model = *patch.Model
 		// Preserve supported effort, otherwise use the new model's default.
-		base := agent.NewAgent(s.logger, s.providers)
+		base := agent.NewSettingsSelector(s.providers)
 		if settingsOld := a.Agent.Settings; settingsOld.Model != "" {
 			_, _ = base.SetModel(settingsOld.Model)
 			if settingsOld.Effort != "" {
@@ -536,13 +604,14 @@ func (s *Service) UpdateSettings(id string, patch SettingsPatch) (Agent, error) 
 	if err != nil {
 		return Agent{}, err
 	}
-	before := copyJSON(s.state)
+	before := newStateChanges()
+	before.agent(s.state, id)
 	a.Agent.Settings = settings
 	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
 	if err = s.commitLocked(before); err != nil {
 		return Agent{}, err
 	}
-	return copyJSON(a.Agent), nil
+	return cloneAgent(a.Agent), nil
 }
 func (s *Service) Submit(id, text, key string) (QueuedMessage, error) {
 	return s.SubmitMessage(id, SubmitMessageRequest{Text: text}, key)
@@ -565,20 +634,25 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 		req.Kind = ""
 	}
 	scope := "message:" + id + ":" + key
-	hash := fingerprint(req)
-	if req.Kind == "" {
-		hash = fingerprint(req.Text)
-	}
+	var hash string
 	if key != "" {
+		if req.Kind == "" {
+			hash = fingerprint(req.Text)
+		} else {
+			hash = fingerprint(req)
+		}
 		if r, ok := s.state.Receipts[scope]; ok {
 			if r.Fingerprint != hash {
 				return QueuedMessage{}, problem(409, "idempotency_conflict", "key already used with different message")
 			}
-			for _, m := range a.Agent.Queue {
-				if m.ID == r.MessageID {
-					return m, nil
-				}
+			index, found, err := s.queuePositionLocked(a, r.MessageID)
+			if err != nil {
+				return QueuedMessage{}, s.failStorageLocked(err)
 			}
+			if found {
+				return a.Agent.Queue[index], nil
+			}
+			return QueuedMessage{}, s.failStorageLocked(errors.New("durable receipt references a missing message"))
 		}
 	}
 	if a.Agent.Workspace.Status == "failed" {
@@ -587,7 +661,11 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 	if a.Agent.Settled {
 		return QueuedMessage{}, problem(409, "settled", "restore agent before submitting messages")
 	}
-	before := copyJSON(s.state)
+	before := newStateChanges()
+	before.agent(s.state, id)
+	if key != "" {
+		before.receipt(s.state, scope)
+	}
 	s.lockWorkspaceLocked(a)
 	m := QueuedMessage{ID: newID(), Text: req.Text, Kind: req.Kind, SenderAgentID: req.SenderAgentID, Status: "pending", CreatedAt: time.Now().UTC()}
 	a.Agent.Queue = append(a.Agent.Queue, m)
@@ -636,24 +714,27 @@ func (s *Service) DeletePending(id, messageID string) error {
 	if err != nil {
 		return err
 	}
-	for i := range a.Agent.Queue {
-		m := &a.Agent.Queue[i]
-		if m.ID != messageID {
-			continue
-		}
-		if m.Status == "cancelled" {
-			return nil
-		}
-		if m.Status != "pending" {
-			return problem(409, "not_pending", "only pending messages can be removed")
-		}
-		before := copyJSON(s.state)
-		m.Status = "cancelled"
-		s.eventLocked(a, "message.cancelled", *m)
-		return s.commitLocked(before)
+	index, found, err := s.queuePositionLocked(a, messageID)
+	if err != nil {
+		return s.failStorageLocked(err)
 	}
-	return problem(404, "not_found", "message not found")
+	if !found {
+		return problem(404, "not_found", "message not found")
+	}
+	m := &a.Agent.Queue[index]
+	if m.Status == "cancelled" {
+		return nil
+	}
+	if m.Status != "pending" {
+		return problem(409, "not_pending", "only pending messages can be removed")
+	}
+	before := newStateChanges()
+	before.queued(s.state, id, index)
+	m.Status = "cancelled"
+	s.eventLocked(a, "message.cancelled", *m)
+	return s.commitLocked(before)
 }
+
 func (s *Service) Stop(id, turnID string) (Agent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -667,24 +748,22 @@ func (s *Service) Stop(id, turnID string) (Agent, error) {
 	if turnID == "" {
 		return Agent{}, problem(400, "turn_required", "turn_id is required")
 	}
-	found := false
-	for _, m := range a.Agent.Queue {
-		if m.ID == turnID {
-			found = true
-			if m.Status == "pending" {
-				return Agent{}, problem(409, "not_running", "message has not started")
-			}
-			break
-		}
+	index, found, err := s.queuePositionLocked(a, turnID)
+	if err != nil {
+		return Agent{}, s.failStorageLocked(err)
 	}
 	if !found {
 		return Agent{}, problem(404, "not_found", "turn not found")
 	}
+	if a.Agent.Queue[index].Status == "pending" {
+		return Agent{}, problem(409, "not_running", "message has not started")
+	}
 	r := s.running[id]
 	if r == nil || r.id != turnID || r.stopped {
-		return copyJSON(a.Agent), nil
+		return cloneAgent(a.Agent), nil
 	}
-	before := copyJSON(s.state)
+	before := newStateChanges()
+	before.agent(s.state, id)
 	a.Agent.State = "stopping"
 	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
 	if err = s.commitLocked(before); err != nil {
@@ -692,7 +771,7 @@ func (s *Service) Stop(id, turnID string) (Agent, error) {
 	}
 	r.stopped = true
 	r.cancel()
-	return copyJSON(a.Agent), nil
+	return cloneAgent(a.Agent), nil
 }
 func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 	s.mu.Lock()
@@ -706,12 +785,14 @@ func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 	}
 	targets := []*storedAgent{a}
 	if settled {
-		for i := 0; i < len(targets); i++ {
-			for _, child := range s.state.Agents {
-				if child.Agent.ParentAgentID == targets[i].Agent.ID {
-					targets = append(targets, child)
-				}
+		children := make(map[string][]*storedAgent)
+		for _, child := range s.state.Agents {
+			if parent := child.Agent.ParentAgentID; parent != "" {
+				children[parent] = append(children[parent], child)
 			}
+		}
+		for i := 0; i < len(targets); i++ {
+			targets = append(targets, children[targets[i].Agent.ID]...)
 		}
 	}
 	changed := targets[:0]
@@ -721,10 +802,11 @@ func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 		}
 	}
 	if len(changed) == 0 {
-		return copyJSON(a.Agent), nil
+		return cloneAgent(a.Agent), nil
 	}
-	before := copyJSON(s.state)
+	before := newStateChanges()
 	for _, target := range changed {
+		before.agent(s.state, target.Agent.ID)
 		target.Agent.Settled = settled
 		target.Agent.Held = true
 		if settled && s.running[target.Agent.ID] != nil {
@@ -745,7 +827,7 @@ func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 			}
 		}
 	}
-	return copyJSON(a.Agent), nil
+	return cloneAgent(a.Agent), nil
 }
 func (s *Service) Continue(id string) (Agent, error) {
 	s.mu.Lock()
@@ -763,7 +845,8 @@ func (s *Service) Continue(id string) (Agent, error) {
 	if a.Agent.Settled {
 		return Agent{}, problem(409, "settled", "restore agent before continuing")
 	}
-	before := copyJSON(s.state)
+	before := newStateChanges()
+	before.agent(s.state, id)
 	a.Agent.Held = false
 	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
 	if err = s.commitLocked(before); err != nil {
@@ -773,7 +856,7 @@ func (s *Service) Continue(id string) (Agent, error) {
 	if err = s.writableLocked(); err != nil {
 		return Agent{}, err
 	}
-	return copyJSON(s.state.Agents[id].Agent), nil
+	return cloneAgent(s.state.Agents[id].Agent), nil
 }
 
 // startLocked durably reserves the turn before allowing any external effects.
@@ -785,17 +868,16 @@ func (s *Service) startLocked(id string) {
 	if a == nil || a.Agent.Settled || a.Agent.Held || a.Agent.Workspace.Status == "failed" {
 		return
 	}
-	index := -1
-	for i, m := range a.Agent.Queue {
-		if m.Status == "pending" {
-			index = i
-			break
-		}
-	}
-	if index < 0 {
+	index, found, err := s.firstPendingLocked(a)
+	if err != nil {
+		s.failStorageLocked(err)
 		return
 	}
-	before := copyJSON(s.state)
+	if !found {
+		return
+	}
+	before := newStateChanges()
+	before.queued(s.state, id, index)
 	m := &a.Agent.Queue[index]
 	m.Status = "running"
 	a.Agent.State = "running"
@@ -810,7 +892,7 @@ func (s *Service) startLocked(id string) {
 	r := &runningTurn{id: m.ID, cancel: cancel}
 	s.running[id] = r
 	project := s.state.Projects[a.Agent.ProjectID]
-	history := copyJSON(a.Agent.Messages)
+	history := cloneMessages(a.Agent.Messages)
 	message := *m
 	s.workers.Add(1)
 	go s.run(ctx, id, r, project, settings, history, message)
@@ -856,7 +938,8 @@ func (s *Service) run(ctx context.Context, id string, r *runningTurn, project Pr
 				return
 			}
 			a := s.state.Agents[id]
-			before := copyJSON(s.state)
+			before := newStateChanges()
+			before.agent(s.state, id)
 			a.Agent.ContextUsage = instance.ContextUsage()
 			s.eventLocked(a, "output", output)
 			if output.ResponseType == "agent" {
@@ -878,30 +961,36 @@ func (s *Service) run(ctx context.Context, id string, r *runningTurn, project Pr
 		}
 		return
 	}
-	before := copyJSON(s.state)
-	var finished QueuedMessage
-	for i := range a.Agent.Queue {
-		m := &a.Agent.Queue[i]
-		if m.ID != r.id {
-			continue
-		}
-		switch {
-		case r.shutdown:
-			m.Status = "interrupted"
-			m.Error = "server shut down during turn"
-			a.Agent.Held = true
-		case r.stopped:
-			m.Status = "cancelled"
-		case err != nil:
-			m.Status = "failed"
-			m.Error = err.Error()
-			a.Agent.Held = true
-		default:
-			m.Status = "completed"
-		}
-		finished = *m
-		break
+	index, found, lookupErr := s.queuePositionLocked(a, r.id)
+	if lookupErr == nil && !found {
+		lookupErr = errors.New("durable running message is missing")
 	}
+	if lookupErr != nil {
+		s.failStorageLocked(lookupErr)
+		s.mu.Unlock()
+		if instance != nil {
+			_ = instance.Close()
+		}
+		return
+	}
+	before := newStateChanges()
+	before.queued(s.state, id, index)
+	m := &a.Agent.Queue[index]
+	switch {
+	case r.shutdown:
+		m.Status = "interrupted"
+		m.Error = "server shut down during turn"
+		a.Agent.Held = true
+	case r.stopped:
+		m.Status = "cancelled"
+	case err != nil:
+		m.Status = "failed"
+		m.Error = err.Error()
+		a.Agent.Held = true
+	default:
+		m.Status = "completed"
+	}
+	finished := *m
 	if instance != nil {
 		a.ManifestOffset = instance.ArtifactOffset()
 		current := instance.Messages()
@@ -926,8 +1015,8 @@ func (s *Service) run(ctx context.Context, id string, r *runningTurn, project Pr
 }
 
 func (s *Service) Events(id string, after uint64, limit int) ([]Event, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	a, err := s.recordLocked(id)
 	if err != nil {
 		return nil, err
@@ -942,7 +1031,7 @@ func (s *Service) Events(id string, after uint64, limit int) ([]Event, error) {
 		return nil, problem(400, "invalid_limit", "limit must not exceed 1000")
 	}
 	end := min(len(a.Events), int(after)+limit)
-	out := copyJSON(a.Events[int(after):end])
+	out := cloneEvents(a.Events[int(after):end])
 	if out == nil {
 		out = []Event{}
 	}
@@ -952,8 +1041,12 @@ func (s *Service) Events(id string, after uint64, limit int) ([]Event, error) {
 // SnapshotEvents obtains inventory, replay and next-change notification under
 // one lock. Waiting on changed cannot miss mutations after this snapshot.
 func (s *Service) SnapshotEvents(cursors map[string]uint64, all bool, ids []string) ([]Agent, []Event, <-chan struct{}, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	return s.snapshotEvents(cursors, all, ids, false)
+}
+
+func (s *Service) snapshotEvents(cursors map[string]uint64, all bool, ids []string, summaries bool) ([]Agent, []Event, <-chan struct{}, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.storageErr != nil {
 		return nil, nil, nil, problem(503, "storage_failed", s.storageErr.Error())
 	}
@@ -989,8 +1082,13 @@ func (s *Service) SnapshotEvents(cursors map[string]uint64, all bool, ids []stri
 	events := make([]Event, 0)
 	for _, id := range ordered {
 		a := s.state.Agents[id]
-		inventory = append(inventory, copyJSON(a.Agent))
-		events = append(events, copyJSON(a.Events[cursors[id]:])...)
+		snapshot := a.Agent
+		if summaries {
+			snapshot.Queue = nil
+			snapshot.Messages = nil
+		}
+		inventory = append(inventory, cloneAgent(snapshot))
+		events = append(events, cloneEvents(a.Events[cursors[id]:])...)
 	}
 	return inventory, events, s.changed, nil
 }
@@ -1003,11 +1101,12 @@ func (s *Service) BeginShutdown() error {
 	defer s.mu.Unlock()
 	var err error
 	if !s.closing {
-		before := copyJSON(s.state)
+		before := newStateChanges()
 		s.closing = true
 		for id, r := range s.running {
 			r.shutdown = true
 			a := s.state.Agents[id]
+			before.agent(s.state, id)
 			a.Agent.State = "stopping"
 			a.Agent.Held = true
 			s.eventLocked(a, "agent.updated", s.summaryLocked(a))
@@ -1050,8 +1149,11 @@ func (s *Service) Close(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var err error
+	if s.store != nil {
+		err = s.store.close()
+	}
 	if s.releaseLock != nil {
-		err = s.releaseLock()
+		err = errors.Join(err, s.releaseLock())
 		s.releaseLock = nil
 	}
 	return errors.Join(s.storageErr, err)

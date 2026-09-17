@@ -122,29 +122,17 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 			if input.err != nil {
 				return
 			}
-			kind, requestID, err := h.validateWS(input.data)
+			command, err := h.validateWS(input.data)
 			if err != nil {
-				if writeWSError(c, requestID, err) != nil {
+				if writeWSError(c, command.requestID, err) != nil {
 					return
 				}
 				continue
 			}
-			switch kind {
+			requestID := command.requestID
+			switch command.kind {
 			case "subscribe":
-				var command api.WSSubscribe
-				if err = json.Unmarshal(input.data, &command); err != nil {
-					if writeWSError(c, requestID, problem(400, "invalid", err.Error())) != nil {
-						return
-					}
-					continue
-				}
-				candidate, err := newWSSubscription(command)
-				if err != nil {
-					if writeWSError(c, requestID, err) != nil {
-						return
-					}
-					continue
-				}
+				candidate := command.subscription
 				agents, events, next, err := h.snapshotWS(candidate)
 				if err != nil {
 					if writeWSError(c, requestID, err) != nil {
@@ -161,21 +149,14 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			case "submit":
-				var command api.WSSubmit
-				if err = json.Unmarshal(input.data, &command); err != nil {
-					if writeWSError(c, requestID, problem(400, "invalid", err.Error())) != nil {
-						return
-					}
-					continue
-				}
-				m, err := h.service.SubmitMessage(command.AgentId, SubmitMessageRequest{Text: command.Text, Kind: string(value(command.Kind)), SenderAgentID: value(command.SenderAgentId)}, command.IdempotencyKey)
+				m, err := h.service.SubmitMessage(command.agentID, command.message, command.idempotencyKey)
 				if err != nil {
 					if writeWSError(c, requestID, err) != nil {
 						return
 					}
 					continue
 				}
-				if err = writeWS(c, api.WSAck{Type: api.Ack, RequestId: requestID, AgentId: command.AgentId, MessageId: m.ID, Status: m.Status}); err != nil {
+				if err = writeWS(c, api.WSAck{Type: api.Ack, RequestId: requestID, AgentId: command.agentID, MessageId: m.ID, Status: m.Status}); err != nil {
 					return
 				}
 			}
@@ -184,44 +165,80 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 // Both transports validate requests against shared, generated-spec schemas.
-func (h *httpAPI) validateWS(data []byte) (kind, requestID string, err error) {
+type wsCommand struct {
+	kind           string
+	requestID      string
+	subscription   *wsSubscription
+	agentID        string
+	message        SubmitMessageRequest
+	idempotencyKey string
+}
+
+func (h *httpAPI) validateWS(data []byte) (command wsCommand, err error) {
 	var raw map[string]any
-	if e := json.Unmarshal(data, &raw); e != nil {
-		return "", "", problem(400, "invalid", "expected a JSON object")
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if e := decoder.Decode(&raw); e != nil {
+		return command, problem(400, "invalid", "expected a JSON object")
 	}
-	kind, _ = raw["type"].(string)
-	requestID, _ = raw["request_id"].(string)
-	if len(requestID) > 256 {
-		requestID = ""
+	// Decoder.Decode accepts a valid value followed by another value. Reject any
+	// non-whitespace after that value to preserve json.Unmarshal's contract.
+	if len(bytes.Trim(data[decoder.InputOffset():], " \t\r\n")) != 0 {
+		return command, problem(400, "invalid", "expected a JSON object")
+	}
+	command.kind, _ = raw["type"].(string)
+	command.requestID, _ = raw["request_id"].(string)
+	if len(command.requestID) > 256 {
+		command.requestID = ""
 	}
 	name := ""
-	switch kind {
+	switch command.kind {
 	case "subscribe":
 		name = "WSSubscribe"
 	case "submit":
 		name = "WSSubmit"
 	default:
-		return kind, requestID, problem(400, "invalid", "unknown WebSocket command type")
+		return command, problem(400, "invalid", "unknown WebSocket command type")
 	}
 	if e := h.spec.Components.Schemas[name].Value.VisitJSON(raw); e != nil {
-		return kind, requestID, problem(400, "invalid", e.Error())
+		return command, problem(400, "invalid", e.Error())
 	}
-	return
+	if command.kind == "subscribe" {
+		command.subscription, err = wsSubscriptionFromJSON(raw)
+	} else {
+		command.agentID = raw["agent_id"].(string)
+		command.message.Text = raw["text"].(string)
+		command.message.Kind, _ = raw["kind"].(string)
+		command.message.SenderAgentID, _ = raw["sender_agent_id"].(string)
+		command.idempotencyKey = raw["idempotency_key"].(string)
+	}
+	return command, err
 }
 
-func newWSSubscription(command api.WSSubscribe) (*wsSubscription, error) {
-	s := &wsSubscription{all: value(command.SubscribeAll), explicit: map[string]bool{}, known: map[string]bool{}, cursors: map[string]uint64{}, inventory: map[string][]byte{}}
-	for _, id := range value(command.AgentIds) {
-		s.explicit[id] = true
+func wsSubscriptionFromJSON(raw map[string]any) (*wsSubscription, error) {
+	s := &wsSubscription{explicit: map[string]bool{}, known: map[string]bool{}, cursors: map[string]uint64{}, inventory: map[string][]byte{}}
+	if value, ok := raw["subscribe_all"]; ok {
+		s.all = value.(bool)
 	}
-	for id, cursor := range value(command.Cursors) {
-		if !s.all && !s.explicit[id] {
-			return nil, problem(400, "invalid", "cursor supplied for an unsubscribed agent: "+id)
+	if value, ok := raw["agent_ids"]; ok {
+		for _, id := range value.([]any) {
+			s.explicit[id.(string)] = true
 		}
-		// Include resumed ids in the first atomic snapshot, even if they settled
-		// while the client was offline. This delivers their terminal events.
-		s.known[id] = true
-		s.cursors[id] = uint64(cursor)
+	}
+	if value, ok := raw["cursors"]; ok {
+		for id, value := range value.(map[string]any) {
+			cursor, err := strconv.ParseInt(value.(json.Number).String(), 10, 64)
+			if err != nil {
+				return nil, problem(400, "invalid", "cursor must be an int64: "+id)
+			}
+			if !s.all && !s.explicit[id] {
+				return nil, problem(400, "invalid", "cursor supplied for an unsubscribed agent: "+id)
+			}
+			// Include resumed ids in the first atomic snapshot, even if they settled
+			// while the client was offline. This delivers their terminal events.
+			s.known[id] = true
+			s.cursors[id] = uint64(cursor)
+		}
 	}
 	return s, nil
 }
@@ -239,30 +256,78 @@ func (h *httpAPI) snapshotWS(s *wsSubscription) ([]Agent, []Event, <-chan struct
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	return h.service.SnapshotEvents(s.cursors, s.all, ids)
+	return h.service.snapshotEvents(s.cursors, s.all, ids, true)
 }
 
-func summaryWS(a Agent) (api.AgentSummary, error) {
-	// Runtime data stays detached. The generated wire type intentionally excludes
-	// conversation/queue history so inventory notifications remain bounded.
-	wire := wireAgent(a)
-	wire.Messages = nil
-	wire.Queue = nil
-	data, err := json.Marshal(wire)
-	if err != nil {
-		return api.AgentSummary{}, err
+func summaryWS(a Agent) api.AgentSummary {
+	// Runtime data stays detached. Build the bounded generated wire type directly;
+	// converting through JSON needlessly encoded the full Agent only to discard its
+	// conversation and queue.
+	summary := api.AgentSummary{
+		Id:        a.ID,
+		ProjectId: a.ProjectID,
+		Title:     a.Title,
+		Settings:  api.Settings{Model: a.Settings.Model, Effort: a.Settings.Effort},
+		Settled:   a.Settled,
+		State:     api.AgentSummaryState(a.State),
+		Held:      a.Held,
+		Cursor:    int64(a.Cursor),
+		CreatedAt: a.CreatedAt,
+		UpdatedAt: a.UpdatedAt,
 	}
-	var summary api.AgentSummary
-	err = json.Unmarshal(data, &summary)
-	return summary, err
+	if a.ParentAgentID != "" {
+		summary.ParentAgentId = stringPointer(a.ParentAgentID)
+	}
+	if a.ActiveSettings != nil {
+		summary.ActiveSettings = &api.Settings{Model: a.ActiveSettings.Model, Effort: a.ActiveSettings.Effort}
+	}
+	last := int64(a.LastResponseCursor)
+	summary.LastResponseCursor = &last
+	read := int64(a.ReadCursor)
+	summary.ReadCursor = &read
+	summary.Workspace = wireWorkspace(a.Workspace)
+	u := a.ContextUsage
+	summary.ContextUsage = &api.ContextUsage{
+		Model: u.Model, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+		EstimatedTokens: u.EstimatedTokens, ContextWindow: u.ContextWindow,
+		Known: u.Known, Estimated: u.Estimated,
+	}
+	return summary
+}
+
+func stringPointer(v string) *string { return &v }
+
+func wireWorkspace(w Workspace) *api.Workspace {
+	result := &api.Workspace{
+		Locked: w.Locked,
+		Mode:   api.WorkspaceMode(w.Mode),
+		Status: api.WorkspaceStatus(w.Status),
+	}
+	if w.BaseBranch != "" {
+		result.BaseBranch = stringPointer(w.BaseBranch)
+	}
+	if w.BaseCommit != "" {
+		result.BaseCommit = stringPointer(w.BaseCommit)
+	}
+	if w.Branch != "" {
+		result.Branch = stringPointer(w.Branch)
+	}
+	if w.Error != "" {
+		result.Error = stringPointer(w.Error)
+	}
+	if w.Path != "" {
+		result.Path = stringPointer(w.Path)
+	}
+	if w.Shared {
+		shared := true
+		result.Shared = &shared
+	}
+	return result
 }
 
 func (h *httpAPI) deliverWS(c *websocket.Conn, s *wsSubscription, agents []Agent, events []Event) error {
 	for _, a := range agents {
-		summary, err := summaryWS(a)
-		if err != nil {
-			return err
-		}
+		summary := summaryWS(a)
 		frame, err := json.Marshal(api.WSInventory{Type: api.Inventory, Agent: summary})
 		if err != nil {
 			return err
