@@ -82,8 +82,10 @@ Example:
 {"type":"release","tab_id":"tab-123"}
 ```
 
-Bounds: 64 KiB per incoming message; tab IDs ≤256 bytes, URLs ≤8192 characters,
-key/code ≤128 bytes, text ≤16384 characters. Coordinates range 0–100000 and wheel deltas
+Bounds: 64 KiB per incoming message; tab IDs ≤256 Unicode characters, URLs ≤8192
+Unicode characters, key/code ≤128 Unicode characters, and text ≤16384 Unicode
+characters. The 64 KiB wire limit is measured in bytes and applies independently.
+Coordinates range 0–100000 and wheel deltas
 −100000–100000; all numbers must be finite. Integer bounds: buttons 0–7,
 click count 0–3, modifiers 0–15, key code 0–65535. URL schemes are `http`,
 `https`, `file`, `about`, and `data`. Daemon-side tab ownership and state

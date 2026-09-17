@@ -1067,47 +1067,75 @@ components:
       x-go-type-import:
         name: browser
         path: github.com/TheMarstonConnell/ted/browser
-      type: object
-      additionalProperties: false
-      required: [type]
       description: Ephemeral state, base64 JPEG frame, agent-only activity, or error. selected is agent selection; tab_id is the viewed/event tab. Frames carry CSS viewport width/height. No typed text is emitted in activity.
-      properties:
-        type:
-          type: string
-          enum: [state, frame, activity, error]
-        tabs:
-          type: array
-          items:
-            $ref: '#/components/schemas/BrowserLiveTab'
-        selected:
-          type: string
-        pinned:
-          type: string
-          description: Authoritative viewer pin in state messages; omitted or empty follows agent selection.
-        tab_id:
-          type: string
-        data:
-          type: string
-          description: Base64 JPEG, without a data URL prefix.
-        width:
-          type: number
-          format: double
-        height:
-          type: number
-          format: double
-        x:
-          type: number
-          format: double
-        y:
-          type: number
-          format: double
-        kind:
-          type: string
-          enum: [move, click, fill, clear]
-        message:
-          type: string
-        code:
-          type: string
+      discriminator:
+        propertyName: type
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required: [type]
+        properties:
+          type:
+            type: string
+            enum: [state]
+          tabs:
+            type: array
+            items:
+              $ref: '#/components/schemas/BrowserLiveTab'
+          selected:
+            type: string
+          pinned:
+            type: string
+            description: Authoritative viewer pin; omitted or empty follows agent selection.
+          tab_id:
+            type: string
+      - type: object
+        additionalProperties: false
+        required: [type, tab_id, data, width, height]
+        properties:
+          type:
+            type: string
+            enum: [frame]
+          tab_id:
+            type: string
+          data:
+            type: string
+            description: Base64 JPEG, without a data URL prefix.
+          width:
+            type: number
+            format: double
+          height:
+            type: number
+            format: double
+      - type: object
+        additionalProperties: false
+        required: [type, tab_id, kind]
+        properties:
+          type:
+            type: string
+            enum: [activity]
+          tab_id:
+            type: string
+          kind:
+            type: string
+            enum: [move, click, fill, clear]
+          x:
+            type: number
+            format: double
+          y:
+            type: number
+            format: double
+      - type: object
+        additionalProperties: false
+        required: [type, code, message]
+        properties:
+          type:
+            type: string
+            enum: [error]
+          code:
+            type: string
+          message:
+            type: string
     Settings:
       type: object
       additionalProperties: false

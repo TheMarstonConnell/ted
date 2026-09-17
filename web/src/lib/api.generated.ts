@@ -444,26 +444,37 @@ export interface components {
         /** @description Ephemeral state, base64 JPEG frame, agent-only activity, or error. selected is agent selection; tab_id is the viewed/event tab. Frames carry CSS viewport width/height. No typed text is emitted in activity. */
         BrowserLiveEvent: {
             /** @enum {string} */
-            type: "state" | "frame" | "activity" | "error";
+            type: "state";
             tabs?: components["schemas"]["BrowserLiveTab"][];
             selected?: string;
-            /** @description Authoritative viewer pin in state messages; omitted or empty follows agent selection. */
+            /** @description Authoritative viewer pin; omitted or empty follows agent selection. */
             pinned?: string;
             tab_id?: string;
+        } | {
+            /** @enum {string} */
+            type: "frame";
+            tab_id: string;
             /** @description Base64 JPEG, without a data URL prefix. */
-            data?: string;
+            data: string;
             /** Format: double */
-            width?: number;
+            width: number;
             /** Format: double */
-            height?: number;
+            height: number;
+        } | {
+            /** @enum {string} */
+            type: "activity";
+            tab_id: string;
+            /** @enum {string} */
+            kind: "move" | "click" | "fill" | "clear";
             /** Format: double */
             x?: number;
             /** Format: double */
             y?: number;
+        } | {
             /** @enum {string} */
-            kind?: "move" | "click" | "fill" | "clear";
-            message?: string;
-            code?: string;
+            type: "error";
+            code: string;
+            message: string;
         };
         Settings: {
             model: string;

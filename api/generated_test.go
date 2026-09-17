@@ -137,9 +137,11 @@ func TestBrowserLiveCommandContract(t *testing.T) {
 		`{"type":"key","tab_id":"tab","event":"keyDown","key":"a","code":""}`,
 		`{"type":"text","tab_id":"tab","text":"hello"}`,
 		`{"type":"release","tab_id":"tab"}`,
-		fmt.Sprintf(`{"type":"watch","tab_id":%q}`, strings.Repeat("a", 256)),
-		fmt.Sprintf(`{"type":"key","tab_id":"tab","event":"keyDown","key":%q}`, strings.Repeat("a", 128)),
-		fmt.Sprintf(`{"type":"text","tab_id":"tab","text":%q}`, strings.Repeat("a", 16384)),
+		fmt.Sprintf(`{"type":"watch","tab_id":%q}`, strings.Repeat("😀", 256)),
+		fmt.Sprintf(`{"type":"key","tab_id":"tab","event":"keyDown","key":%q}`, strings.Repeat("é", 128)),
+		fmt.Sprintf(`{"type":"key","tab_id":"tab","event":"keyUp","code":%q}`, strings.Repeat("界", 128)),
+		fmt.Sprintf(`{"type":"text","tab_id":"tab","text":%q}`, strings.Repeat("é", 16384)),
+		fmt.Sprintf(`{"type":"new","url":%q}`, "data:,"+strings.Repeat("😀", 8192-6)),
 	}
 	invalid := []string{
 		`{}`,
@@ -174,9 +176,11 @@ func TestBrowserLiveCommandContract(t *testing.T) {
 		`{"type":"text","text":"hello"}`,
 		`{"type":"release"}`,
 		`{"type":"release","tab_id":"tab","modifiers":0}`,
-		fmt.Sprintf(`{"type":"back","tab_id":%q}`, strings.Repeat("a", 257)),
-		fmt.Sprintf(`{"type":"key","tab_id":"tab","event":"keyDown","code":%q}`, strings.Repeat("a", 129)),
-		fmt.Sprintf(`{"type":"text","tab_id":"tab","text":%q}`, strings.Repeat("a", 16385)),
+		fmt.Sprintf(`{"type":"back","tab_id":%q}`, strings.Repeat("😀", 257)),
+		fmt.Sprintf(`{"type":"key","tab_id":"tab","event":"keyDown","key":%q}`, strings.Repeat("é", 129)),
+		fmt.Sprintf(`{"type":"key","tab_id":"tab","event":"keyUp","code":%q}`, strings.Repeat("界", 129)),
+		fmt.Sprintf(`{"type":"text","tab_id":"tab","text":%q}`, strings.Repeat("é", 16385)),
+		fmt.Sprintf(`{"type":"new","url":%q}`, "data:,"+strings.Repeat("😀", 8192-6+1)),
 	}
 
 	check := func(raw string, wantValid bool) {
@@ -196,6 +200,61 @@ func TestBrowserLiveCommandContract(t *testing.T) {
 	}
 	for _, raw := range valid {
 		check(raw, true)
+	}
+	for _, raw := range invalid {
+		check(raw, false)
+	}
+}
+
+func TestBrowserLiveEventContract(t *testing.T) {
+	spec, err := GetSwagger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := spec.Components.Schemas["BrowserLiveEvent"].Value
+
+	emitted := []browser.LiveEvent{
+		{Type: "state"},
+		{Type: "state", Tabs: []browser.LiveTab{}, Selected: "agent-tab", Pinned: "viewer-tab", TabID: "viewer-tab"},
+		{Type: "state", Tabs: []browser.LiveTab{{ID: "tab", URL: "https://example.com", Title: "Example"}}},
+		{Type: "frame", TabID: "tab", Data: "/9j/2Q==", Width: 1280, Height: 720},
+		{Type: "activity", TabID: "tab", Kind: "move"},
+		{Type: "activity", TabID: "tab", Kind: "click", X: 12.5, Y: 20},
+		{Type: "error", Code: "tab_not_found", Message: "Tab was closed"},
+	}
+	invalid := []string{
+		`{}`,
+		`{"type":"unknown"}`,
+		`{"type":"state","code":"invalid"}`,
+		`{"type":"state","tabs":[{"id":"tab","url":"https://example.com"}]}`,
+		`{"type":"frame"}`,
+		`{"type":"frame","tab_id":"tab","data":"/9j/2Q==","width":1280}`,
+		`{"type":"frame","tab_id":"tab","data":"/9j/2Q==","width":1280,"height":720,"selected":"tab"}`,
+		`{"type":"activity","kind":"move"}`,
+		`{"type":"activity","tab_id":"tab"}`,
+		`{"type":"activity","tab_id":"tab","kind":"type","x":1,"y":2}`,
+		`{"type":"error","code":"invalid"}`,
+		`{"type":"error","message":"invalid command"}`,
+		`{"type":"error","code":"invalid","message":"invalid command","tab_id":"tab"}`,
+	}
+
+	check := func(raw string, wantValid bool) {
+		t.Helper()
+		var value any
+		if err := json.Unmarshal([]byte(raw), &value); err != nil {
+			t.Fatalf("bad test JSON %q: %v", raw, err)
+		}
+		err := schema.VisitJSON(value)
+		if got := err == nil; got != wantValid {
+			t.Errorf("event schema validity for %s = %v, want %v (error: %v)", raw, got, wantValid, err)
+		}
+	}
+	for _, event := range emitted {
+		raw, err := json.Marshal(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(string(raw), true)
 	}
 	for _, raw := range invalid {
 		check(raw, false)

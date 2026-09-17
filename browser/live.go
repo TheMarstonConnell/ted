@@ -210,7 +210,7 @@ func ParseLiveCommand(data []byte) (LiveCommand, error) {
 
 func validateLiveCommand(c LiveCommand) error {
 	invalid := func(message string) error { return fail("invalid_params", "%s", message) }
-	if len(c.TabID) > 256 {
+	if utf8.RuneCountInString(c.TabID) > 256 {
 		return invalid("tab_id is too long")
 	}
 	for _, v := range []float64{c.X, c.Y, c.DeltaX, c.DeltaY} {
@@ -224,7 +224,7 @@ func validateLiveCommand(c LiveCommand) error {
 	if c.Modifiers < 0 || c.Modifiers > 15 || c.Buttons < 0 || c.Buttons > 7 || c.ClickCount < 0 || c.ClickCount > 3 || c.KeyCode < 0 || c.KeyCode > 65535 {
 		return invalid("input flags are out of range")
 	}
-	if len(c.Key) > 128 || len(c.Code) > 128 || utf8.RuneCountInString(c.Text) > 16384 || utf8.RuneCountInString(c.URL) > 8192 {
+	if utf8.RuneCountInString(c.Key) > 128 || utf8.RuneCountInString(c.Code) > 128 || utf8.RuneCountInString(c.Text) > 16384 || utf8.RuneCountInString(c.URL) > 8192 {
 		return invalid("input string is too long")
 	}
 	switch c.Type {
