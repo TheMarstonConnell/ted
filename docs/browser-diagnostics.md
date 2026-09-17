@@ -35,8 +35,8 @@ not a site restriction. Chrome log entries may describe the same failure as a
 network entry.
 
 Network metadata intentionally omits URLs, headers, cookies, bodies and CORS
-parameter values. Raw CDP and existing
-console/log output may contain secrets; inspect and share them cautiously. These
+parameter values. Raw CDP and existing console/log output may contain secrets;
+inspect and share them cautiously. These
 network records are memory-only, not added to the action trace. They are not a
 complete HAR or a retrospective record of requests before target attachment.
 

@@ -1,10 +1,6 @@
 package browser
 
-import (
-	"fmt"
-
-	"github.com/chromedp/cdproto/network"
-)
+import "github.com/chromedp/cdproto/network"
 
 // chromedp enables Network on attachment. Keep only failure metadata here;
 // raw headers, cookies and bodies belong in explicitly requested CDP output.
@@ -28,7 +24,6 @@ func (t *browserTab) handleNetworkDiagnostic(event any) {
 		}
 		t.appendError(map[string]any{
 			"source": "network", "type": "http_error",
-			"text":          fmt.Sprintf("HTTP %d", e.Response.Status),
 			"resource_type": e.Type,
 			"status":        e.Response.Status,
 		})

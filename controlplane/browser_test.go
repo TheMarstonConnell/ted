@@ -280,6 +280,7 @@ func TestBrowserCommandsEventsAndRecoverableValidation(t *testing.T) {
 		`{"type":"watch","tab_id":"tab-a"}`,
 		`{"type":"new","url":"about:blank"}`,
 		`{"type":"navigate","tab_id":"tab-a","url":"example.test/` + strings.Repeat("é", 8192-len("example.test/")) + `"}`,
+		`{"type":"new","url":"::1/` + strings.Repeat("é", 8192-len("::1/")) + `"}`,
 		`{"type":"navigate","url":"https://example.test"}`,
 		`{"type":"navigate","tab_id":"tab-a","url":"https://example.test/next"}`,
 		`{"type":"back","tab_id":"tab-a"}`,
@@ -302,15 +303,7 @@ func TestBrowserCommandsEventsAndRecoverableValidation(t *testing.T) {
 		_ = json.Unmarshal([]byte(raw), &want)
 		select {
 		case got := <-live.sent:
-			wire, err := json.Marshal(got)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var forwarded browser.LiveCommand
-			if err := json.Unmarshal(wire, &forwarded); err != nil {
-				t.Fatal(err)
-			}
-			if forwarded != want {
+			if got != want {
 				t.Fatalf("command changed: %+v != %+v", got, want)
 			}
 		case <-time.After(time.Second):

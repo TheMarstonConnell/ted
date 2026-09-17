@@ -33,9 +33,6 @@ type LiveCommand struct {
 	Text       string  `json:"text,omitempty"`
 	Modifiers  int64   `json:"modifiers,omitempty"`
 	KeyCode    int64   `json:"key_code,omitempty"`
-
-	// Keep URL as received so forwarding cannot inflate its wire-length bound.
-	normalizedURL string
 }
 
 // Mouse coordinates are required on the wire, including at the viewport origin.
@@ -209,9 +206,7 @@ func ParseLiveCommand(data []byte) (LiveCommand, error) {
 		return command, err
 	}
 	if (command.Type == "navigate" || command.Type == "new") && command.URL != "" {
-		var err error
-		command.normalizedURL, err = normalizeURL(command.URL)
-		if err != nil {
+		if _, err := normalizeURL(command.URL); err != nil {
 			return command, err
 		}
 	}

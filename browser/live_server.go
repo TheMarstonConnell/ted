@@ -315,7 +315,7 @@ func (l *liveSubscription) execute(ctx context.Context, c LiveCommand) error {
 	}
 	switch c.Type {
 	case "navigate":
-		return liveNavigate(ctx, t, c.normalizedURL)
+		return liveNavigate(ctx, t, c.URL)
 	case "close":
 		_ = l.release(ctx, t)
 		_, err := s.tabClose(ctx, map[string]any{"id": c.TabID})
@@ -397,7 +397,7 @@ func (l *liveSubscription) open(ctx context.Context, c LiveCommand, s *session) 
 	l.watch = string(t.id)
 	l.mu.Unlock()
 	if c.URL != "" {
-		return liveNavigate(ctx, t, c.normalizedURL)
+		return liveNavigate(ctx, t, c.URL)
 	}
 	return nil
 }
@@ -422,6 +422,10 @@ func liveRun(ctx context.Context, t *browserTab, actions ...chromedp.Action) err
 	return chromedp.Run(run, actions...)
 }
 func liveNavigate(ctx context.Context, t *browserTab, url string) error {
+	url, err := normalizeURL(url)
+	if err != nil {
+		return err
+	}
 	return liveRun(ctx, t, chromedp.ActionFunc(func(exec context.Context) error {
 		_, _, message, _, err := page.Navigate(url).Do(exec)
 		if err == nil && message != "" {
