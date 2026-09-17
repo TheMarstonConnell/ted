@@ -224,7 +224,7 @@ export class LiveBrowserConnection {
         !this.state.tabs.some((tab) => tab.id === command.tab_id))
     )
       return false;
-    if ((command.text?.length || 0) > 16384) {
+    if (Array.from(command.text ?? "").length > 16384) {
       this.update({
         error: "Text is too long. Paste at most 16,384 characters at a time.",
       });
@@ -232,7 +232,12 @@ export class LiveBrowserConnection {
     }
     if (this.socket?.readyState !== 1) return false;
     try {
-      this.socket.send(JSON.stringify(command));
+      const payload = JSON.stringify(command);
+      if (new TextEncoder().encode(payload).length > 64 * 1024) {
+        this.update({ error: "Browser input exceeds the 64 KiB message limit." });
+        return false;
+      }
+      this.socket.send(payload);
       return true;
     } catch {
       this.update({

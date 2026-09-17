@@ -49,7 +49,10 @@ reserved by the local browser/OS cannot all be forwarded.
 The viewer exposes pages and authenticated sessions accessible to the server's
 browser. The control plane has no built-in authentication: use loopback, a trusted
 network, or an authenticated TLS reverse proxy that protects WebSocket upgrades.
-Same-origin checks are an additional browser defense, not authentication. The
+Same-origin checks are an additional browser defense, not authentication.
+For TLS termination with an HTTP backend, configure
+`ted serve --public-origin https://ted.example.com` and preserve the browser's
+Origin header; forwarded headers alone never alter origin validation. The
 server resolves browser identity from the selected agent; clients cannot submit
 arbitrary project paths or raw CDP methods. Browser input and activity events must
 not be persisted in conversation logs or used to log typed secrets. Screenshots,

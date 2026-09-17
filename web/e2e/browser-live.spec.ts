@@ -392,6 +392,7 @@ test("touch pan scrolls remotely, touch tap clicks, and mouse drag remains a dra
   const box = (await live.viewport.boundingBox())!;
   const x = box.x + box.width / 2;
   const startY = box.y + box.height * 0.72;
+  await expect(live.viewport).toHaveCSS("font-size", "16px");
   const beforePan = live.commands.length;
   const image = page.getByAltText("Live browser page");
   const beforeSrc = await image.getAttribute("src");

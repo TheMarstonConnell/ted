@@ -1266,3 +1266,45 @@ func TestBrowserLifecycleAfterServiceRestart(t *testing.T) {
 		})
 	}
 }
+
+func TestConfiguredPublicOriginBehindTLSProxy(t *testing.T) {
+	f := browserFixture(t, func(context.Context, browser.Request) (browserLiveConnection, error) {
+		return newFakeBrowserLive(), nil
+	})
+	a := f.agent(f.project())
+	f.server.Close()
+	handler, err := WithPublicOrigin(newHandler(f.s, func(context.Context, browser.Request) (browserLiveConnection, error) {
+		return newFakeBrowserLive(), nil
+	}), "https://ted.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.server = httptest.NewServer(handler)
+	t.Cleanup(f.server.Close)
+	for _, path := range []string{"/v1/ws", "/v1/agents/" + a.ID + "/browser"} {
+		for _, origin := range []string{"https://ted.example.com", "https://TED.EXAMPLE.COM", "https://evil.example.com", "http://ted.example.com", "https://ted.example.com/path", "https://ted.example.com?", "https://ted.example.com#", "null"} {
+			headers := http.Header{"Origin": {origin}, "X-Forwarded-Proto": {"https"}, "X-Forwarded-Host": {"evil.example.com"}}
+			c, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(f.server.URL, "http")+path, headers)
+			allowed := strings.EqualFold(origin, "https://ted.example.com")
+			if allowed {
+				if err != nil {
+					t.Fatalf("TLS-terminated %s rejected: %v", path, err)
+				}
+				_ = c.Close()
+			} else {
+				if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
+					if c != nil {
+						_ = c.Close()
+					}
+					t.Fatalf("untrusted origin %q was not rejected: %v %+v", origin, err, response)
+				}
+				response.Body.Close()
+			}
+		}
+	}
+	for _, origin := range []string{"https://", "ftp://ted.example.com", "https://user@ted.example.com", "https://ted.example.com/", "https://ted.example.com?x=1"} {
+		if _, err := WithPublicOrigin(http.NotFoundHandler(), origin); err == nil {
+			t.Fatalf("invalid configured origin accepted: %q", origin)
+		}
+	}
+}

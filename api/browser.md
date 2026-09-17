@@ -23,10 +23,14 @@ work, and do not enter the agent's message queue.
 
 ## Handshake and security
 
-Browser `Origin` must exactly match the request's scheme and host (case-insensitive
+By default, browser `Origin` must exactly match the request's scheme and host (case-insensitive
 host); malformed, repeated, null, and cross-origin values are rejected with
 HTTP 403. Non-browser clients may omit Origin. Forwarded-origin headers are not
-trusted. TLS-terminating proxies must preserve a matching origin at the server.
+trusted. For a TLS-terminating authenticated proxy, set
+`ted serve --public-origin https://ted.example.com` to pin the expected browser
+Origin independently of the backend HTTP transport. Preserve the browser's Origin
+when proxying; other origins are still rejected. This configuration also applies
+to `/v1/ws` and does not add authentication or trust forwarded headers.
 
 Unknown agents return 404, unavailable project directories return 409
 `workspace_unavailable`, daemon connection failures return 503

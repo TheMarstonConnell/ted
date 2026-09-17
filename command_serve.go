@@ -45,10 +45,11 @@ func defaultDataDir() (string, error) {
 }
 
 func newServeCommand() *cobra.Command {
-	var addr, dir string
+	var addr, dir, publicOrigin string
 	var owned bool
 	cmd := &cobra.Command{Use: "serve", Short: "Run the agent API server", Args: cobra.NoArgs}
 	cmd.Flags().StringVar(&addr, "addr", defaultServerAddress, "HTTP listen address")
+	cmd.Flags().StringVar(&publicOrigin, "public-origin", "", "Trusted public http(s) origin when behind a TLS-terminating proxy")
 	defaultDir, _ := defaultDataDir()
 	cmd.Flags().StringVar(&dir, "data-dir", defaultDir, "Persistent control plane data directory")
 	cmd.Flags().BoolVar(&owned, "owned", false, "Shut down when the owning client's stdin pipe closes")
@@ -66,12 +67,12 @@ func newServeCommand() *cobra.Command {
 		if owned {
 			go cancelOnEOF(os.Stdin, cancel)
 		}
-		return runServe(ctx, addr, dir)
+		return runServe(ctx, addr, dir, publicOrigin)
 	}
 	return cmd
 }
 
-func runServe(ctx context.Context, addr, dir string) error {
+func runServe(ctx context.Context, addr, dir, publicOrigin string) error {
 	// Bind first: a competing startup must fail without opening the same store.
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -92,15 +93,19 @@ func runServe(ctx context.Context, addr, dir string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "Ted control plane listening on %s (API version 1). WARNING: no authentication; use a trusted network or protected proxy.\n", listener.Addr())
-	return serveControlPlane(ctx, listener, service)
+	return serveControlPlane(ctx, listener, service, publicOrigin)
 }
 
-func serveControlPlane(ctx context.Context, listener net.Listener, service *controlplane.Service) error {
-	var err error
+func serveControlPlane(ctx context.Context, listener net.Listener, service *controlplane.Service, publicOrigin string) error {
+	handler, err := controlplane.WithPublicOrigin(web.Handler(controlplane.NewHandler(service)), publicOrigin)
+	if err != nil {
+		_ = service.Close(context.Background())
+		return err
+	}
 	// net/http does not close hijacked (WebSocket) connections in Close.
 	// Keep all accepted sockets so owner shutdown intentionally disconnects every client.
 	tracked := &trackedListener{Listener: listener}
-	server := &http.Server{Handler: web.Handler(controlplane.NewHandler(service)), ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(tracked) }()

@@ -165,6 +165,20 @@ describe("dedicated live-browser transport", () => {
     vi.advanceTimersByTime(20000);
     expect(sockets).toHaveLength(2);
   });
+  it("counts paste code points separately from UTF-8 JSON bytes", () => {
+    const { connection, socket } = setup();
+    socket.event(state());
+    const emoji = "😀".repeat(10000);
+    expect(connection.send({ type: "text", tab_id: "one", text: emoji })).toBe(true);
+    expect(socket.sent.at(-1)).toEqual({ type: "text", tab_id: "one", text: emoji });
+    const before = socket.sent.length;
+    expect(connection.send({ type: "text", tab_id: "one", text: "😀".repeat(16385) })).toBe(false);
+    expect(connection.snapshot().error).toContain("16,384 characters");
+    expect(connection.send({ type: "text", tab_id: "one", text: "😀".repeat(16384) })).toBe(false);
+    expect(connection.snapshot().error).toContain("64 KiB");
+    expect(socket.sent).toHaveLength(before);
+    connection.disconnect();
+  });
   it("surfaces errors, protects oversized pastes and handles malformed JSON", () => {
     const { connection, socket } = setup();
     socket.event(state());

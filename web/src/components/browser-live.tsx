@@ -665,7 +665,7 @@ function BrowserViewport({
             autoCapitalize="off"
             autoComplete="off"
             spellCheck={false}
-            className="absolute inset-0 size-full resize-none cursor-default touch-none opacity-0"
+            className="absolute inset-0 size-full resize-none cursor-default touch-none text-base md:text-sm opacity-0"
             onFocus={() => setFocused(true)}
             onBlur={() => {
               setFocused(false);
