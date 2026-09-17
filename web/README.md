@@ -75,6 +75,23 @@ when upgrading. Receipts cover only rendered responses and retry after transient
 failures, without acknowledging newer unseen output.
 
 
+## Screenshot attachments
+
+Use **Attach screenshots**, paste an image from the clipboard, or drop image files
+onto the composer. PNG, JPEG, WebP, and GIF are supported, up to four images per
+message and 5 MiB per image. The server also limits images to 16,777,216 pixels
+and 16,384 pixels per side. Previews show the selected images; each can be removed
+before sending. Images can be sent on their own or with a text prompt. Slash
+commands cannot include images; use `//` to send a literal leading slash.
+
+Attachments stay with each chat's in-memory draft when switching chats, including
+failed-send retries and queued-message edits. A page reload discards unsent drafts.
+Submitted images are persisted with the chat, displayed in the transcript with
+an expandable preview, and sent as image input to the selected agent's provider.
+Choose a vision-capable model. Images are not uploaded until the message is sent,
+but once sent they become part of chat history and provider input: avoid sensitive
+information unless you intend to share it with that provider.
+
 ## Chat workspace footer
 
 The composer footer's left-hand directory slot now holds the workspace choice.
@@ -190,7 +207,7 @@ action with an accessible label and hover title. Project creation is no longer r
 - The pending queue has a sticky count/header (including “Queue held”) that
   stays visible while its messages scroll.
 - Pending messages have **Edit** and **Cancel** actions. Edit removes only that
-  queue entry and loads its text into the composer, focusing it without sending.
+  queue entry and loads its text and images into the composer, focusing it without sending.
   Replacing an existing draft requires confirmation. The composer is briefly
   read-only while removal is pending; a failed removal leaves the draft intact.
   Messages that have already started cannot be edited. Resending an edited
@@ -248,8 +265,8 @@ cursors, and TUI-style display transcripts. It replays lifetime events, rather
 than rendering conversation checkpoints again as duplicate messages. Output
 events are completed display messages, not token deltas. Tool calls/results are
 expandable and retain full uncapped tool output; Markdown is rendered without
-raw HTML execution. The API does not currently expose separate approval actions
-or an attachment-upload endpoint.
+raw HTML execution. The API does not currently expose separate approval actions. Screenshot attachments
+are sent inline with message submissions; there is no separate upload endpoint.
 
 Inventory cursors never acknowledge processed events. Large `event_ref` payloads
 are fetched from a reconstructed same-origin path and processed serially before
@@ -280,7 +297,7 @@ workspaces will benefit from a later lazy history/cache layer; it is not a
 virtualized or server-paginated archive browser yet.
 
 HTTP mutations support large messages and idempotency keys. Failed message
-retries reuse the key while text is unchanged. Browser HTTP on a trusted LAN
+retries reuse the key while text and attachments are unchanged. Browser HTTP on a trusted LAN
 uses `getRandomValues` where secure-context-only `randomUUID` is unavailable.
 
 ## Check and build

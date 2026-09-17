@@ -20,6 +20,8 @@ import {
   ChevronRight,
   LoaderCircle,
   Menu,
+  Paperclip,
+  X,
   Play,
   Square,
 } from "lucide-react";
@@ -79,10 +81,28 @@ import {
   FooterSeparator,
 } from "./workspace";
 
+import {
+  IMAGE_ACCEPT,
+  readImage,
+  validateImageFiles,
+  type Attachment,
+} from "@/lib/attachments";
+
 // Intentionally ephemeral: agent switches retain drafts, a reload does not.
 const drafts = new Map<string, string>();
 const draftVersions = new Map<string, number>();
-const receipts = new Map<string, { text: string; key: string }>();
+const receipts = new Map<
+  string,
+  { text: string; attachments: Attachment[]; key: string }
+>();
+const draftAttachments = new Map<string, Attachment[]>();
+const readingImages = new Set<string>();
+const EMPTY_ATTACHMENTS: Attachment[] = [];
+function writeAttachments(agentId: string, images: Attachment[]) {
+  draftAttachments.set(agentId, images);
+  draftVersions.set(agentId, (draftVersions.get(agentId) || 0) + 1);
+  notifyComposer();
+}
 const inFlight = new Set<string>();
 const editingDrafts = new Set<string>();
 const composerErrors = new Map<string, string>();
@@ -232,15 +252,23 @@ const Message = memo(function Message({ item }: { item: TranscriptItem }) {
         <AlertDescription>{item.text}</AlertDescription>
       </Alert>
     );
-  return <ConversationMessage text={item.text} user={item.kind === "user"} />;
+  return (
+    <ConversationMessage
+      text={item.text}
+      attachments={item.attachments}
+      user={item.kind === "user"}
+    />
+  );
 });
 
 const ConversationMessage = memo(function ConversationMessage({
   text,
   user,
+  attachments,
 }: {
   text: string;
   user: boolean;
+  attachments?: Attachment[];
 }) {
   return (
     <article
@@ -250,6 +278,9 @@ const ConversationMessage = memo(function ConversationMessage({
         user && "ml-auto w-fit max-w-[90%] rounded-xl bg-muted p-4",
       )}
     >
+      {attachments?.map((image, index) => (
+        <ChatImage key={index} src={image.url} alt={image.name} />
+      ))}
       <div className="markdown text-sm leading-6 [overflow-wrap:anywhere] [&>*+*]:mt-4 [&_p]:whitespace-pre-wrap [&_h1]:text-xl [&_h1]:leading-7 [&_h2]:text-xl [&_h2]:leading-7 [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h4]:font-semibold [&_h5]:font-semibold [&_h6]:font-semibold [&_a]:underline [&_a]:underline-offset-4 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-5 [&_code]:font-mono [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_blockquote]:border-l-2 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_th]:border [&_th]:px-4 [&_th]:py-2 [&_th]:text-left [&_td]:border [&_td]:px-4 [&_td]:py-2">
         <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
           {text}
@@ -333,6 +364,60 @@ const Transcript = memo(function Transcript({
   );
 });
 
+const DraftImages = memo(function DraftImages({
+  agentId,
+  disabled,
+}: {
+  agentId: string;
+  disabled: boolean;
+}) {
+  const images = useSyncExternalStore(
+    subscribeComposer,
+    () => draftAttachments.get(agentId) || EMPTY_ATTACHMENTS,
+  );
+  if (!images.length) return null;
+  return (
+    <div
+      aria-label="Attached images"
+      className="flex max-h-48 w-full flex-wrap gap-2 overflow-y-auto px-4 pt-4 md:px-inset"
+    >
+      {images.map((image, index) => (
+        <div
+          key={index}
+          className="flex min-w-0 max-w-full items-center gap-2 rounded-lg border p-2"
+        >
+          <img
+            src={image.url}
+            alt={image.name}
+            className="size-16 rounded-md object-contain"
+          />
+          <span
+            className="min-w-0 max-w-32 truncate text-xs"
+            title={image.name}
+          >
+            {image.name}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={`Remove ${image.name}`}
+            disabled={disabled}
+            onClick={() =>
+              writeAttachments(
+                agentId,
+                images.filter((_, i) => i !== index),
+              )
+            }
+          >
+            <X />
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+});
+
 // Typing updates this small leaf, not the transcript, queue, or model menus.
 const ComposerInput = memo(function ComposerInput({
   agentId,
@@ -384,7 +469,8 @@ const SendMessageButton = memo(function SendMessageButton({
 }) {
   const empty = useSyncExternalStore(
     subscribeComposer,
-    () => !drafts.get(agentId)?.trim(),
+    () =>
+      !drafts.get(agentId)?.trim() && !draftAttachments.get(agentId)?.length,
   );
   return (
     <Button
@@ -437,6 +523,10 @@ function ChatWorkspace() {
   const busy = useSyncExternalStore(subscribeComposer, () =>
     inFlight.has(agentId),
   );
+  const reading = useSyncExternalStore(subscribeComposer, () =>
+    readingImages.has(agentId),
+  );
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const editingDraft = useSyncExternalStore(subscribeComposer, () =>
     editingDrafts.has(agentId),
   );
@@ -530,6 +620,7 @@ function ChatWorkspace() {
         // a new submission, not a retry of the now-cancelled queue entry.
         receipts.delete(agentId);
         // Preserve a literal leading slash rather than turning it into a command.
+        writeAttachments(agentId, message.attachments || EMPTY_ATTACHMENTS);
         writeDraft(agentId, message.text.replace(/^(\s*)\//, "$1//"));
         requestAnimationFrame(() => {
           const input = composerRef.current;
@@ -543,19 +634,37 @@ function ChatWorkspace() {
     });
   };
   const requestEdit = (message: QueueMessage) => {
-    if (inFlight.has(agentId) || !ready || status !== "live") return;
+    if (
+      inFlight.has(agentId) ||
+      readingImages.has(agentId) ||
+      !ready ||
+      status !== "live"
+    )
+      return;
     const text = message.text.replace(/^(\s*)\//, "$1//");
     const draft = drafts.get(agentId) || "";
-    if (draft && draft !== text) setEditCandidate(message);
+    if ((draft && draft !== text) || draftAttachments.get(agentId)?.length)
+      setEditCandidate(message);
     else editPending(message);
   };
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const original = drafts.get(agentId) || "";
-    if (!original.trim() || busy || workspaceBlocked) return;
+    const attachments = draftAttachments.get(agentId) || EMPTY_ATTACHMENTS;
+    if (
+      (!original.trim() && !attachments.length) ||
+      busy ||
+      readingImages.has(agentId) ||
+      workspaceBlocked
+    )
+      return;
     void action(async () => {
       const trimmed = original.trim();
       if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
+        if (attachments.length)
+          throw new Error(
+            "Send images with a message, not a slash command. Use // for a literal slash.",
+          );
         const [command, ...args] = trimmed.slice(1).split(/\s+/);
         if (args.length > (["model", "effort"].includes(command) ? 1 : 0))
           throw new Error(`Invalid arguments for /${command}`);
@@ -593,22 +702,29 @@ function ChatWorkspace() {
       } else {
         const text = original.replace(/^(\s*)\/\//, "$1/");
         let receipt = receipts.get(agentId);
-        if (!receipt || receipt.text !== text) {
-          receipt = { text, key: requestKey() };
+        if (
+          !receipt ||
+          receipt.text !== text ||
+          receipt.attachments !== attachments
+        ) {
+          receipt = { text, attachments, key: requestKey() };
           receipts.set(agentId, receipt);
         }
         // Clear the submitted draft before the request, not after an async
         // response that may arrive after more typing or a chat switch.
         const scrollVersion = scrollIntentVersion.current;
         writeDraft(agentId, "");
+        writeAttachments(agentId, EMPTY_ATTACHMENTS);
         const version = draftVersions.get(agentId);
         try {
-          await control.send(agentId, text, receipt.key);
+          await control.send(agentId, text, receipt.key, attachments);
           receipts.delete(agentId);
         } catch (error) {
           // Keep the retry key and restore only if the composer was untouched.
-          if (draftVersions.get(agentId) === version)
+          if (draftVersions.get(agentId) === version) {
             writeDraft(agentId, original);
+            writeAttachments(agentId, attachments);
+          }
           throw error;
         }
         // Re-enter following mode, not just a one-off scrollTop assignment:
@@ -625,6 +741,30 @@ function ChatWorkspace() {
         writeDraft(agentId, "");
       }
     });
+  };
+  const attachFiles = async (files: File[]) => {
+    if (
+      !files.length ||
+      editingDrafts.has(agentId) ||
+      readingImages.has(agentId) ||
+      workspaceBlocked
+    )
+      return;
+    readingImages.add(agentId);
+    draftVersions.set(agentId, (draftVersions.get(agentId) || 0) + 1);
+    setError(null);
+    notifyComposer();
+    try {
+      const existing = draftAttachments.get(agentId) || EMPTY_ATTACHMENTS;
+      validateImageFiles(files, existing.length);
+      const images = await Promise.all(files.map(readImage));
+      writeAttachments(agentId, [...existing, ...images]);
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      readingImages.delete(agentId);
+      notifyComposer();
+    }
   };
   if (!loaded) return <Loading>Connecting to your workspace…</Loading>;
   if (!agent)
@@ -658,7 +798,7 @@ function ChatWorkspace() {
               Keep draft
             </Button>
             <Button
-              disabled={busy || !ready || status !== "live"}
+              disabled={busy || reading || !ready || status !== "live"}
               onClick={() => {
                 if (editCandidate) editPending(editCandidate);
               }}
@@ -758,7 +898,9 @@ function ChatWorkspace() {
                                     ? ` from ${botSourceLabel(m.sender_agent_id)}`
                                     : ""
                                 }: ${m.text}`
-                              : m.text}
+                              : m.text || "Images"}
+                            {!!m.attachments?.length &&
+                              ` · ${m.attachments.length} image${m.attachments.length === 1 ? "" : "s"}`}
                           </span>
                         </span>
                         {m.kind !== "bot" && (
@@ -767,7 +909,9 @@ function ChatWorkspace() {
                             variant="ghost"
                             size="xs"
                             title="Move this message back to the composer"
-                            disabled={busy || !ready || status !== "live"}
+                            disabled={
+                              busy || reading || !ready || status !== "live"
+                            }
                             onClick={() => requestEdit(m)}
                           >
                             Edit
@@ -799,16 +943,62 @@ function ChatWorkspace() {
                   <ConversationMessage
                     key={message.key}
                     text={message.text}
+                    attachments={message.attachments}
                     user
                   />
                 ))}
               </section>
             )}
-            <form onSubmit={submit} aria-label="Message composer">
+            <form
+              onSubmit={submit}
+              aria-label="Message composer"
+              onPaste={(event) => {
+                const files = Array.from(event.clipboardData.files);
+                if (files.length) {
+                  event.preventDefault();
+                  void attachFiles(files);
+                }
+              }}
+              onDragOver={(event) => {
+                if (event.dataTransfer.types.includes("Files"))
+                  event.preventDefault();
+              }}
+              onDrop={(event) => {
+                if (event.dataTransfer.types.includes("Files")) {
+                  event.preventDefault();
+                  void attachFiles(Array.from(event.dataTransfer.files));
+                }
+              }}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={IMAGE_ACCEPT}
+                multiple
+                hidden
+                aria-label="Attach images"
+                onChange={(event) => {
+                  const files = Array.from(event.target.files || []);
+                  event.target.value = "";
+                  void attachFiles(files);
+                }}
+              />
               <InputGroup
                 aria-label="Message input"
                 className="rounded-xl has-disabled:opacity-100 has-disabled:bg-transparent dark:has-disabled:bg-input/30"
               >
+                {reading && (
+                  <span
+                    role="status"
+                    className="px-4 pt-4 text-xs text-muted-foreground md:px-inset"
+                  >
+                    Reading images…
+                  </span>
+                )}
+                <DraftImages
+                  agentId={agentId}
+                  disabled={editingDraft || reading}
+                />
                 <ComposerInput
                   agentId={agentId}
                   inputRef={composerRef}
@@ -825,10 +1015,25 @@ function ChatWorkspace() {
                     aria-label="Chat settings"
                     className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
                   >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Attach screenshots"
+                      title="Attach screenshots (PNG, JPEG, WebP, GIF; up to 4, 5 MiB each)"
+                      disabled={editingDraft || reading || workspaceBlocked}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Paperclip />
+                    </Button>
                     <ModelFields
                       compact
                       disabled={
-                        busy || !ready || status !== "live" || workspaceBlocked
+                        busy ||
+                        reading ||
+                        !ready ||
+                        status !== "live" ||
+                        workspaceBlocked
                       }
                       model={agent.settings.model}
                       effort={agent.settings.effort}
@@ -870,7 +1075,9 @@ function ChatWorkspace() {
                         variant="destructive"
                         size="icon"
                         aria-label="Stop"
-                        disabled={busy || !ready || status !== "live"}
+                        disabled={
+                          busy || reading || !ready || status !== "live"
+                        }
                         title="Stop this turn; the next pending message can then run"
                         onClick={() =>
                           void action(() =>
@@ -884,7 +1091,11 @@ function ChatWorkspace() {
                     <SendMessageButton
                       agentId={agentId}
                       disabled={
-                        busy || !ready || status !== "live" || workspaceBlocked
+                        busy ||
+                        reading ||
+                        !ready ||
+                        status !== "live" ||
+                        workspaceBlocked
                       }
                     />
                   </div>
@@ -928,7 +1139,7 @@ function ChatWorkspace() {
                       prNumber={prNumber}
                       projectId={project.id}
                       value={workspaceSelection}
-                      disabled={busy || !ready || status !== "live"}
+                      disabled={busy || reading || !ready || status !== "live"}
                       onChange={(selection) =>
                         void action(() =>
                           control.updateWorkspace(agentId, selection),

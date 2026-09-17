@@ -16,10 +16,13 @@ import {
   type AgentPullRequest,
 } from "./api";
 
+import type { Attachment } from "./attachments";
+
 export type TranscriptItem = {
   id: string;
   kind: "user" | "bot" | "agent" | "tool" | "tool_result" | "status";
   text: string;
+  attachments?: Attachment[];
   toolName?: string;
   toolCallId?: string;
   senderAgentId?: string;
@@ -29,6 +32,7 @@ export type TranscriptItem = {
 type OutgoingMessage = {
   key: string;
   text: string;
+  attachments?: Attachment[];
   messageId?: string;
 };
 export type State = {
@@ -127,6 +131,7 @@ export function reduceEvent(state: State, event: Event): State {
         id: String(cursor),
         kind: q.kind === "bot" ? "bot" : "user",
         text: q.text,
+        attachments: q.attachments,
         senderAgentId: q.sender_agent_id,
         time: event.created_at,
       };
@@ -644,7 +649,12 @@ export class ControlPlane {
       `${agentPath(id)}/messages/${encodeURIComponent(messageId)}`,
       "DELETE",
     );
-  send = async (id: string, text: string, key: string) => {
+  send = async (
+    id: string,
+    text: string,
+    key: string,
+    attachments: Attachment[] = [],
+  ) => {
     const generation = this.generation;
     const updateOutgoing = (message?: OutgoingMessage) => {
       const current = this.state.outgoing[id] || [];
@@ -663,9 +673,15 @@ export class ControlPlane {
         },
       });
     };
-    updateOutgoing({ key, text });
+    const images = attachments.length ? { attachments } : {};
+    updateOutgoing({ key, text, ...images });
     const submit = () =>
-      api<QueueMessage>(`${agentPath(id)}/messages`, "POST", { text }, key);
+      api<QueueMessage>(
+        `${agentPath(id)}/messages`,
+        "POST",
+        { text, ...(attachments.length ? { attachments } : {}) },
+        key,
+      );
     try {
       if (this.state.agents[id]?.settled) await this.settle(id, false);
       let message: QueueMessage;
@@ -682,7 +698,7 @@ export class ControlPlane {
       updateOutgoing(
         this.state.agents[id]?.queue?.some((m) => m.id === message.id)
           ? undefined
-          : { key, text, messageId: message.id },
+          : { key, text, ...images, messageId: message.id },
       );
       if (generation !== this.generation) return message;
       const agent = this.state.agents[id];
