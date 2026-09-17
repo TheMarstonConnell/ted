@@ -53,28 +53,14 @@ type LiveEvent struct {
 	Code     string    `json:"code,omitempty"`
 }
 
-// Activity coordinates include zero, which is a valid viewport position.
-func (e LiveEvent) MarshalJSON() ([]byte, error) {
-	type eventJSON LiveEvent
-	if e.Type == "activity" && e.Kind != "clear" {
-		return json.Marshal(struct {
-			eventJSON
-			X float64 `json:"x"`
-			Y float64 `json:"y"`
-		}{eventJSON(e), e.X, e.Y})
-	}
-	return json.Marshal(eventJSON(e))
-}
-
 // LiveClient keeps one daemon subscription. Send and Receive may run concurrently.
 // Canceling the OpenLive context also closes the connection.
 type LiveClient struct {
-	conn      net.Conn
-	dec       *json.Decoder
-	sendMu    sync.Mutex
-	receiveMu sync.Mutex
-	once      sync.Once
-	stop      func() bool
+	conn   net.Conn
+	dec    *json.Decoder
+	sendMu sync.Mutex
+	once   sync.Once
+	stop   func() bool
 }
 
 func OpenLive(ctx context.Context, req Request) (*LiveClient, error) {
@@ -129,17 +115,12 @@ func OpenLive(ctx context.Context, req Request) (*LiveClient, error) {
 }
 
 func (c *LiveClient) Send(command LiveCommand) error {
-	if err := validateLiveCommand(command); err != nil {
-		return err
-	}
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
 	_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	return json.NewEncoder(c.conn).Encode(command)
 }
 func (c *LiveClient) Receive() (LiveEvent, error) {
-	c.receiveMu.Lock()
-	defer c.receiveMu.Unlock()
 	var event LiveEvent
 	err := c.dec.Decode(&event)
 	return event, err

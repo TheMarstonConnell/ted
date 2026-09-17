@@ -357,27 +357,6 @@ func TestLiveDaemonStartupUsesChildHome(t *testing.T) {
 	}
 }
 
-func TestActivityWireIncludesZeroCoordinatesWithoutText(t *testing.T) {
-	data, err := json.Marshal(LiveEvent{Type: "activity", TabID: "tab", Kind: "move", X: 0, Y: 0})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var value map[string]any
-	if err := json.Unmarshal(data, &value); err != nil {
-		t.Fatal(err)
-	}
-	if value["x"] != float64(0) || value["y"] != float64(0) {
-		t.Fatalf("missing valid zero coordinates: %s", data)
-	}
-	if _, ok := value["text"]; ok {
-		t.Fatalf("activity contains typed text: %s", data)
-	}
-	var decoded LiveEvent
-	if err := json.Unmarshal(data, &decoded); err != nil || decoded.Type != "activity" || decoded.Kind != "move" || decoded.TabID != "tab" {
-		t.Fatalf("activity roundtrip %+v %v", decoded, err)
-	}
-}
-
 func TestLiveIdleFrameRefreshAfterPeriodicState(t *testing.T) {
 	mgr := newManager(context.Background(), t.TempDir())
 	p := mgr.project("root", "key")

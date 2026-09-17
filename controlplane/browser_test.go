@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -573,19 +572,35 @@ func TestBrowserOversizedDaemonEvent(t *testing.T) {
 }
 
 func TestBrowserGlobalViewerLimit(t *testing.T) {
-	var viewers browserViewers
+	s, _, project, first := serviceFixture(t)
+	var releaseFirst func()
 	for i := range maxBrowserViewers {
-		if !viewers.acquire(fmt.Sprint(i)) {
-			t.Fatal("premature viewer limit")
+		a := first
+		if i != 0 {
+			var err error
+			a, err = s.CreateAgent(CreateAgentRequest{ProjectID: project.ID}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, _, release, err := s.beginBrowserViewer(a.ID, func() {})
+		if err != nil {
+			t.Fatalf("viewer %d rejected: %v", i, err)
+		}
+		if i == 0 {
+			releaseFirst = release
+		} else {
+			t.Cleanup(release)
 		}
 	}
-	if viewers.acquire("overflow") {
-		t.Fatal("global limit not enforced")
+	_, _, _, err := s.beginBrowserViewer(first.ID, func() {})
+	assertStatus(t, err, 503)
+	releaseFirst()
+	_, _, release, err := s.beginBrowserViewer(first.ID, func() {})
+	if err != nil {
+		t.Fatalf("released global slot not reusable: %v", err)
 	}
-	viewers.release("0")
-	if !viewers.acquire("reused") {
-		t.Fatal("global slot not reusable")
-	}
+	release()
 }
 
 func TestBrowserPingWhileDaemonSendBlocked(t *testing.T) {

@@ -40,36 +40,6 @@ func openBrowserLive(ctx context.Context, req browser.Request) (browserLiveConne
 	return browser.OpenLive(ctx, req)
 }
 
-type browserViewers struct {
-	mu     sync.Mutex
-	total  int
-	agents map[string]int
-}
-
-func (v *browserViewers) acquire(id string) bool {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if v.total >= maxBrowserViewers || v.agents[id] >= maxAgentBrowserViewers {
-		return false
-	}
-	if v.agents == nil {
-		v.agents = make(map[string]int)
-	}
-	v.total++
-	v.agents[id]++
-	return true
-}
-
-func (v *browserViewers) release(id string) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.total--
-	v.agents[id]--
-	if v.agents[id] == 0 {
-		delete(v.agents, id)
-	}
-}
-
 type browserSessionCloser func(context.Context, string, string, string) error
 
 func closeBrowserSession(ctx context.Context, home, project, thread string) error {
@@ -104,6 +74,13 @@ func (s *Service) beginBrowserViewer(id string, cancel context.CancelFunc) (brow
 	if err != nil {
 		return browser.Request{}, nil, nil, err
 	}
+	total := 0
+	for _, clients := range s.browserClients {
+		total += len(clients)
+	}
+	if total >= maxBrowserViewers || len(s.browserClients[id]) >= maxAgentBrowserViewers {
+		return browser.Request{}, nil, nil, problem(503, "browser_limit", "too many browser viewers")
+	}
 	if s.browserClients == nil {
 		s.browserClients = make(map[string]map[uint64]context.CancelFunc)
 	}
@@ -128,7 +105,6 @@ func (s *Service) cancelBrowserViewersLocked(id string) {
 	for _, cancel := range s.browserClients[id] {
 		cancel()
 	}
-	delete(s.browserClients, id)
 }
 
 func (s *Service) closeBrowserSessionLocked(id, project string) error {
@@ -157,11 +133,6 @@ func (h *httpAPI) AgentBrowser(w http.ResponseWriter, r *http.Request, id string
 		writeProblem(w, 400, "invalid", "invalid WebSocket handshake")
 		return
 	}
-	if !h.browserViewers.acquire(id) {
-		writeProblem(w, 503, "browser_limit", "too many browser viewers")
-		return
-	}
-	defer h.browserViewers.release(id)
 	ctx, cancel := context.WithCancel(r.Context())
 	req, changed, release, err := h.service.beginBrowserViewer(id, cancel)
 	if err != nil {

@@ -30,7 +30,6 @@ type httpAPI struct {
 	service        *Service
 	spec           *openapi3.T
 	browserConnect browserLiveConnector
-	browserViewers browserViewers
 }
 
 var _ api.ServerInterface = (*httpAPI)(nil)
