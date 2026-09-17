@@ -46,7 +46,9 @@ func closeBrowserSession(ctx context.Context, home, project, thread string) erro
 	return browser.CloseSessionIfRunning(ctx, home, project, thread)
 }
 
-func (s *Service) browserIdentityLocked(id string) (browser.Request, <-chan struct{}, error) {
+func (s *Service) beginBrowserViewer(id string, cancel context.CancelFunc) (browser.Request, func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closing {
 		return browser.Request{}, nil, problem(503, "shutting_down", "server is shutting down")
 	}
@@ -58,28 +60,13 @@ func (s *Service) browserIdentityLocked(id string) (browser.Request, <-chan stru
 	if !ok || !filepath.IsAbs(project.Root) {
 		return browser.Request{}, nil, problem(409, "workspace_unavailable", "browser project directory is unavailable")
 	}
-	return browser.Request{Project: project.Root, Thread: a.Agent.ID, Home: filepath.Join(s.dir, "runtime")}, s.changed, nil
-}
-
-func (s *Service) browserIdentity(id string) (browser.Request, <-chan struct{}, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.browserIdentityLocked(id)
-}
-
-func (s *Service) beginBrowserViewer(id string, cancel context.CancelFunc) (browser.Request, <-chan struct{}, func(), error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	req, changed, err := s.browserIdentityLocked(id)
-	if err != nil {
-		return browser.Request{}, nil, nil, err
-	}
+	req := browser.Request{Project: project.Root, Thread: a.Agent.ID, Home: filepath.Join(s.dir, "runtime")}
 	total := 0
 	for _, clients := range s.browserClients {
 		total += len(clients)
 	}
 	if total >= maxBrowserViewers || len(s.browserClients[id]) >= maxAgentBrowserViewers {
-		return browser.Request{}, nil, nil, problem(503, "browser_limit", "too many browser viewers")
+		return browser.Request{}, nil, problem(503, "browser_limit", "too many browser viewers")
 	}
 	if s.browserClients == nil {
 		s.browserClients = make(map[string]map[uint64]context.CancelFunc)
@@ -90,7 +77,7 @@ func (s *Service) beginBrowserViewer(id string, cancel context.CancelFunc) (brow
 	s.nextBrowserClient++
 	token := s.nextBrowserClient
 	s.browserClients[id][token] = cancel
-	return req, changed, func() {
+	return req, func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		clients := s.browserClients[id]
@@ -134,7 +121,7 @@ func (h *httpAPI) AgentBrowser(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	ctx, cancel := context.WithCancel(r.Context())
-	req, changed, release, err := h.service.beginBrowserViewer(id, cancel)
+	req, release, err := h.service.beginBrowserViewer(id, cancel)
 	if err != nil {
 		cancel()
 		writeRuntimeError(w, err)
@@ -151,23 +138,7 @@ func (h *httpAPI) AgentBrowser(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	req.Project = root
-	var workers sync.WaitGroup
-	defer func() { cancel(); workers.Wait() }()
-	workers.Go(func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-changed:
-				_, next, err := h.service.browserIdentity(id)
-				if err != nil {
-					cancel()
-					return
-				}
-				changed = next
-			}
-		}
-	})
+	defer cancel()
 	live, err := h.browserConnect(ctx, req)
 	if err != nil {
 		writeProblem(w, 503, "browser_unavailable", "cannot connect to browser service")

@@ -165,6 +165,9 @@ func (s *Service) failStorageLocked(err error) error {
 		r.shutdown = true
 		r.cancel()
 	}
+	for id := range s.browserClients {
+		s.cancelBrowserViewersLocked(id)
+	}
 	s.notifyLocked()
 	return problem(503, "storage_failed", "could not persist operation: "+err.Error())
 }

@@ -583,7 +583,7 @@ func TestBrowserGlobalViewerLimit(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		_, _, release, err := s.beginBrowserViewer(a.ID, func() {})
+		_, release, err := s.beginBrowserViewer(a.ID, func() {})
 		if err != nil {
 			t.Fatalf("viewer %d rejected: %v", i, err)
 		}
@@ -593,10 +593,10 @@ func TestBrowserGlobalViewerLimit(t *testing.T) {
 			t.Cleanup(release)
 		}
 	}
-	_, _, _, err := s.beginBrowserViewer(first.ID, func() {})
+	_, _, err := s.beginBrowserViewer(first.ID, func() {})
 	assertStatus(t, err, 503)
 	releaseFirst()
-	_, _, release, err := s.beginBrowserViewer(first.ID, func() {})
+	_, release, err := s.beginBrowserViewer(first.ID, func() {})
 	if err != nil {
 		t.Fatalf("released global slot not reusable: %v", err)
 	}
@@ -1307,4 +1307,16 @@ func TestConfiguredPublicOriginBehindTLSProxy(t *testing.T) {
 			t.Fatalf("invalid configured origin accepted: %q", origin)
 		}
 	}
+}
+
+func TestBrowserStorageFailureCancelsViewer(t *testing.T) {
+	live := newFakeBrowserLive()
+	f := browserFixture(t, func(context.Context, browser.Request) (browserLiveConnection, error) { return live, nil })
+	a := f.agent(f.project())
+	c := dialBrowser(t, f, a.ID)
+	defer c.Close()
+	f.s.mu.Lock()
+	_ = f.s.failStorageLocked(errors.New("disk full"))
+	f.s.mu.Unlock()
+	awaitBrowserClosed(t, live)
 }
