@@ -200,7 +200,12 @@ function ProjectForm() {
             placeholder="/path/to/your/project"
             value={root}
             readOnly={!!project}
-            onChange={(event) => setRoot(event.target.value)}
+            onChange={(event) => {
+              const nextRoot = event.target.value;
+              setRoot(nextRoot);
+              if (nextRoot.trim() !== root.trim())
+                setWorkspaceDefaults({ mode: workspaceDefaults.mode });
+            }}
           />
           <p className="text-xs text-muted-foreground">
             Project name:{" "}
@@ -236,6 +241,7 @@ function ProjectForm() {
           </p>
           <WorkspaceFields
             projectId={project?.id}
+            root={root}
             value={workspaceDefaults}
             onChange={setWorkspaceDefaults}
             disabled={busy}

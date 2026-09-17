@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -491,6 +492,64 @@ func TestHTTPProjectBranchesContract(t *testing.T) {
 		t.Fatalf("unexpected non-Git branch inventory: %+v", empty)
 	}
 	f.request("GET", "/v1/projects/missing/branches", "", "", 404)
+}
+
+func TestHTTPDirectoryBranchesContract(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	gitRoot := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = gitRoot
+		cmd.Env = append(cmd.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-b", "local-only")
+	git("config", "user.name", "HTTP Test")
+	git("config", "user.email", "http@example.invalid")
+	if err := os.WriteFile(filepath.Join(gitRoot, "README"), []byte("test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "README")
+	git("commit", "-m", "initial")
+	commit := git("rev-parse", "HEAD")
+	// The preview must inspect existing refs only; this remote cannot be fetched.
+	git("remote", "add", "origin", "https://example.invalid/never-fetch.git")
+	git("update-ref", "refs/remotes/origin/main", commit)
+	git("update-ref", "refs/remotes/origin/release", commit)
+	git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+	branches := decodeHTTP[api.ProjectBranches](t, f.request("GET", "/v1/projects/branches?root="+url.QueryEscape(gitRoot), "", "", 200))
+	if !branches.IsGit || branches.DefaultBranch != "origin/main" || len(branches.Branches) != 2 || branches.Branches[0] != "origin/main" || branches.Branches[1] != "origin/release" {
+		t.Fatalf("unexpected directory branch inventory: %+v", branches)
+	}
+
+	nonGitRoot := t.TempDir()
+	empty := decodeHTTP[api.ProjectBranches](t, f.request("GET", "/v1/projects/branches?root="+url.QueryEscape(nonGitRoot), "", "", 200))
+	if empty.IsGit || empty.DefaultBranch != "" || empty.Branches == nil || len(empty.Branches) != 0 {
+		t.Fatalf("unexpected non-Git directory inventory: %+v", empty)
+	}
+
+	for _, root := range []string{"relative", filepath.Join(nonGitRoot, "missing")} {
+		got := decodeHTTP[api.Error](t, f.request("GET", "/v1/projects/branches?root="+url.QueryEscape(root), "", "", 400))
+		if got.Error.Code != api.InvalidProject {
+			t.Fatalf("invalid root %q returned code %q, want %q", root, got.Error.Code, api.InvalidProject)
+		}
+	}
+	f.request("GET", "/v1/projects/branches", "", "", 400)
+
+	if got := string(f.request("GET", "/v1/projects", "", "", 200)); got != "[]\n" {
+		t.Fatalf("branch previews created a project: %s", got)
+	}
+	body, _ := json.Marshal(map[string]any{"name": "previewed", "root": gitRoot, "defaults": Settings{Model: "http-test/one", Effort: "low"}})
+	created := decodeHTTP[Project](t, f.request("POST", "/v1/projects", string(body), "", 201))
+	if created.Root != gitRoot {
+		t.Fatalf("created project root = %q, want %q", created.Root, gitRoot)
+	}
 }
 
 func TestProjectLiveGitBranch(t *testing.T) {

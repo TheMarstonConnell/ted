@@ -284,6 +284,13 @@ func (h *httpAPI) GetHealth(w http.ResponseWriter, r *http.Request) {
 func (h *httpAPI) ListProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, nonnil(h.service.Projects()))
 }
+func (h *httpAPI) ListDirectoryBranches(w http.ResponseWriter, r *http.Request, p api.ListDirectoryBranchesParams) {
+	branches, err := h.service.DirectoryBranches(p.Root)
+	if err == nil {
+		branches.Branches = nonnil(branches.Branches)
+	}
+	respond(w, 200, branches, err)
+}
 func (h *httpAPI) CreateProject(w http.ResponseWriter, r *http.Request) {
 	b, ok := decodeBody[api.CreateProjectJSONRequestBody](w, r)
 	if !ok {

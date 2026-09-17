@@ -24,36 +24,46 @@ const COMPACT_TRIGGER_CLASS =
   "min-w-0 max-w-full border-transparent bg-transparent px-2 font-mono text-xs dark:bg-transparent dark:hover:bg-accent";
 const FIELD_CLASS = "grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-2";
 
-function useProjectBranches(projectId?: string) {
+function useProjectBranches(projectId?: string, root?: string) {
+  const path = projectId
+    ? `/v1/projects/${encodeURIComponent(projectId)}/branches`
+    : root?.trim()
+      ? `/v1/projects/branches?${new URLSearchParams({ root: root.trim() })}`
+      : undefined;
   const [state, setState] = useState<{
-    projectId?: string;
+    path?: string;
     branches: ProjectBranches | null;
     error: string | null;
-  }>({ projectId, branches: null, error: null });
+  }>({ path, branches: null, error: null });
   useEffect(() => {
     let active = true;
-    if (!projectId) return () => undefined;
-    void api<ProjectBranches>(
-      `/v1/projects/${encodeURIComponent(projectId)}/branches`,
-    )
-      .then((branches) => {
-        if (active) setState({ projectId, branches, error: null });
-      })
-      .catch((error) => {
-        if (active)
-          setState({ projectId, branches: null, error: String(error) });
-      });
+    if (!path) return;
+    const timer = setTimeout(
+      () => {
+        void api<ProjectBranches>(path)
+          .then((branches) => {
+            if (active) setState({ path, branches, error: null });
+          })
+          .catch((error) => {
+            if (active)
+              setState({ path, branches: null, error: String(error) });
+          });
+      },
+      projectId ? 0 : 300,
+    );
     return () => {
       active = false;
+      clearTimeout(timer);
     };
-  }, [projectId]);
-  return state.projectId === projectId
-    ? { ...state, loading: !!projectId && !state.branches && !state.error }
-    : { projectId, branches: null, error: null, loading: !!projectId };
+  }, [path, projectId]);
+  return state.path === path
+    ? { ...state, loading: !!path && !state.branches && !state.error }
+    : { branches: null, error: null, loading: !!path };
 }
 
 export function WorkspaceFields({
   projectId,
+  root,
   value,
   onChange,
   disabled = false,
@@ -62,6 +72,7 @@ export function WorkspaceFields({
   prNumber,
 }: {
   projectId?: string;
+  root?: string;
   value: WorkspaceSelection;
   onChange: (value: WorkspaceSelection) => void;
   disabled?: boolean;
@@ -71,13 +82,22 @@ export function WorkspaceFields({
 }) {
   const locationId = useId();
   const branchId = useId();
-  const { branches, error, loading } = useProjectBranches(projectId);
+  const { branches, error, loading } = useProjectBranches(projectId, root);
   const knownNonGit = branches?.is_git === false;
   const availableBranches = branches?.branches || [];
   const defaultBranch = branches?.default_branch || availableBranches[0];
   const initialBranch = availableBranches.includes(value.base_branch || "")
     ? value.base_branch
     : defaultBranch;
+  useEffect(() => {
+    if (
+      !projectId &&
+      value.mode === "worktree" &&
+      !value.base_branch &&
+      defaultBranch
+    )
+      onChange({ mode: "worktree", base_branch: defaultBranch });
+  }, [projectId, value.mode, value.base_branch, defaultBranch, onChange]);
   const noRemoteBranches = !!branches?.is_git && !availableBranches.length;
   const branchValue = value.base_branch || REPOSITORY_DEFAULT;
   const branchOptions = [...(branches?.branches || [])];
@@ -86,11 +106,13 @@ export function WorkspaceFields({
   const branchItems = [
     {
       value: REPOSITORY_DEFAULT,
-      label: compact
-        ? defaultBranch || "Start from…"
-        : defaultBranch
-          ? `Repository default (${defaultBranch})`
-          : "Repository default",
+      label: loading
+        ? "Loading branches…"
+        : compact
+          ? defaultBranch || "Start from…"
+          : defaultBranch
+            ? `Repository default (${defaultBranch})`
+            : "Repository default",
     },
     ...branchOptions.map((branch) => ({ value: branch, label: branch })),
   ];
@@ -150,7 +172,12 @@ export function WorkspaceFields({
                 <SelectItem value="current_checkout">Local</SelectItem>
                 <SelectItem
                   value="worktree"
-                  disabled={knownNonGit || noRemoteBranches || !!error}
+                  disabled={
+                    (!projectId && !root?.trim()) ||
+                    knownNonGit ||
+                    noRemoteBranches ||
+                    !!error
+                  }
                 >
                   Worktree
                 </SelectItem>
@@ -174,11 +201,17 @@ export function WorkspaceFields({
           <Label htmlFor={branchId} className={compact ? "sr-only" : undefined}>
             Start from
           </Label>
-          {projectId ? (
+          {projectId || root?.trim() ? (
             <Select
               items={branchItems}
               value={branchValue}
-              disabled={disabled || loading || knownNonGit || !!error}
+              disabled={
+                disabled ||
+                loading ||
+                knownNonGit ||
+                noRemoteBranches ||
+                !!error
+              }
               onValueChange={(branch) =>
                 branch &&
                 onChange({
@@ -216,8 +249,7 @@ export function WorkspaceFields({
             </Select>
           ) : (
             <p className="flex min-h-10 items-center text-xs text-muted-foreground">
-              The repository’s default remote branch will be used. You can
-              override it after creating the project.
+              Enter a server directory to choose a starting branch.
             </p>
           )}
         </div>

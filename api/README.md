@@ -27,6 +27,7 @@ generated. Edit the YAML, then regenerate; never edit `generated.go` manually.
 | --- | --- | --- |
 | GET | `/health` | `{ "api_version": "1" }` |
 | GET, POST | `/v1/projects` | List or create projects |
+| GET | `/v1/projects/branches?root=...` | Preview known remote Git branches for an existing server directory without creating a project or fetching |
 | GET, PATCH, DELETE | `/v1/projects/{project_id}` | Read, update name/defaults, delete a project and its settled agents |
 | GET, POST | `/v1/agents` | List or create durable agents |
 | GET, PATCH | `/v1/agents/{agent_id}` | Read an agent, update `settled`, or advance `read_cursor` |
@@ -48,8 +49,10 @@ parameters, malformed escapes, trailing JSON, and bodies on bodyless operations
 are rejected. JSON operations require `Content-Type: application/json`; entire
 request bodies are limited to **2 MiB**, and text to **1,048,576 characters**.
 Names are limited to 256 characters, roots to 4096, model identifiers to 256,
-effort strings to 64, and idempotency keys to 256. Root paths must be existing
-absolute server-local directories. Model/effort availability is checked against
+effort strings to 64, and idempotency keys to 256. Root paths, including the
+directory branch-preview query, must be existing absolute server-local directories.
+Branch previews inspect only local Git refs and do not create a project or fetch from
+a remote. Model/effort availability is checked against
 the runtime provider catalog. See YAML for every request field and bound.
 
 Project creation requires `name`, `root`, and complete `defaults` (`model` and
