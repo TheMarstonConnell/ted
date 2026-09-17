@@ -106,13 +106,11 @@ export function WorkspaceFields({
   const branchItems = [
     {
       value: REPOSITORY_DEFAULT,
-      label: loading
-        ? "Loading branches…"
-        : compact
-          ? defaultBranch || "Start from…"
-          : defaultBranch
-            ? `Repository default (${defaultBranch})`
-            : "Repository default",
+      label: compact
+        ? defaultBranch || "Start from…"
+        : defaultBranch
+          ? `Repository default (${defaultBranch})`
+          : "Repository default",
     },
     ...branchOptions.map((branch) => ({ value: branch, label: branch })),
   ];
@@ -172,12 +170,7 @@ export function WorkspaceFields({
                 <SelectItem value="current_checkout">Local</SelectItem>
                 <SelectItem
                   value="worktree"
-                  disabled={
-                    (!projectId && !root?.trim()) ||
-                    knownNonGit ||
-                    noRemoteBranches ||
-                    !!error
-                  }
+                  disabled={knownNonGit || noRemoteBranches || !!error}
                 >
                   Worktree
                 </SelectItem>

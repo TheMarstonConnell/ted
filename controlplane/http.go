@@ -285,10 +285,6 @@ func (h *httpAPI) ListProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, nonnil(h.service.Projects()))
 }
 func (h *httpAPI) ListDirectoryBranches(w http.ResponseWriter, r *http.Request, p api.ListDirectoryBranchesParams) {
-	if strings.TrimSpace(p.Root) == "" {
-		respond(w, 200, ProjectBranches{}, problem(400, "invalid_project", "root is required"))
-		return
-	}
 	root, err := validateProjectRoot(p.Root)
 	if err != nil {
 		respond(w, 200, ProjectBranches{}, err)
