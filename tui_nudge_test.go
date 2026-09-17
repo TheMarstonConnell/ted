@@ -100,3 +100,60 @@ func TestBotNotificationCollapsesLongContent(t *testing.T) {
 		t.Fatalf("full notification was not retained: %q", wide)
 	}
 }
+
+func TestBotNotificationMergePreservesRows(t *testing.T) {
+	m := tuiTestModel()
+	m.viewport.SetWidth(160)
+	original := remote.QueuedMessage{ID: "nudge", Text: "checks passed", Kind: "bot", SenderAgentID: "reviewer", Status: "pending"}
+	other := original
+	other.ID = "another-nudge"
+	for _, notification := range []remote.QueuedMessage{original, other} {
+		next, _ := m.Update(notification)
+		m = next.(model)
+	}
+	m.appendMessage(userMessage, "continue review")
+	m.appendMessage(agentMessage, "working on it")
+	m.appendMessage(toolCallMessage, "Ran shell command")
+	before := append([]transcriptEntry(nil), m.messages...)
+	merged := original
+	merged.Text += "\n\ncoverage passed"
+	for range 2 {
+		next, cmd := m.Update(merged)
+		m = next.(model)
+		if cmd != nil || len(m.messages) != len(before) {
+			t.Fatalf("merge appended a row: %+v", m.messages)
+		}
+	}
+	for i, want := range before {
+		if i == 1 {
+			want.content = "Bot notification from chat reviewer: checks passed\n\ncoverage passed"
+		}
+		if m.messages[i] != want {
+			t.Fatalf("row %d = %+v, want %+v", i, m.messages[i], want)
+		}
+	}
+	if !strings.Contains(ansi.Strip(m.transcriptContent), "coverage passed") {
+		t.Fatalf("render cache did not refresh: %q", m.transcriptContent)
+	}
+}
+
+func TestBotNotificationMergeReplay(t *testing.T) {
+	original := remote.QueuedMessage{ID: "nudge", Text: "first report", Kind: "bot", SenderAgentID: "reviewer", Status: "pending"}
+	merged := original
+	merged.Text += "\n\nsecond report"
+	latest := merged
+	latest.Text += "\n\nfinal report"
+	for _, events := range [][]remote.QueuedMessage{
+		{original, merged, latest},
+		{latest}, // An update can be the first event seen by a renderer.
+	} {
+		m := tuiTestModel()
+		for _, notification := range events {
+			next, _ := m.Update(notification)
+			m = next.(model)
+		}
+		if len(m.messages) != 2 || m.messages[1].content != formatTUIBotNotification(latest) {
+			t.Fatalf("replayed notification = %+v", m.messages)
+		}
+	}
+}

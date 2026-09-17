@@ -115,3 +115,56 @@ func TestFullEventReplayRendersEveryAcceptedBotOnce(t *testing.T) {
 		t.Fatalf("replayed history = %+v", got)
 	}
 }
+
+func TestBotUpdatedEventRendering(t *testing.T) {
+	a := NewAgent(context.Background(), nil, Snapshot{ID: "target"}, "", nil)
+	original := QueuedMessage{ID: "nudge", Text: "checks passed", Kind: "bot", SenderAgentID: "reviewer", Status: "pending"}
+	merged := original
+	merged.Text += "\n\ncoverage passed"
+	var updates []Update
+	consume := func(cursor uint64, eventType string, data any) {
+		t.Helper()
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.consume(Event{AgentID: "target", Cursor: cursor, Type: eventType, Data: encoded}, func(update Update) {
+			updates = append(updates, update)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	consume(1, "message.queued", original)
+	consume(2, "message.updated", merged)
+	consume(2, "message.updated", merged)
+	consume(1, "message.queued", original)
+	if len(updates) != 2 {
+		t.Fatalf("updates = %+v, want acceptance and one merge", updates)
+	}
+	for i, want := range []QueuedMessage{original, merged} {
+		if updates[i].Bot == nil || *updates[i].Bot != want || updates[i].Output != nil || updates[i].Busy != nil {
+			t.Fatalf("update %d = %+v, want bot %+v", i, updates[i], want)
+		}
+	}
+	if len(a.Messages()) != 0 {
+		t.Fatalf("pending notification added to history: %+v", a.Messages())
+	}
+	consume(3, "turn.started", merged)
+	consume(4, "conversation", []agent.Message{{Role: "user", Kind: "bot", SenderAgentID: "reviewer", Content: agent.TextContent(merged.Text)}})
+	if len(updates) != 2 || len(a.Messages()) != 1 || a.Messages()[0].Content.Text() != merged.Text {
+		t.Fatalf("merged history lost or duplicated: updates=%+v messages=%+v", updates, a.Messages())
+	}
+}
+
+func TestUpdatedEventDoesNotDuplicateUserMessage(t *testing.T) {
+	a := NewAgent(context.Background(), nil, Snapshot{ID: "target"}, "", nil)
+	data, err := json.Marshal(QueuedMessage{ID: "user", Text: "edited", Status: "pending"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.consume(Event{AgentID: "target", Cursor: 1, Type: "message.updated", Data: data}, func(update Update) {
+		t.Fatalf("non-bot update rendered a new row: %+v", update)
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

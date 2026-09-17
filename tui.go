@@ -92,6 +92,8 @@ type model struct {
 	picker         *pickerState
 	busy           bool
 	workingSpinner spinner.Model
+
+	botNotificationRows map[string]int
 	// transcriptContent caches rendered messages so spinner ticks do not re-render markdown.
 	transcriptContent string
 	// height is the terminal height from the most recent window size
@@ -159,6 +161,22 @@ func formatTUIBotNotification(notification remote.QueuedMessage) string {
 		return "Bot notification: " + notification.Text
 	}
 	return "Bot notification from chat " + notification.SenderAgentID + ": " + notification.Text
+}
+
+func (m *model) upsertBotNotification(notification remote.QueuedMessage) {
+	text := formatTUIBotNotification(notification)
+	if notification.ID != "" {
+		if row, ok := m.botNotificationRows[notification.ID]; ok {
+			m.messages[row].content = text
+			m.renderTranscript()
+			return
+		}
+		if m.botNotificationRows == nil {
+			m.botNotificationRows = make(map[string]int)
+		}
+		m.botNotificationRows[notification.ID] = len(m.messages)
+	}
+	m.appendMessage(toolCallMessage, text)
 }
 
 func (m model) acceptsQueuedInput() bool {
@@ -534,7 +552,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.GotoBottom()
 	case remote.QueuedMessage:
-		m.appendMessage(toolCallMessage, formatTUIBotNotification(msg))
+		m.upsertBotNotification(msg)
 		return m, nil
 	case agent.AgentResponse:
 		switch msg.ResponseType {
@@ -553,6 +571,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case remoteDeletedMsg:
 		m.exitErr = msg.err
 		m.messages = nil
+		m.botNotificationRows = nil
 		m.textarea.Reset()
 		m.picker = nil
 		m.initialPrompt = ""

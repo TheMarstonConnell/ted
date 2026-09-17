@@ -75,9 +75,18 @@ is optional bot-only provenance, not authenticated identity. Both HTTP and WS
 submit support these fields. Queue records and conversation messages preserve
 the metadata; bot conversation messages use `role: "user"` with `kind: "bot"`
 in stored history, with explicit bot attribution added when sent to a provider.
-Notifications follow the normal FIFO, hold-release, and settled-agent rules.
-Idempotency distinguishes text, kind, and sender; omitted and explicit `user`
-kind are equivalent. `ted nudge` is the CLI client for this submission mode.
+Notifications follow the normal hold-release and settled-agent rules. A named bot
+submission appends its text with a blank-line separator to the latest pending bot
+entry from that sender unless a pending human message intervenes. Its ID, creation
+time, and queue position are preserved. Anonymous, running, and terminal entries
+are never merged. `message.updated` events contain the full merged record; clients
+replace the queue entry by ID. Combined text cannot exceed 1,048,576 Unicode
+characters; overflow returns `413 too_large` without modifying the entry.
+Idempotency distinguishes submitted text, kind, and sender; omitted and explicit
+`user` kind are equivalent. Each key retains its own input fingerprint but can
+reference the same merged queue ID. A retry returns the entry's current contents
+and status without duplicating text. Cancelling that ID cancels all its reports.
+`ted nudge` is the CLI client for this submission mode.
 
 Agent lists default to unsettled only; set `include_settled=true` to inspect all,
 and optionally filter by `project_id`. With either positive `page` or `page_size`,
@@ -165,7 +174,7 @@ All HTTP errors use the generated `Error` envelope:
 | 405 | `method_not_allowed` | Method unsupported for route; `Allow` lists methods |
 | 409 | `conflict`, `project_exists`, `project_not_empty`, `idempotency_conflict`, `not_pending`, `not_running`, `settled` | Runtime state/precondition conflict |
 | 410 | `cursor_invalid` | Invalid cursor; do not silently reset |
-| 413 | `too_large` | HTTP request body exceeds 2 MiB |
+| 413 | `too_large` | HTTP request body exceeds 2 MiB or merged bot text exceeds 1,048,576 characters |
 | 415 | `unsupported_media_type` | Expected JSON Content-Type |
 | 500 | `internal` | Unexpected failure; internal details are not exposed |
 | 503 | `shutting_down`, `storage_failed` | Runtime unavailable; failed mutations are not acknowledged as successful |

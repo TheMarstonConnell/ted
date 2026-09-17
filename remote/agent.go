@@ -185,7 +185,7 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 			return err
 		}
 		a.snapshot.Messages = append(a.snapshot.Messages, messages...)
-	case "message.queued":
+	case "message.queued", "message.updated":
 		var q QueuedMessage
 		if err := json.Unmarshal(e.Data, &q); err != nil {
 			a.mu.Unlock()
@@ -194,7 +194,7 @@ func (a *Agent) consume(e Event, notify func(Update)) error {
 		if q.Text != "" {
 			if q.Kind == "bot" {
 				bot = &q
-			} else {
+			} else if e.Type == "message.queued" {
 				output = &agent.AgentResponse{ResponseType: "user", Content: q.Text}
 			}
 		}

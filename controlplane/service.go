@@ -661,16 +661,29 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 	if a.Agent.Settled {
 		return QueuedMessage{}, problem(409, "settled", "restore agent before submitting messages")
 	}
+	mergeIndex := pendingBotMergeIndex(a.Agent.Queue, req)
+	if mergeIndex >= 0 && utf8.RuneCountInString(a.Agent.Queue[mergeIndex].Text)+2+utf8.RuneCountInString(req.Text) > 1<<20 {
+		return QueuedMessage{}, problem(413, "too_large", "merged bot message must not exceed 1048576 characters")
+	}
 	before := newStateChanges()
 	before.agent(s.state, id)
 	if key != "" {
 		before.receipt(s.state, scope)
 	}
 	s.lockWorkspaceLocked(a)
-	m := QueuedMessage{ID: newID(), Text: req.Text, Kind: req.Kind, SenderAgentID: req.SenderAgentID, Status: "pending", CreatedAt: time.Now().UTC()}
-	a.Agent.Queue = append(a.Agent.Queue, m)
+	var m QueuedMessage
+	eventType := "message.queued"
+	if mergeIndex >= 0 {
+		before.queued(s.state, id, mergeIndex)
+		a.Agent.Queue[mergeIndex].Text += "\n\n" + req.Text
+		m = a.Agent.Queue[mergeIndex]
+		eventType = "message.updated"
+	} else {
+		m = QueuedMessage{ID: newID(), Text: req.Text, Kind: req.Kind, SenderAgentID: req.SenderAgentID, Status: "pending", CreatedAt: time.Now().UTC()}
+		a.Agent.Queue = append(a.Agent.Queue, m)
+	}
 	a.Agent.Held = false
-	s.eventLocked(a, "message.queued", m)
+	s.eventLocked(a, eventType, m)
 	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
 	if key != "" {
 		s.state.Receipts[scope] = receipt{hash, id, m.ID}
@@ -683,6 +696,26 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 		return QueuedMessage{}, err
 	}
 	return m, nil
+}
+
+func pendingBotMergeIndex(queue []QueuedMessage, req SubmitMessageRequest) int {
+	if req.Kind != "bot" || strings.TrimSpace(req.SenderAgentID) == "" {
+		return -1
+	}
+	for i := len(queue) - 1; i >= 0; i-- {
+		m := queue[i]
+		if m.Status == "cancelled" {
+			continue
+		}
+		// Never change active/history entries or move new reports ahead of human input.
+		if m.Status != "pending" || m.Kind != "bot" {
+			break
+		}
+		if m.SenderAgentID == req.SenderAgentID {
+			return i
+		}
+	}
+	return -1
 }
 
 func validateSubmitMessage(req SubmitMessageRequest) error {

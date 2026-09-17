@@ -142,8 +142,13 @@ acceptance, without waiting for the receiving agent's response. Delivery errors
 return a nonzero exit status. Like `sessions`, it connects to an existing server
 (default `http://localhost:8281`) and never starts a fallback server.
 
-Each notification gets its own turn in the same FIFO queue as user input. It
-wakes an idle chat, waits behind active/earlier work, and releases held work just
+Notifications use the same queue as user input. When a named sender already has
+an eligible pending bot message, a new nudge appends its text (separated by a blank
+line) to that entry instead of adding another turn. The ID, creation time, and
+queue position stay the same. Merging never crosses a pending human message;
+anonymous, running, and terminal messages are not merged. Combined text is limited
+to 1,048,576 characters; an overflow is rejected without changing the queue.
+A nudge wakes an idle chat, waits behind active work, and releases held work just
 like new user input. It does not interrupt an active turn. Settled chats must be
 restored before receiving notifications. The target UI need not be open, but the
 server must remain running; use `ted serve` for work that must outlive a TUI.
@@ -155,11 +160,18 @@ not authenticated identity. The model receives an explicitly attributed bot
 report rather than a higher-priority instruction or a synthetic tool result.
 
 When delegating asynchronous work, give the child the parent's chat ID (the
-parent's `$TED_THREAD_ID`) and ask it to run `ted nudge` when finished or blocked.
+parent's `$TED_THREAD_ID`) and ask it to run `ted nudge` only when its assigned work
+is fully complete or it is blocked and needs intervention. Send one consolidated
+completion report with results and validation, or one actionable blocker report.
+Do not send routine progress, individual test results, acknowledgments, or repeated
+completion confirmations. After completion, stop until new work is assigned;
+report a blocker again only if it materially changes.
 The child has its **own** `$TED_THREAD_ID`, so pass the destination explicitly in
 its instructions. The parent can finish its turn instead of sleeping and polling;
 the child's notification will start another turn. Completion notifications are
 explicit, not automatic. There is no read/completion guarantee or special priority.
+Reports merged into one entry are delivered together in a single turn. Existing
+backlogs are not retroactively consolidated.
 
 Use a stable `--idempotency-key` when retrying the same notification after an
 uncertain connection failure. Reusing that key with different text, kind, or
