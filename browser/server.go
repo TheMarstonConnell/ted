@@ -88,11 +88,18 @@ func handleConnection(serverCtx context.Context, mgr *manager, conn net.Conn) {
 	stop := context.AfterFunc(serverCtx, func() { _ = conn.Close() })
 	defer stop()
 	_ = conn.SetDeadline(time.Now().Add(15 * time.Minute))
-	dec := json.NewDecoder(bufio.NewReader(io.LimitReader(conn, maxRequestBytes)))
+	reader := bufio.NewReader(conn)
+	initial := &io.LimitedReader{R: reader, N: maxRequestBytes}
+	dec := json.NewDecoder(initial)
 	dec.UseNumber()
 	var req Request
 	if err := dec.Decode(&req); err != nil {
 		_ = json.NewEncoder(conn).Encode(errorResponse(fail("invalid_request", "decode request: %v", err)))
+		return
+	}
+	if normalizeAction(req.Action) == "live" {
+		_ = conn.SetDeadline(time.Time{})
+		serveLive(serverCtx, mgr, conn, req, io.MultiReader(dec.Buffered(), reader))
 		return
 	}
 	// A connection carries one request. If the CLI exits or cancels while an

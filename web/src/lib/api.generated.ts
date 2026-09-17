@@ -111,6 +111,23 @@ export interface paths {
         patch: operations["PatchAgent"];
         trace?: never;
     };
+    "/v1/agents/{agent_id}/browser": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Same-origin live browser WebSocket. Trusted agent identity selects the browser project and thread; no client paths or query parameters. Subscribing does not launch Chrome. Client messages are BrowserLiveCommand; server messages are BrowserLiveEvent. See browser.md. */
+        get: operations["AgentBrowser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/agents/{agent_id}/pull-request": {
         parameters: {
             query?: never;
@@ -320,6 +337,61 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Typed commands only. Each type accepts only its relevant fields (see browser.md). Tab IDs are required except watch, new and initial navigate. Maximum wire message is 64 KiB. */
+        BrowserLiveCommand: {
+            /** @enum {string} */
+            type: "watch" | "new" | "navigate" | "back" | "forward" | "reload" | "close" | "mouse" | "key" | "text" | "release";
+            tab_id?: string;
+            url?: string;
+            /** Format: double */
+            x?: number;
+            /** Format: double */
+            y?: number;
+            /** Format: double */
+            delta_x?: number;
+            /** Format: double */
+            delta_y?: number;
+            /** @enum {string} */
+            event?: "mouseMoved" | "mousePressed" | "mouseReleased" | "mouseWheel" | "keyDown" | "keyUp";
+            /** @enum {string} */
+            button?: "none" | "left" | "middle" | "right";
+            buttons?: number;
+            click_count?: number;
+            key?: string;
+            code?: string;
+            text?: string;
+            modifiers?: number;
+            key_code?: number;
+        };
+        BrowserLiveTab: {
+            id: string;
+            url: string;
+            title: string;
+        };
+        /** @description Ephemeral state, base64 JPEG frame, agent-only activity, or error. selected is agent selection; tab_id is the viewed/event tab. Frames carry CSS viewport width/height. No typed text is emitted in activity. */
+        BrowserLiveEvent: {
+            /** @enum {string} */
+            type: "state" | "frame" | "activity" | "error";
+            tabs?: components["schemas"]["BrowserLiveTab"][];
+            selected?: string;
+            /** @description Authoritative viewer pin in state messages; omitted or empty follows agent selection. */
+            pinned?: string;
+            tab_id?: string;
+            /** @description Base64 JPEG, without a data URL prefix. */
+            data?: string;
+            /** Format: double */
+            width?: number;
+            /** Format: double */
+            height?: number;
+            /** Format: double */
+            x?: number;
+            /** Format: double */
+            y?: number;
+            /** @enum {string} */
+            kind?: "move" | "click" | "fill" | "clear";
+            message?: string;
+            code?: string;
+        };
         Settings: {
             model: string;
             effort: string;
@@ -585,7 +657,7 @@ export interface components {
             created_at: string;
         };
         /** @enum {string} */
-        ErrorCode: "invalid" | "invalid_project" | "invalid_settings" | "invalid_workspace" | "workspace_locked" | "workspace_failed" | "workspace_unavailable" | "invalid_message" | "invalid_limit" | "turn_required" | "not_found" | "conflict" | "project_exists" | "project_not_empty" | "idempotency_conflict" | "not_pending" | "not_running" | "settled" | "cursor_invalid" | "shutting_down" | "storage_failed" | "internal" | "method_not_allowed" | "too_large" | "unsupported_media_type" | "forbidden";
+        ErrorCode: "invalid" | "invalid_project" | "invalid_settings" | "invalid_workspace" | "workspace_locked" | "workspace_failed" | "workspace_unavailable" | "invalid_message" | "invalid_limit" | "turn_required" | "not_found" | "conflict" | "project_exists" | "project_not_empty" | "idempotency_conflict" | "not_pending" | "not_running" | "settled" | "cursor_invalid" | "shutting_down" | "storage_failed" | "browser_unavailable" | "browser_limit" | "internal" | "method_not_allowed" | "too_large" | "unsupported_media_type" | "forbidden";
         Error: {
             error: {
                 code: components["schemas"]["ErrorCode"];
@@ -1784,6 +1856,107 @@ export interface operations {
             };
             /** @description Cursor invalid (ahead of retained stream or outside lifetime). */
             410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body exceeds 2 MiB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Expected application/json. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Service shutting down or durable storage unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    AgentBrowser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Live browser WebSocket established. */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid request: unknown or missing fields, malformed JSON or parameters, bounds violations. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Origin is not this server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Project, agent, message, or event not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description HTTP method not allowed. */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflicting state, idempotency key reused with different payload, or message not pending. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

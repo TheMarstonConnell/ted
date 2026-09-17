@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -23,7 +24,7 @@ func Call(ctx context.Context, req Request) (Response, error) {
 	if err := ctx.Err(); err != nil {
 		return Response{}, err
 	}
-	path, err := socketPath()
+	path, err := socketPathForHome(req.Home)
 	if err != nil {
 		return Response{}, err
 	}
@@ -32,7 +33,7 @@ func Call(ctx context.Context, req Request) (Response, error) {
 		if err := ctx.Err(); err != nil {
 			return Response{}, err
 		}
-		if err := startDaemon(path); err != nil {
+		if err := startDaemonInHome(path, req.Home); err != nil {
 			return Response{}, err
 		}
 		conn, err = waitForDaemon(ctx, path)
@@ -90,12 +91,12 @@ func waitForDaemon(ctx context.Context, path string) (net.Conn, error) {
 	}
 }
 
-func startDaemon(socket string) error {
+func startDaemonInHome(socket, home string) error {
 	exe, err := executablePath()
 	if err != nil {
 		return fmt.Errorf("locate current executable: %w", err)
 	}
-	h, err := Home()
+	h, err := resolveHome(home)
 	if err != nil {
 		return err
 	}
@@ -106,6 +107,12 @@ func startDaemon(socket string) error {
 	}
 	_ = os.Chmod(logPath, 0o600)
 	cmd := exec.Command(exe, "browser", "serve")
+	for _, variable := range os.Environ() {
+		if !strings.HasPrefix(variable, "TED_HOME=") {
+			cmd.Env = append(cmd.Env, variable)
+		}
+	}
+	cmd.Env = append(cmd.Env, "TED_HOME="+h)
 	cmd.Stdin = nil
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile

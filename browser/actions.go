@@ -48,8 +48,12 @@ func (s *session) perform(ctx context.Context, action string, params map[string]
 	case "screenshot":
 		return s.screenshot(ctx, params)
 	case "record-start":
+		s.recordMu.Lock()
+		defer s.recordMu.Unlock()
 		return s.startRecordingLocked(ctx, params)
 	case "record-stop":
+		s.recordMu.Lock()
+		defer s.recordMu.Unlock()
 		return s.stopRecordingLocked(ctx)
 	case "console":
 		return s.readEvents(params, false)
@@ -313,6 +317,8 @@ func (s *session) tabNew(ctx context.Context, params map[string]any) (any, error
 }
 
 func (s *session) tabSelect(params map[string]any) (any, error) {
+	s.structureMu.Lock()
+	defer s.structureMu.Unlock()
 	id, err := stringParam(params, "id", true)
 	if err != nil {
 		return nil, err
@@ -330,10 +336,14 @@ func (s *session) tabClose(ctx context.Context, params map[string]any) (any, err
 	if err != nil {
 		return nil, err
 	}
+	s.recordMu.Lock()
+	defer s.recordMu.Unlock()
+	s.structureMu.Lock()
 	if id == "" {
 		id = string(s.selected)
 	}
 	t := s.tabs[target.ID(id)]
+	s.structureMu.Unlock()
 	if t == nil {
 		return nil, fail("not_found", "tab %q not found in thread session", id)
 	}
@@ -342,7 +352,7 @@ func (s *session) tabClose(ctx context.Context, params map[string]any) (any, err
 			return nil, err
 		}
 	}
-	t.cancel()
+	s.structureMu.Lock()
 	delete(s.tabs, t.id)
 	for i, tid := range s.order {
 		if tid == t.id {
@@ -351,27 +361,38 @@ func (s *session) tabClose(ctx context.Context, params map[string]any) (any, err
 		}
 	}
 	if s.selected == t.id {
+		s.selected = ""
 		if len(s.order) > 0 {
 			s.selected = s.order[len(s.order)-1]
-		} else {
-			s.selected = ""
 		}
 	}
-	return map[string]any{"closed": id, "selected": string(s.selected)}, nil
+	selected := s.selected
+	s.structureMu.Unlock()
+	t.cancel()
+	return map[string]any{"closed": id, "selected": string(selected)}, nil
+}
+
+func (s *session) tabSnapshot() ([]*browserTab, target.ID) {
+	s.structureMu.Lock()
+	defer s.structureMu.Unlock()
+	tabs := make([]*browserTab, 0, len(s.order))
+	for _, id := range s.order {
+		if t := s.tabs[id]; t != nil {
+			tabs = append(tabs, t)
+		}
+	}
+	return tabs, s.selected
 }
 
 func (s *session) listTabs(ctx context.Context) (any, error) {
-	out := make([]map[string]any, 0, len(s.order))
-	for _, id := range s.order {
-		t := s.tabs[id]
-		if t == nil {
-			continue
-		}
+	tabs, selected := s.tabSnapshot()
+	out := make([]map[string]any, 0, len(tabs))
+	for _, t := range tabs {
 		info, err := s.tabInfo(ctx, t)
 		if err != nil {
 			return nil, err
 		}
-		info["selected"] = id == s.selected
+		info["selected"] = t.id == selected
 		out = append(out, info)
 	}
 	return map[string]any{"tabs": out}, nil
@@ -517,6 +538,20 @@ func (s *session) cdpCall(ctx context.Context, params map[string]any) (any, erro
 	})
 	if err := s.runTab(ctx, t, action); err != nil {
 		return nil, err
+	}
+	if !browser && method == "Input.dispatchMouseEvent" {
+		x, xe := numberParam(callParams, "x", math.NaN())
+		y, ye := numberParam(callParams, "y", math.NaN())
+		kind := ""
+		switch callParams["type"] {
+		case "mouseMoved":
+			kind = "move"
+		case "mousePressed":
+			kind = "click"
+		}
+		if kind != "" && xe == nil && ye == nil && !math.IsNaN(x) && !math.IsNaN(y) && !math.IsInf(x, 0) && !math.IsInf(y, 0) {
+			t.activity(kind, x, y)
+		}
 	}
 	return map[string]any{"method": method, "result": result}, nil
 }

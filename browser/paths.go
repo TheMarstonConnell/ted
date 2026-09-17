@@ -17,8 +17,13 @@ var threadPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 // Home returns TED_HOME, defaulting to ~/.ted, as an absolute canonical-ish
 // path. The directory is created with private permissions.
-func Home() (string, error) {
-	h := strings.TrimSpace(os.Getenv("TED_HOME"))
+func Home() (string, error) { return resolveHome("") }
+
+func resolveHome(override string) (string, error) {
+	h := strings.TrimSpace(override)
+	if h == "" {
+		h = strings.TrimSpace(os.Getenv("TED_HOME"))
+	}
 	if h == "" {
 		user, err := os.UserHomeDir()
 		if err != nil {
@@ -128,8 +133,10 @@ func projectKey(root string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-func socketPath() (string, error) {
-	h, err := Home()
+func socketPath() (string, error) { return socketPathForHome("") }
+
+func socketPathForHome(home string) (string, error) {
+	h, err := resolveHome(home)
 	if err != nil {
 		return "", err
 	}

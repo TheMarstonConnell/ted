@@ -203,3 +203,12 @@ embedded spec. The HTTP adapter actually uses those generated routes and validat
 requests against that same document. Shared WebSocket payload schemas are kept
 in the contract and validated at runtime. No public client SDK is generated yet;
 the TUI currently uses a small handwritten wire adapter.
+
+## Live browser
+
+`GET /v1/agents/{agent_id}/browser` is a dedicated same-origin WebSocket for
+viewing and interacting with the agent’s shared browser. It does not start
+Chrome on subscription or pause the agent. The server resolves the trusted
+project/thread identity, including managed-worktree agents. See the
+[browser protocol](../api/browser.md) for typed commands, frames, activity,
+security, limits, and reconnect behavior.

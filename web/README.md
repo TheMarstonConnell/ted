@@ -354,3 +354,54 @@ to its results. To also retain workflow video:
 TED_WEB_RECORD=1 npm run test:e2e -- --grep "plain interface"
 # Artifacts: web/test-results/ (when viewed from the repository root)
 ```
+
+## Shared live browser
+
+The chat header’s **Browser** toggle opens an interactive viewer alongside chat
+on desktop. **Expand browser** uses the available workspace; **Narrow browser**
+restores the split. Below 1024px the panel replaces the transcript and composer
+until closed, preserving the draft. Closing the panel never closes Chrome.
+
+Opening the panel only subscribes to the conversation’s browser. An unused
+session shows **Open browser**, which explicitly creates the first tab. The
+address bar can also open the first page. **Follow agent** tracks Ted’s selected
+tab; choosing a tab pins only your viewer. Back, forward, reload, address entry,
+new and close controls operate on the shared session. There is no takeover or
+pause: human and agent actions can affect the same page concurrently.
+
+Hover, click, drag, double-click, scroll, keyboard input, plain-text paste and
+IME text are forwarded to the viewed tab. Click the page to focus keyboard input;
+**Escape releases focus** back to the panel. Changing tabs, navigating, blurring
+the page/window or closing the panel releases held input. Typing in chat or the
+address bar is never forwarded. The viewport keeps Chrome’s CSS aspect ratio and
+scales pointer coordinates independently of display pixel density. Ted’s
+pointer/click overlay is non-interactive, tab-scoped, cleared on navigation, and
+fades after 1.5 seconds without activity (no fade animation under reduced motion).
+
+The panel has its own same-origin `/v1/agents/:id/browser` WebSocket, independent
+of transcript replay. Disconnects remove the stale interactive frame and retry
+with capped backoff, preserving the follow/pin preference, never replaying input
+or opening a browser. Server errors are visible with an explicit reconnect action.
+There is no clipboard readback, file transfer, browser-native UI or audio stream.
+For architecture, limitations and real-stack validation see
+[Interactive shared browser](../docs/browser-ui.md).
+
+`src/lib/browser-live.test.ts` covers transport, no-start subscriptions,
+reconnection, tab filtering, activity expiry and CSS input scaling.
+`e2e/browser-live.spec.ts` covers the panel, focus and input, follow/pin, navigation,
+errors, responsive layouts, and a deliberately paced demo. Deterministic demo
+frames are labeled as fixtures; they do not claim real daemon integration.
+Capture screenshots and a roughly 20-second video with:
+
+```sh
+cd web
+TED_WEB_RECORD=1 npm run test:e2e -- browser-live.spec.ts
+```
+
+Fixture preview artifacts:
+[Desktop split](../docs/screenshots/live-browser-desktop.png),
+[empty session](../docs/screenshots/live-browser-empty.png),
+[expanded](../docs/screenshots/live-browser-expanded.png),
+[dark](../docs/screenshots/live-browser-dark.png),
+[mobile](../docs/screenshots/live-browser-mobile.png), and
+[17-second walkthrough](../docs/screenshots/web-live-browser-demo.webm).

@@ -2441,6 +2441,7 @@ for (const width of [1440, 390]) {
     await page
       .getByRole("button", { name: "harness /srv/harness", exact: true })
       .click();
+    await expect(page).toHaveURL(/\/agents\/a1$/);
     for (let i = 0; i < 16; i++)
       emit("a1", "message.queued", {
         id: `sticky-${i}`,

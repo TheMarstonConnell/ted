@@ -15,6 +15,8 @@ const defaultTimeout = 30 * time.Second
 // Request is one browser operation. Timeout is encoded as a Go duration (in
 // nanoseconds by encoding/json); a non-positive timeout defaults to 30s.
 type Request struct {
+	// Home overrides TED_HOME for this client connection, not the daemon request.
+	Home    string         `json:"-"`
 	Project string         `json:"project"`
 	Thread  string         `json:"thread"`
 	Action  string         `json:"action"`

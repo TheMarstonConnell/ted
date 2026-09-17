@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,16 +54,44 @@ type recording struct {
 }
 
 func (t *browserTab) handleRecordingEvent(ev any) {
+	switch event := ev.(type) {
+	case *page.EventFrameNavigated:
+		if event.Frame != nil && event.Frame.ParentID == "" {
+			t.activity("clear", 0, 0)
+		}
+		return
+	case *page.EventNavigatedWithinDocument:
+		t.activity("clear", 0, 0)
+		return
+	}
 	frame, ok := ev.(*page.EventScreencastFrame)
 	if !ok {
 		return
 	}
 	// Acknowledgement must not run synchronously in a chromedp listener.
-	go func(id int64) {
+	t.streamAcks.offer(frame.SessionID, func(id int64) {
 		ackCtx, cancel := context.WithTimeout(t.ctx, 2*time.Second)
 		defer cancel()
 		_ = chromedp.Run(ackCtx, page.ScreencastFrameAck(id))
-	}(frame.SessionID)
+	})
+
+	live := LiveEvent{Type: "frame", TabID: string(t.id), Data: frame.Data}
+	offsetTop := 0.0
+	if frame.Metadata != nil {
+		scale := frame.Metadata.PageScaleFactor
+		if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
+			scale = 1
+		}
+		live.Width = frame.Metadata.DeviceWidth / scale
+		live.Height = frame.Metadata.DeviceHeight / scale
+		if offset := frame.Metadata.OffsetTop; offset > 0 && !math.IsNaN(offset) && !math.IsInf(offset, 0) {
+			offsetTop = offset / scale
+		}
+	}
+	t.liveMu.Lock()
+	t.liveFrame = live
+	t.liveOffsetTop = offsetTop
+	t.liveMu.Unlock()
 
 	t.recMu.Lock()
 	defer t.recMu.Unlock()
@@ -139,10 +168,7 @@ func (s *session) startRecordingLocked(ctx context.Context, params map[string]an
 	s.recording = r
 	go r.encodeFrames()
 
-	// Background tabs may acknowledge StartScreencast without producing frames.
-	// Activate this tab before requesting the stream.
-	start := page.StartScreencast().WithFormat(page.ScreencastFormatJpeg).WithQuality(80).WithEveryNthFrame(1)
-	if err := s.runTab(ctx, t, page.BringToFront(), start); err != nil {
+	if err := t.acquireStream(ctx); err != nil {
 		s.detachRecording(r)
 		close(r.stop)
 		_ = r.stdin.Close()
@@ -151,6 +177,15 @@ func (s *session) startRecordingLocked(ctx context.Context, params map[string]an
 		os.Remove(path)
 		return nil, err
 	}
+	// An existing viewer may be watching an idle page with no new CDP frames.
+	t.liveMu.Lock()
+	latest := t.liveFrame.Data
+	t.liveMu.Unlock()
+	r.mu.Lock()
+	if r.latestFrame == "" {
+		r.latestFrame = latest
+	}
+	r.mu.Unlock()
 	return map[string]any{"recording": true, "path": path, "fps": fps, "silent": true}, nil
 }
 
@@ -220,9 +255,7 @@ func (s *session) stopRecordingLocked(ctx context.Context) (any, error) {
 	if r == nil {
 		return nil, fail("not_found", "no active recording")
 	}
-	// Stop production first, then detach and close the channel while holding
-	// recMu so a listener cannot race with close.
-	stopErr := s.runTab(ctx, r.tab, page.StopScreencast())
+	stopErr := r.tab.releaseStream(ctx)
 	r.tab.recMu.Lock()
 	if r.tab.rec == r {
 		r.tab.rec = nil

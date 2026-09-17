@@ -269,3 +269,22 @@
     -webkit-text-fill-color: currentColor;
   }
 }
+
+/* Agent-only telemetry never intercepts human input; idle fades in 1.5 seconds. */
+@keyframes browser-agent-idle {
+  0%,
+  65% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.browser-agent-cursor {
+  animation: browser-agent-idle 1.5s linear forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .browser-agent-cursor {
+    animation: none;
+  }
+}

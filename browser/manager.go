@@ -45,6 +45,10 @@ type session struct {
 	isolated bool
 
 	mu             sync.Mutex
+	structureMu    sync.Mutex
+	recordMu       sync.Mutex
+	closed         bool
+	parentCtx      context.Context
 	ownerCtx       context.Context // hidden owner of an isolated BrowserContext
 	ownerCancel    context.CancelFunc
 	browserContext cdp.BrowserContextID
@@ -60,11 +64,20 @@ type browserTab struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	eventsMu sync.Mutex
-	console  []any
-	errors   []any
-	recMu    sync.Mutex
-	rec      *recording
+	eventsMu        sync.Mutex
+	console         []any
+	errors          []any
+	recMu           sync.Mutex
+	rec             *recording
+	streamMu        sync.Mutex
+	streamUsers     int
+	streamAcks      screencastAcks
+	liveMu          sync.Mutex
+	liveFrame       LiveEvent
+	liveOffsetTop   float64
+	liveActivity    LiveEvent
+	liveActivitySeq uint64
+	liveActivityAt  time.Time
 }
 
 func newManager(ctx context.Context, home string) *manager {
@@ -134,9 +147,8 @@ func (m *manager) dispatch(serverCtx context.Context, req Request) (any, error) 
 	if err != nil {
 		return nil, err
 	}
-	// Serializing operations within a thread keeps tab selection, generated
-	// refs, recording state, and form interactions deterministic. The session
-	// contexts are parents of opCtx and are never cancelled by a request.
+	// Agent operations serialize; live input only takes structural locks.
+	// Request cancellation never tears down durable tab contexts.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if opCtx.Err() != nil {
@@ -201,7 +213,9 @@ func (m *manager) closeSession(key, thread string) map[string]any {
 		return map[string]any{"closed": false, "tabs": 0}
 	}
 	s.mu.Lock()
+	s.structureMu.Lock()
 	n := len(s.tabs)
+	s.structureMu.Unlock()
 	s.writeTrace("session-close", time.Now(), nil)
 	s.closeLocked()
 	s.mu.Unlock()
@@ -273,7 +287,7 @@ func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated
 	if err != nil {
 		return nil, err
 	}
-	s := &session{project: p, thread: thread, dir: dir, isolated: isolated, tabs: make(map[target.ID]*browserTab)}
+	s := &session{project: p, thread: thread, dir: dir, isolated: isolated, parentCtx: p.browserCtx, tabs: make(map[target.ID]*browserTab)}
 
 	if isolated {
 		// Create a window explicitly: recent Chrome versions reject the first
@@ -354,18 +368,23 @@ func (p *projectBrowser) close() {
 }
 
 func (s *session) newTab(ctx context.Context, url string) (*browserTab, error) {
+	return s.createTab(ctx, url, true)
+}
+
+func (s *session) createTab(ctx context.Context, url string, selectTab bool) (*browserTab, error) {
 	var tabCtx context.Context
 	var cancel context.CancelFunc
 	if s.isolated {
-		tabCtx, cancel = chromedp.NewContext(s.project.browserCtx, chromedp.WithExistingBrowserContext(s.browserContext))
+		tabCtx, cancel = chromedp.NewContext(s.parentCtx, chromedp.WithExistingBrowserContext(s.browserContext))
 	} else {
-		tabCtx, cancel = chromedp.NewContext(s.project.browserCtx)
+		tabCtx, cancel = chromedp.NewContext(s.parentCtx)
 	}
 	t := &browserTab{ctx: tabCtx, cancel: cancel}
-	t.installListeners()
 	if err := initializeContext(tabCtx, ctx, cancel, runtime.Enable(), log.Enable()); err != nil {
 		return nil, fail("browser_unavailable", "initialize tab: %v", err)
 	}
+	t.id = chromedp.FromContext(tabCtx).Target.TargetID
+	t.installListeners()
 	runCtx, runCancel := linkedContext(tabCtx, ctx)
 	defer runCancel()
 	var actions []chromedp.Action
@@ -379,10 +398,17 @@ func (s *session) newTab(ctx context.Context, url string) (*browserTab, error) {
 		}
 		return nil, fail("action_failed", "create tab: %v", err)
 	}
-	t.id = chromedp.FromContext(tabCtx).Target.TargetID
+	s.structureMu.Lock()
+	defer s.structureMu.Unlock()
+	if s.closed {
+		cancel()
+		return nil, fail("not_found", "session is closed")
+	}
 	s.tabs[t.id] = t
 	s.order = append(s.order, t.id)
-	s.selected = t.id
+	if selectTab || s.selected == "" {
+		s.selected = t.id
+	}
 	return t, nil
 }
 
@@ -442,6 +468,8 @@ func appendBounded(in []any, v any) []any {
 }
 
 func (s *session) selectedTab() (*browserTab, error) {
+	s.structureMu.Lock()
+	defer s.structureMu.Unlock()
 	t := s.tabs[s.selected]
 	if t == nil {
 		return nil, fail("not_found", "no selected tab")
@@ -450,17 +478,23 @@ func (s *session) selectedTab() (*browserTab, error) {
 }
 
 func (s *session) closeLocked() {
+	s.recordMu.Lock()
+	defer s.recordMu.Unlock()
 	if s.recording != nil {
 		_, _ = s.stopRecordingLocked(context.Background())
 	}
-	for _, id := range s.order {
-		if t := s.tabs[id]; t != nil {
-			t.cancel()
-		}
-	}
+	s.structureMu.Lock()
+	s.closed = true
+	tabs := s.tabs
 	s.tabs = make(map[target.ID]*browserTab)
 	s.order = nil
 	s.selected = ""
+	s.structureMu.Unlock()
+	for _, t := range tabs {
+		if t != nil {
+			t.cancel()
+		}
+	}
 	if s.ownerCancel != nil {
 		s.ownerCancel()
 		s.ownerCancel = nil

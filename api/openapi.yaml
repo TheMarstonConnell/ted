@@ -385,6 +385,32 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/PatchAgentRequest'
+  /v1/agents/{agent_id}/browser:
+    get:
+      operationId: AgentBrowser
+      description: Same-origin live browser WebSocket. Trusted agent identity selects the browser project and thread; no client paths or query parameters. Subscribing does not launch Chrome. Client messages are BrowserLiveCommand; server messages are BrowserLiveEvent. See browser.md.
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema: *id010
+      responses:
+        '101':
+          description: Live browser WebSocket established.
+        '400': *id001
+        '403':
+          description: Origin is not this server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404': *id002
+        '405': *id003
+        '409': *id004
+        '413': *id006
+        '415': *id007
+        '500': *id008
+        '503': *id009
   /v1/agents/{agent_id}/pull-request:
     get:
       operationId: GetAgentPullRequest
@@ -771,6 +797,127 @@ paths:
                 $ref: '#/components/schemas/Error'
 components:
   schemas:
+    BrowserLiveCommand:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: Typed commands only. Each type accepts only its relevant fields (see browser.md). Tab IDs are required except watch, new and initial navigate. Maximum wire message is 64 KiB.
+      properties:
+        type:
+          type: string
+          enum: [watch, new, navigate, back, forward, reload, close, mouse, key, text, release]
+        tab_id:
+          type: string
+          maxLength: 256
+        url:
+          type: string
+          minLength: 1
+          maxLength: 8192
+        x:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100000
+        y:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100000
+        delta_x:
+          type: number
+          format: double
+          minimum: -100000
+          maximum: 100000
+        delta_y:
+          type: number
+          format: double
+          minimum: -100000
+          maximum: 100000
+        event:
+          type: string
+          enum: [mouseMoved, mousePressed, mouseReleased, mouseWheel, keyDown, keyUp]
+        button:
+          type: string
+          enum: [none, left, middle, right]
+        buttons:
+          type: integer
+          minimum: 0
+          maximum: 7
+        click_count:
+          type: integer
+          minimum: 0
+          maximum: 3
+        key:
+          type: string
+          minLength: 1
+          maxLength: 128
+        code:
+          type: string
+          maxLength: 128
+        text:
+          type: string
+          maxLength: 16384
+        modifiers:
+          type: integer
+          minimum: 0
+          maximum: 15
+        key_code:
+          type: integer
+          minimum: 0
+          maximum: 65535
+    BrowserLiveTab:
+      type: object
+      additionalProperties: false
+      required: [id, url, title]
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+        title:
+          type: string
+    BrowserLiveEvent:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: Ephemeral state, base64 JPEG frame, agent-only activity, or error. selected is agent selection; tab_id is the viewed/event tab. Frames carry CSS viewport width/height. No typed text is emitted in activity.
+      properties:
+        type:
+          type: string
+          enum: [state, frame, activity, error]
+        tabs:
+          type: array
+          items:
+            $ref: '#/components/schemas/BrowserLiveTab'
+        selected:
+          type: string
+        pinned:
+          type: string
+          description: Authoritative viewer pin in state messages; omitted or empty follows agent selection.
+        tab_id:
+          type: string
+        data:
+          type: string
+          description: Base64 JPEG, without a data URL prefix.
+        width:
+          type: number
+          format: double
+        height:
+          type: number
+          format: double
+        x:
+          type: number
+          format: double
+        y:
+          type: number
+          format: double
+        kind:
+          type: string
+          enum: [move, click, fill, clear]
+        message:
+          type: string
+        code:
+          type: string
     Settings:
       type: object
       additionalProperties: false
@@ -1419,6 +1566,8 @@ components:
       - cursor_invalid
       - shutting_down
       - storage_failed
+      - browser_unavailable
+      - browser_limit
       - internal
       - method_not_allowed
       - too_large

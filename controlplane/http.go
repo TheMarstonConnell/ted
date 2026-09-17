@@ -27,8 +27,10 @@ const maxHTTPBody = 2 << 20
 // httpAPI adapts generated transport types to the durable runtime. The generated
 // ServerInterface and HandlerWithOptions are the only HTTP route implementation.
 type httpAPI struct {
-	service *Service
-	spec    *openapi3.T
+	service        *Service
+	spec           *openapi3.T
+	browserConnect browserLiveConnector
+	browserViewers browserViewers
 }
 
 var _ api.ServerInterface = (*httpAPI)(nil)
@@ -36,6 +38,10 @@ var _ api.ServerInterface = (*httpAPI)(nil)
 // NewHandler exposes the versioned, spec-validated HTTP and WebSocket API.
 // Authentication/TLS, if needed, belong at the caller's trusted reverse proxy.
 func NewHandler(s *Service) http.Handler {
+	return newHandler(s, openBrowserLive)
+}
+
+func newHandler(s *Service, connect browserLiveConnector) http.Handler {
 	spec, err := api.GetSwagger()
 	if err != nil {
 		panic(fmt.Errorf("load embedded API spec: %w", err))
@@ -47,7 +53,7 @@ func NewHandler(s *Service) http.Handler {
 	if err != nil {
 		panic(err)
 	}
-	h := &httpAPI{service: s, spec: spec}
+	h := &httpAPI{service: s, spec: spec, browserConnect: connect}
 	generated := api.HandlerWithOptions(h, api.StdHTTPServerOptions{ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) { writeProblem(w, 400, "invalid", err.Error()) }})
 	return validateHTTP(router, generated)
 }
