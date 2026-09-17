@@ -625,6 +625,8 @@ func (s *Service) Submit(id, text, key string) (QueuedMessage, error) {
 }
 
 func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string) (QueuedMessage, error) {
+	// Image decoding must not block unrelated chats.
+	validationErr := validateSubmitMessage(req)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.writableLocked(); err != nil {
@@ -634,7 +636,7 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 	if err != nil {
 		return QueuedMessage{}, err
 	}
-	if err = validateSubmitMessage(req); err != nil {
+	if err = validationErr; err != nil {
 		return QueuedMessage{}, err
 	}
 	if req.Kind == "user" {
