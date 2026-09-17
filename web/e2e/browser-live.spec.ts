@@ -430,6 +430,7 @@ for (const width of [320, 390, 768]) {
 }
 
 test("live browser preview demo", async ({ page }, testInfo) => {
+  test.skip(process.env.TED_WEB_RECORD !== "1", "Opt-in visual evidence capture");
   const live = await liveBrowser(page);
   live.emit("a1", "output", {
     ResponseType: "agent",

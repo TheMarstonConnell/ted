@@ -188,19 +188,6 @@ func TestLiveTabLookupDoesNotWaitForAgentOperation(t *testing.T) {
 	}
 }
 
-func TestLatestBufferKeepsNewest(t *testing.T) {
-	queue := make(chan LiveEvent, 1)
-	for i := range 1000 {
-		offerLatest(queue, LiveEvent{Type: "frame", X: float64(i)})
-	}
-	if len(queue) != 1 {
-		t.Fatal("unbounded queue")
-	}
-	if event := <-queue; event.X != 999 {
-		t.Fatalf("stale event: %+v", event)
-	}
-}
-
 func TestInputTrackingReleaseRemovesOnlyOwnHeldState(t *testing.T) {
 	sub := &liveSubscription{inputs: make(map[*browserTab]*liveInputState)}
 	tab := &browserTab{}

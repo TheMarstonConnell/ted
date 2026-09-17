@@ -1,7 +1,6 @@
 import type { Schema } from "./api";
 
-// Dedicated live-browser protocol, derived from the generated API schema and
-// deliberately separate from transcript replay. Runtime data is still validated.
+// Dedicated protocol, separate from transcript replay.
 export type LiveTab = Schema["BrowserLiveTab"];
 export type LiveCommand = Schema["BrowserLiveCommand"];
 type LiveEvent = Schema["BrowserLiveEvent"];
@@ -166,7 +165,7 @@ export class LiveBrowserConnection {
     socket.onmessage = (event) => {
       if (socket !== this.socket || this.stopped) return;
       try {
-        this.receive(JSON.parse(String(event.data)));
+        this.receive(JSON.parse(String(event.data)) as LiveEvent);
       } catch {
         this.update({
           error: "Invalid browser update. Reconnect to try again.",
@@ -265,26 +264,17 @@ export class LiveBrowserConnection {
     }
     return this.send(command);
   };
-  private receive(event: Record<string, unknown>) {
+  private receive(event: LiveEvent) {
     switch (event.type) {
       case "state": {
-        const tabs = Array.isArray(event.tabs) ? (event.tabs as LiveTab[]) : [];
-        if (
-          !tabs.every(
-            (tab) =>
-              typeof tab.id === "string" &&
-              typeof tab.url === "string" &&
-              typeof tab.title === "string",
-          )
-        )
-          throw new Error("Invalid tabs");
-        const viewed = typeof event.tab_id === "string" ? event.tab_id : "";
+        const tabs = event.tabs ?? [];
+        const viewed = event.tab_id ?? "";
         const viewChanged = viewed !== this.state.viewed;
         const changed =
           viewChanged ||
           tabs.find((t) => t.id === viewed)?.url !==
             this.state.tabs.find((t) => t.id === viewed)?.url;
-        const pinned = typeof event.pinned === "string" ? event.pinned : "";
+        const pinned = event.pinned ?? "";
         const pinClosed = !!pinned && !tabs.some((tab) => tab.id === pinned);
         if (changed && tabs.some((tab) => tab.id === this.state.viewed))
           this.send({ type: "release", tab_id: this.state.viewed });
@@ -294,7 +284,7 @@ export class LiveBrowserConnection {
         this.update({
           tabs,
           viewed,
-          selected: typeof event.selected === "string" ? event.selected : "",
+          selected: event.selected ?? "",
           initialized: true,
           ...(changed ? { activity: null } : {}),
           ...(viewChanged ? { frame: null } : {}),
@@ -305,18 +295,6 @@ export class LiveBrowserConnection {
         break;
       }
       case "frame":
-        if (
-          typeof event.data !== "string" ||
-          typeof event.width !== "number" ||
-          typeof event.height !== "number" ||
-          !Number.isFinite(event.width) ||
-          !Number.isFinite(event.height) ||
-          event.width <= 0 ||
-          event.height <= 0
-        )
-          throw new Error("Invalid frame");
-        if (typeof event.tab_id !== "string" || !event.tab_id)
-          throw new Error("Invalid frame tab");
         if (event.tab_id !== this.state.viewed || !this.state.viewed) {
           this.pendingFrame = event as LiveFrame;
           return;
@@ -330,17 +308,10 @@ export class LiveBrowserConnection {
           this.update({ activity: null });
           return;
         }
-        event = { x: 0, y: 0, ...event };
-        if (
-          !["move", "click", "fill"].includes(String(event.kind)) ||
-          typeof event.x !== "number" ||
-          typeof event.y !== "number" ||
-          !Number.isFinite(event.x) ||
-          !Number.isFinite(event.y)
-        )
-          return;
         this.update({
           activity: {
+            x: 0,
+            y: 0,
             ...event,
             sequence: ++this.activitySequence,
           } as LiveActivity,
@@ -349,10 +320,7 @@ export class LiveBrowserConnection {
         break;
       case "error":
         this.update({
-          error:
-            typeof event.message === "string"
-              ? event.message
-              : "Browser request failed.",
+          error: event.message ?? "Browser request failed.",
         });
         break;
       default:

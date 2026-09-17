@@ -165,10 +165,10 @@ describe("dedicated live-browser transport", () => {
     vi.advanceTimersByTime(20000);
     expect(sockets).toHaveLength(2);
   });
-  it("surfaces errors, protects oversized pastes and handles invalid frames", () => {
+  it("surfaces errors, protects oversized pastes and handles malformed JSON", () => {
     const { connection, socket } = setup();
     socket.event(state());
-    socket.event({ ...frame(), width: 0 });
+    socket.onmessage?.({ data: "{" });
     expect(connection.snapshot().error).toContain("Invalid browser update");
     socket.event({ type: "error", message: "Navigation denied" });
     expect(connection.snapshot().error).toBe("Navigation denied");
