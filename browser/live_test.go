@@ -644,3 +644,34 @@ func TestCloseSessionUsesOriginalAliasAfterProjectMove(t *testing.T) {
 		t.Fatal("cleanup crossed project ownership")
 	}
 }
+
+func TestCloseSessionDoesNotRetargetReplacedDirectory(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "project")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	mgr := newManager(context.Background(), t.TempDir())
+	defer mgr.close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	viewer := liveTestClient(t, ctx, mgr, Request{Project: root, Thread: "same-thread"})
+	defer viewer.Close()
+	receiveLive(t, viewer, func(event LiveEvent) bool { return event.Type == "state" })
+	p := mgr.project(root, projectKey(root))
+	s := &session{project: p, thread: "same-thread", dir: t.TempDir(), tabs: make(map[target.ID]*browserTab)}
+	p.mu.Lock()
+	p.sessions[s.thread] = s
+	p.mu.Unlock()
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root, []byte("not a directory"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.dispatch(ctx, Request{Project: root, Thread: s.thread, Action: "session-close"}); err != nil {
+		t.Fatal(err)
+	}
+	if !s.closed {
+		t.Fatal("cleanup used replacement file's parent instead of original session identity")
+	}
+}

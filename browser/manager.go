@@ -170,18 +170,20 @@ func (m *manager) resolveProject(dir string, closing bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	root, err := ProjectRoot(dir)
-	if err != nil {
-		if !closing {
-			return "", err
-		}
+	if closing {
 		m.mu.Lock()
 		cached := m.projectAliases[alias]
 		m.mu.Unlock()
 		if cached != "" {
 			return cached, nil
 		}
-		return alias, nil
+	}
+	root, err := ProjectRoot(dir)
+	if err != nil {
+		if closing {
+			return alias, nil
+		}
+		return "", err
 	}
 	m.mu.Lock()
 	m.projectAliases[alias] = root
