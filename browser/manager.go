@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,11 +18,25 @@ import (
 )
 
 type manager struct {
-	ctx      context.Context
-	home     string
-	mu       sync.Mutex
-	projects map[string]*projectBrowser
-	traceMu  sync.Mutex
+	ctx            context.Context
+	home           string
+	mu             sync.Mutex
+	projects       map[string]*projectBrowser
+	projectAliases map[string]string
+	lifecycles     map[sessionIdentity]*sessionLifecycle
+	nextLive       uint64
+	traceMu        sync.Mutex
+}
+
+type sessionIdentity struct {
+	project string
+	thread  string
+}
+
+type sessionLifecycle struct {
+	gate sync.RWMutex
+	live map[uint64]context.CancelFunc
+	refs int
 }
 
 type projectBrowser struct {
@@ -45,9 +60,19 @@ type session struct {
 	isolated bool
 
 	mu             sync.Mutex
+	structureMu    sync.Mutex
+	targetMu       sync.Mutex
+	recordMu       sync.Mutex
+	closed         bool
+	parentCtx      context.Context
 	ownerCtx       context.Context // hidden owner of an isolated BrowserContext
 	ownerCancel    context.CancelFunc
 	browserContext cdp.BrowserContextID
+	ownerTarget    target.ID
+	targetCancel   context.CancelFunc
+	targetDone     chan struct{}
+	targetWake     chan struct{}
+	ownedTargets   map[target.ID]struct{}
 	tabs           map[target.ID]*browserTab
 	order          []target.ID
 	selected       target.ID
@@ -60,15 +85,71 @@ type browserTab struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	eventsMu sync.Mutex
-	console  []any
-	errors   []any
-	recMu    sync.Mutex
-	rec      *recording
+	eventsMu        sync.Mutex
+	console         []any
+	errors          []any
+	recMu           sync.Mutex
+	rec             *recording
+	streamMu        sync.Mutex
+	streamUsers     int
+	streamAcks      screencastAcks
+	liveMu          sync.Mutex
+	liveFrame       LiveEvent
+	liveOffsetTop   float64
+	liveActivity    LiveEvent
+	liveActivitySeq uint64
+	liveActivityAt  time.Time
 }
 
 func newManager(ctx context.Context, home string) *manager {
-	return &manager{ctx: ctx, home: home, projects: make(map[string]*projectBrowser)}
+	return &manager{ctx: ctx, home: home, projects: make(map[string]*projectBrowser), projectAliases: make(map[string]string), lifecycles: make(map[sessionIdentity]*sessionLifecycle)}
+}
+
+func (m *manager) retainSessionLifecycle(project, thread string) (*sessionLifecycle, func()) {
+	m.mu.Lock()
+	identity := sessionIdentity{project: project, thread: thread}
+	lifecycle := m.lifecycles[identity]
+	if lifecycle == nil {
+		lifecycle = &sessionLifecycle{live: make(map[uint64]context.CancelFunc)}
+		m.lifecycles[identity] = lifecycle
+	}
+	lifecycle.refs++
+	m.mu.Unlock()
+	return lifecycle, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		lifecycle.refs--
+		if lifecycle.refs == 0 {
+			delete(m.lifecycles, identity)
+		}
+	}
+}
+
+func (m *manager) registerLive(project, thread string, cancel context.CancelFunc) (*sessionLifecycle, func()) {
+	lifecycle, release := m.retainSessionLifecycle(project, thread)
+	m.mu.Lock()
+	m.nextLive++
+	token := m.nextLive
+	lifecycle.live[token] = cancel
+	m.mu.Unlock()
+	return lifecycle, func() {
+		m.mu.Lock()
+		delete(lifecycle.live, token)
+		m.mu.Unlock()
+		release()
+	}
+}
+
+func (m *manager) cancelLive(lifecycle *sessionLifecycle) {
+	m.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(lifecycle.live))
+	for _, cancel := range lifecycle.live {
+		cancels = append(cancels, cancel)
+	}
+	m.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
 }
 
 func (m *manager) close() {
@@ -82,6 +163,33 @@ func (m *manager) close() {
 	for _, p := range projects {
 		p.close()
 	}
+}
+
+// Cleanup keeps the original browser identity even after a project is moved.
+func (m *manager) resolveProject(dir string, closing bool) (string, error) {
+	alias, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	if closing {
+		m.mu.Lock()
+		cached := m.projectAliases[alias]
+		m.mu.Unlock()
+		if cached != "" {
+			return cached, nil
+		}
+	}
+	root, err := ProjectRoot(dir)
+	if err != nil {
+		if closing {
+			return alias, nil
+		}
+		return "", err
+	}
+	m.mu.Lock()
+	m.projectAliases[alias] = root
+	m.mu.Unlock()
+	return root, nil
 }
 
 func (m *manager) dispatch(serverCtx context.Context, req Request) (any, error) {
@@ -98,18 +206,27 @@ func (m *manager) dispatch(serverCtx context.Context, req Request) (any, error) 
 	if err := validateThread(req.Thread); err != nil {
 		return nil, err
 	}
-	root, err := ProjectRoot(req.Project)
+	root, err := m.resolveProject(req.Project, action == "session-close")
 	if err != nil {
 		return nil, fail("invalid_project", "%v", err)
 	}
 	key := projectKey(root)
 	if action == "session-close" {
-		return m.closeSession(key, req.Thread), nil
+		lifecycle, release := m.retainSessionLifecycle(key, req.Thread)
+		defer release()
+		m.cancelLive(lifecycle)
+		lifecycle.gate.Lock()
+		defer lifecycle.gate.Unlock()
+		return m.closeSession(key, req.Thread)
 	}
 	if !knownAction(action) {
 		return nil, fail("unknown_action", "unknown browser action %q", req.Action)
 	}
 
+	lifecycle, release := m.retainSessionLifecycle(key, req.Thread)
+	defer release()
+	lifecycle.gate.RLock()
+	defer lifecycle.gate.RUnlock()
 	p := m.project(root, key)
 	timeout := req.Timeout
 	if timeout <= 0 {
@@ -130,13 +247,12 @@ func (m *manager) dispatch(serverCtx context.Context, req Request) (any, error) 
 	if err != nil {
 		return nil, err
 	}
-	s, err := p.getSession(opCtx, req.Thread, isolated)
+	s, _, err := p.getSession(opCtx, req.Thread, isolated)
 	if err != nil {
 		return nil, err
 	}
-	// Serializing operations within a thread keeps tab selection, generated
-	// refs, recording state, and form interactions deterministic. The session
-	// contexts are parents of opCtx and are never cancelled by a request.
+	// Agent operations serialize; live input only takes structural locks.
+	// Request cancellation never tears down durable tab contexts.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if opCtx.Err() != nil {
@@ -184,28 +300,35 @@ func (m *manager) status() map[string]any {
 	return map[string]any{"daemon": true, "projects": items}
 }
 
-func (m *manager) closeSession(key, thread string) map[string]any {
+func (m *manager) closeSession(key, thread string) (map[string]any, error) {
 	m.mu.Lock()
 	p := m.projects[key]
 	m.mu.Unlock()
 	if p == nil {
-		return map[string]any{"closed": false, "tabs": 0}
+		return map[string]any{"closed": false, "tabs": 0}, nil
 	}
 	p.mu.Lock()
 	s := p.sessions[thread]
-	if s != nil {
+	p.mu.Unlock()
+	if s == nil {
+		return map[string]any{"closed": false, "tabs": 0}, nil
+	}
+	s.mu.Lock()
+	s.structureMu.Lock()
+	n := len(s.tabs)
+	s.structureMu.Unlock()
+	s.writeTrace("session-close", time.Now(), nil)
+	err := s.closeLocked()
+	s.mu.Unlock()
+	if err != nil {
+		return nil, fail("action_failed", "close browser session: %v", err)
+	}
+	p.mu.Lock()
+	if p.sessions[thread] == s {
 		delete(p.sessions, thread)
 	}
 	p.mu.Unlock()
-	if s == nil {
-		return map[string]any{"closed": false, "tabs": 0}
-	}
-	s.mu.Lock()
-	n := len(s.tabs)
-	s.writeTrace("session-close", time.Now(), nil)
-	s.closeLocked()
-	s.mu.Unlock()
-	return map[string]any{"closed": true, "tabs": n}
+	return map[string]any{"closed": true, "tabs": n}, nil
 }
 
 func (p *projectBrowser) ensureStarted(ctx context.Context) error {
@@ -258,22 +381,25 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 	return nil
 }
 
-func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated bool) (*session, error) {
+func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated bool) (*session, bool, error) {
 	// Keep the project lock through initialization so concurrent first requests
 	// for one thread cannot observe a half-created session.
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if s := p.sessions[thread]; s != nil {
 		if s.isolated != isolated && isolated {
-			return nil, fail("conflict", "thread session already exists without isolation")
+			return nil, false, fail("conflict", "thread session already exists without isolation")
 		}
-		return s, nil
+		return s, false, nil
 	}
 	dir, err := threadDir(p.manager.home, thread)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	s := &session{project: p, thread: thread, dir: dir, isolated: isolated, tabs: make(map[target.ID]*browserTab)}
+	s := &session{
+		project: p, thread: thread, dir: dir, isolated: isolated, parentCtx: p.browserCtx,
+		tabs: make(map[target.ID]*browserTab), ownedTargets: make(map[target.ID]struct{}),
+	}
 
 	if isolated {
 		// Create a window explicitly: recent Chrome versions reject the first
@@ -282,7 +408,7 @@ func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated
 		executor := cdp.WithExecutor(ctx, browser)
 		id, err := target.CreateBrowserContext().WithDisposeOnDetach(true).Do(executor)
 		if err != nil {
-			return nil, fail("browser_unavailable", "create isolated browser context: %v", err)
+			return nil, false, fail("browser_unavailable", "create isolated browser context: %v", err)
 		}
 		dispose := func() {
 			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -292,25 +418,30 @@ func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated
 		ownerID, err := target.CreateTarget("about:blank").WithBrowserContextID(id).WithNewWindow(true).Do(executor)
 		if err != nil {
 			dispose()
-			return nil, fail("browser_unavailable", "create isolated window: %v", err)
+			return nil, false, fail("browser_unavailable", "create isolated window: %v", err)
 		}
 		ownerCtx, ownerCancel := chromedp.NewContext(p.browserCtx, chromedp.WithTargetID(ownerID))
 		if err := initializeContext(ownerCtx, ctx, ownerCancel); err != nil {
 			ownerCancel()
 			dispose()
-			return nil, fail("browser_unavailable", "attach isolated window: %v", err)
+			return nil, false, fail("browser_unavailable", "attach isolated window: %v", err)
 		}
 		s.ownerCtx = ownerCtx
 		s.ownerCancel = func() { ownerCancel(); dispose() }
+		s.ownerTarget = ownerID
 		s.browserContext = id
 	}
 
+	if err := s.startTargetTracking(ctx); err != nil {
+		s.closeLocked()
+		return nil, false, err
+	}
 	if _, err := s.newTab(ctx, "about:blank"); err != nil {
 		s.closeLocked()
-		return nil, err
+		return nil, false, err
 	}
 	p.sessions[thread] = s
-	return s, nil
+	return s, true, nil
 }
 
 func linkedContext(parent, request context.Context) (context.Context, context.CancelFunc) {
@@ -354,18 +485,32 @@ func (p *projectBrowser) close() {
 }
 
 func (s *session) newTab(ctx context.Context, url string) (*browserTab, error) {
+	return s.createTab(ctx, url, true)
+}
+
+func (s *session) createTab(ctx context.Context, url string, selectTab bool) (*browserTab, error) {
+	s.targetMu.Lock()
+	defer s.targetMu.Unlock()
+	// Failed cleanup sessions stay registered until retry succeeds.
+	s.structureMu.Lock()
+	closed := s.closed
+	s.structureMu.Unlock()
+	if closed {
+		return nil, fail("not_found", "session is closed")
+	}
 	var tabCtx context.Context
 	var cancel context.CancelFunc
 	if s.isolated {
-		tabCtx, cancel = chromedp.NewContext(s.project.browserCtx, chromedp.WithExistingBrowserContext(s.browserContext))
+		tabCtx, cancel = chromedp.NewContext(s.parentCtx, chromedp.WithExistingBrowserContext(s.browserContext))
 	} else {
-		tabCtx, cancel = chromedp.NewContext(s.project.browserCtx)
+		tabCtx, cancel = chromedp.NewContext(s.parentCtx)
 	}
 	t := &browserTab{ctx: tabCtx, cancel: cancel}
-	t.installListeners()
 	if err := initializeContext(tabCtx, ctx, cancel, runtime.Enable(), log.Enable()); err != nil {
 		return nil, fail("browser_unavailable", "initialize tab: %v", err)
 	}
+	t.id = chromedp.FromContext(tabCtx).Target.TargetID
+	t.installListeners()
 	runCtx, runCancel := linkedContext(tabCtx, ctx)
 	defer runCancel()
 	var actions []chromedp.Action
@@ -379,10 +524,20 @@ func (s *session) newTab(ctx context.Context, url string) (*browserTab, error) {
 		}
 		return nil, fail("action_failed", "create tab: %v", err)
 	}
-	t.id = chromedp.FromContext(tabCtx).Target.TargetID
+	s.structureMu.Lock()
+	if s.closed {
+		s.structureMu.Unlock()
+		cancel()
+		return nil, fail("not_found", "session is closed")
+	}
 	s.tabs[t.id] = t
+	s.ownedTargets[t.id] = struct{}{}
 	s.order = append(s.order, t.id)
-	s.selected = t.id
+	if selectTab || s.selected == "" {
+		s.selected = t.id
+	}
+	s.structureMu.Unlock()
+	s.wakeTargetTracking()
 	return t, nil
 }
 
@@ -442,6 +597,8 @@ func appendBounded(in []any, v any) []any {
 }
 
 func (s *session) selectedTab() (*browserTab, error) {
+	s.structureMu.Lock()
+	defer s.structureMu.Unlock()
 	t := s.tabs[s.selected]
 	if t == nil {
 		return nil, fail("not_found", "no selected tab")
@@ -449,22 +606,44 @@ func (s *session) selectedTab() (*browserTab, error) {
 	return t, nil
 }
 
-func (s *session) closeLocked() {
+func (s *session) closeLocked() error {
+	s.recordMu.Lock()
+	var recordingErr error
 	if s.recording != nil {
-		_, _ = s.stopRecordingLocked(context.Background())
+		_, recordingErr = s.stopRecordingLocked(context.Background())
 	}
-	for _, id := range s.order {
-		if t := s.tabs[id]; t != nil {
-			t.cancel()
-		}
+	s.recordMu.Unlock()
+
+	s.structureMu.Lock()
+	s.closed = true
+	tabs := s.tabs
+	owned := make(map[target.ID]struct{}, len(s.ownedTargets))
+	for id := range s.ownedTargets {
+		owned[id] = struct{}{}
 	}
 	s.tabs = make(map[target.ID]*browserTab)
 	s.order = nil
 	s.selected = ""
+	targetCancel, targetDone := s.targetCancel, s.targetDone
+	s.targetCancel, s.targetDone = nil, nil
+	s.structureMu.Unlock()
+
+	if targetCancel != nil {
+		targetCancel()
+	}
+	if targetDone != nil {
+		<-targetDone
+	}
+	for _, t := range tabs {
+		if t != nil {
+			t.cancel()
+		}
+	}
 	if s.ownerCancel != nil {
 		s.ownerCancel()
 		s.ownerCancel = nil
 	}
+	return errors.Join(recordingErr, s.closeOwnedTargets(owned))
 }
 
 func boolParam(params map[string]any, key string, fallback bool) (bool, error) {

@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,6 +37,23 @@ type wsSubscription struct {
 	wake      <-chan struct{}
 }
 
+type publicOriginKey struct{}
+
+// WithPublicOrigin pins browser Origin validation to an operator-configured origin.
+// Forwarded headers are never used to establish trust.
+func WithPublicOrigin(next http.Handler, origin string) (http.Handler, error) {
+	if origin == "" {
+		return next, nil
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || strings.ContainsAny(origin, "?#") || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return nil, fmt.Errorf("public origin must be an http(s) origin without path, credentials, query or fragment")
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), publicOriginKey{}, u)))
+	}), nil
+}
+
 func sameOrigin(r *http.Request) bool {
 	origins := r.Header.Values("Origin")
 	if len(origins) == 0 {
@@ -45,14 +63,18 @@ func sameOrigin(r *http.Request) bool {
 		return false
 	}
 	u, err := url.Parse(origins[0])
-	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
+	if err != nil || u.User != nil || strings.ContainsAny(origins[0], "?#") || u.Path != "" {
 		return false
 	}
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
 	}
-	return u.Scheme == scheme && strings.EqualFold(u.Host, r.Host)
+	host := r.Host
+	if public, ok := r.Context().Value(publicOriginKey{}).(*url.URL); ok {
+		scheme, host = public.Scheme, public.Host
+	}
+	return u.Scheme == scheme && strings.EqualFold(u.Host, host)
 }
 
 func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {

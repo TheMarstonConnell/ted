@@ -143,7 +143,7 @@ func TestCloseSessionIfRunningDoesNotCreateOrStart(t *testing.T) {
 	t.Setenv("TED_HOME", home)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err := CloseSessionIfRunning(ctx, t.TempDir(), "thread-1"); err != nil {
+	if err := CloseSessionIfRunning(ctx, home, t.TempDir(), "thread-1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(home); !os.IsNotExist(err) {
@@ -155,13 +155,18 @@ func TestCloseSessionIfRunningUsesExistingDaemon(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "ted")
 	t.Setenv("TED_HOME", home)
 	cancel, done := startTestServer(t)
+	processHome := filepath.Join(t.TempDir(), "process-home")
+	t.Setenv("TED_HOME", processHome)
 	ctx, stop := context.WithTimeout(context.Background(), 3*time.Second)
 	defer stop()
-	if err := CloseSessionIfRunning(ctx, t.TempDir(), "thread-1"); err != nil {
+	if err := CloseSessionIfRunning(ctx, home, t.TempDir(), "thread-1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "browser", "projects")); !os.IsNotExist(err) {
 		t.Fatalf("close of absent session launched Chrome/project: %v", err)
+	}
+	if _, err := os.Stat(processHome); !os.IsNotExist(err) {
+		t.Fatalf("cleanup used process TED_HOME: %v", err)
 	}
 	cancel()
 	<-done

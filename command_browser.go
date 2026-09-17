@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -40,9 +41,14 @@ func newBrowserCommand(call browserCaller) *cobra.Command {
 		if dir == "" {
 			dir = os.Getenv("TED_PROJECT_ROOT")
 		}
-		canonical, err := browser.ProjectRoot(dir)
+		absolute, err := filepath.Abs(dir)
 		if err != nil {
 			return err
+		}
+		if action != "session-close" {
+			if _, err := browser.ProjectRoot(absolute); err != nil {
+				return err
+			}
 		}
 		id := thread
 		if id == "" {
@@ -57,7 +63,7 @@ func newBrowserCommand(call browserCaller) *cobra.Command {
 		if isolated {
 			params["isolated"] = true
 		}
-		response, err := call(cmd.Context(), browser.Request{Project: canonical, Thread: id, Action: action, Params: params, Timeout: timeout})
+		response, err := call(cmd.Context(), browser.Request{Project: absolute, Thread: id, Action: action, Params: params, Timeout: timeout})
 		if err != nil {
 			return err
 		}

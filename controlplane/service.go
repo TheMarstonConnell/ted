@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/TheMarstonConnell/ted/agent"
+	"github.com/TheMarstonConnell/ted/browser"
 	"go.uber.org/zap"
 )
 
@@ -30,22 +31,25 @@ type runningTurn struct {
 }
 
 type Service struct {
-	mu           sync.RWMutex
-	dir          string
-	logger       *zap.Logger
-	providers    []agent.Provider
-	catalog      *agent.Agent
-	state        diskState
-	running      map[string]*runningTurn
-	instances    map[string]*agent.Agent
-	changed      chan struct{}
-	closing      bool
-	storageErr   error
-	workers      sync.WaitGroup
-	releaseLock  func() error
-	save         func(string, diskState) error
-	store        *sqliteStore
-	pullRequests *pullRequestResolver
+	mu                sync.RWMutex
+	dir               string
+	logger            *zap.Logger
+	providers         []agent.Provider
+	catalog           *agent.Agent
+	state             diskState
+	running           map[string]*runningTurn
+	instances         map[string]*agent.Agent
+	browserClose      browserSessionCloser
+	browserClients    map[string]map[uint64]context.CancelFunc
+	nextBrowserClient uint64
+	changed           chan struct{}
+	closing           bool
+	storageErr        error
+	workers           sync.WaitGroup
+	releaseLock       func() error
+	save              func(string, diskState) error
+	store             *sqliteStore
+	pullRequests      *pullRequestResolver
 }
 
 func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Service, error) {
@@ -68,7 +72,7 @@ func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Se
 		unlock()
 		return nil, err
 	}
-	s := &Service{dir: dir, logger: logger, providers: append([]agent.Provider(nil), providers...), catalog: agent.NewAgent(logger, providers), state: state, running: map[string]*runningTurn{}, instances: map[string]*agent.Agent{}, changed: make(chan struct{}), releaseLock: unlock, store: store, pullRequests: newPullRequestResolver()}
+	s := &Service{dir: dir, logger: logger, providers: append([]agent.Provider(nil), providers...), catalog: agent.NewAgent(logger, providers), state: state, running: map[string]*runningTurn{}, instances: map[string]*agent.Agent{}, browserClose: browser.CloseSessionIfRunning, browserClients: map[string]map[uint64]context.CancelFunc{}, changed: make(chan struct{}), releaseLock: unlock, store: store, pullRequests: newPullRequestResolver()}
 	// A durable "running" record is evidence of interrupted work, never a
 	// request to repeat tools. Even graceful shutdown follows this recovery rule.
 	recovery := newStateChanges()
@@ -161,6 +165,9 @@ func (s *Service) failStorageLocked(err error) error {
 	for _, r := range s.running {
 		r.shutdown = true
 		r.cancel()
+	}
+	for id := range s.browserClients {
+		s.cancelBrowserViewersLocked(id)
 	}
 	s.notifyLocked()
 	return problem(503, "storage_failed", "could not persist operation: "+err.Error())
@@ -326,7 +333,8 @@ func (s *Service) DeleteProject(id string) error {
 	if err := s.writableLocked(); err != nil {
 		return err
 	}
-	if _, ok := s.state.Projects[id]; !ok {
+	project, ok := s.state.Projects[id]
+	if !ok {
 		return problem(404, "not_found", "project not found")
 	}
 	for agentID, a := range s.state.Agents {
@@ -342,6 +350,13 @@ func (s *Service) DeleteProject(id string) error {
 		// Cancellation is asynchronous; workers still need their final records.
 		if s.running[agentID] != nil {
 			return problem(409, "project_not_empty", "settled agents are still stopping; try deleting the project again shortly")
+		}
+	}
+	for agentID, a := range s.state.Agents {
+		if a.Agent.ProjectID == id {
+			if err := s.closeBrowserSessionLocked(agentID, project.Root); err != nil {
+				return problem(503, "browser_unavailable", "could not close project browser sessions")
+			}
 		}
 	}
 	before := newStateChanges()
@@ -841,36 +856,47 @@ func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 			targets = append(targets, children[targets[i].Agent.ID]...)
 		}
 	}
-	changed := targets[:0]
+	changed := make([]*storedAgent, 0, len(targets))
 	for _, target := range targets {
 		if target.Agent.Settled != settled {
 			changed = append(changed, target)
 		}
 	}
-	if len(changed) == 0 {
-		return cloneAgent(a.Agent), nil
-	}
-	before := newStateChanges()
-	for _, target := range changed {
-		before.agent(s.state, target.Agent.ID)
-		target.Agent.Settled = settled
-		target.Agent.Held = true
-		if settled && s.running[target.Agent.ID] != nil {
-			target.Agent.State = "stopping"
+	if len(changed) > 0 {
+		before := newStateChanges()
+		for _, target := range changed {
+			before.agent(s.state, target.Agent.ID)
+			target.Agent.Settled = settled
+			target.Agent.Held = true
+			if settled && s.running[target.Agent.ID] != nil {
+				target.Agent.State = "stopping"
+			}
+			s.eventLocked(target, "agent.updated", s.summaryLocked(target))
 		}
-		s.eventLocked(target, "agent.updated", s.summaryLocked(target))
-	}
-	if err = s.commitLocked(before); err != nil {
-		return Agent{}, err
+		if err = s.commitLocked(before); err != nil {
+			return Agent{}, err
+		}
 	}
 	if settled {
-		for _, target := range changed {
+		cleanupFailed := false
+		for _, target := range targets {
 			if r := s.running[target.Agent.ID]; r != nil {
 				r.stopped = true
 				r.cancel()
-			} else if instance := s.instances[target.Agent.ID]; instance != nil {
-				_ = instance.Close()
 			}
+			if instance := s.instances[target.Agent.ID]; instance != nil {
+				s.cancelBrowserViewersLocked(target.Agent.ID)
+				if err := instance.Close(); err != nil {
+					cleanupFailed = true
+				}
+			} else if project, ok := s.state.Projects[target.Agent.ProjectID]; ok {
+				if err := s.closeBrowserSessionLocked(target.Agent.ID, project.Root); err != nil {
+					cleanupFailed = true
+				}
+			}
+		}
+		if cleanupFailed {
+			return Agent{}, problem(503, "browser_unavailable", "agent settled but browser cleanup failed; retry settling")
 		}
 	}
 	return cloneAgent(a.Agent), nil
@@ -1163,6 +1189,9 @@ func (s *Service) BeginShutdown() error {
 		r.shutdown = true
 		r.cancel()
 	}
+	for id := range s.browserClients {
+		s.cancelBrowserViewersLocked(id)
+	}
 	s.notifyLocked()
 	return err
 }
@@ -1170,21 +1199,56 @@ func (s *Service) BeginShutdown() error {
 func (s *Service) Close(ctx context.Context) error {
 	_ = s.BeginShutdown()
 	done := make(chan struct{})
+	var cleanupErr error
 	go func() {
 		s.workers.Wait()
 		s.mu.Lock()
-		instances := make([]*agent.Agent, 0, len(s.instances))
-		for _, instance := range s.instances {
-			instances = append(instances, instance)
+		instances := make(map[string]*agent.Agent, len(s.instances))
+		for id, instance := range s.instances {
+			instances[id] = instance
 		}
+		viewerIdentities := make(map[string]string, len(s.state.Agents))
+		for id := range s.state.Agents {
+			if instances[id] != nil {
+				continue
+			}
+			if a := s.state.Agents[id]; a != nil {
+				if project, ok := s.state.Projects[a.Agent.ProjectID]; ok {
+					viewerIdentities[id] = project.Root
+				}
+			}
+		}
+		closer := s.browserClose
+		home := filepath.Join(s.dir, "runtime")
 		s.instances = map[string]*agent.Agent{}
 		s.mu.Unlock()
 		var cleanup sync.WaitGroup
+		failures := make(chan error, len(instances)+len(viewerIdentities))
 		for _, instance := range instances {
 			cleanup.Add(1)
-			go func(a *agent.Agent) { defer cleanup.Done(); _ = a.Close() }(instance)
+			go func(instance *agent.Agent) {
+				defer cleanup.Done()
+				if err := instance.Close(); err != nil {
+					failures <- err
+				}
+			}(instance)
+		}
+		for id, project := range viewerIdentities {
+			cleanup.Add(1)
+			go func(id, project string) {
+				defer cleanup.Done()
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if err := closer(cleanupCtx, home, project, id); err != nil {
+					failures <- err
+				}
+			}(id, project)
 		}
 		cleanup.Wait()
+		close(failures)
+		for err := range failures {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
 		close(done)
 	}()
 	select {
@@ -1202,6 +1266,6 @@ func (s *Service) Close(ctx context.Context) error {
 		err = errors.Join(err, s.releaseLock())
 		s.releaseLock = nil
 	}
-	return errors.Join(s.storageErr, err)
+	return errors.Join(cleanupErr, s.storageErr, err)
 }
 func (s *Service) String() string { return fmt.Sprintf("control plane (%s)", s.dir) }

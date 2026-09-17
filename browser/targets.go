@@ -7,6 +7,9 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/input"
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -166,7 +169,22 @@ func (s *session) click(ctx context.Context, params map[string]any) (any, error)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.runTab(ctx, t, chromedp.Click(sel, chromedp.ByQuery)); err != nil {
+	click := chromedp.QueryAfter(sel, func(ctx context.Context, _ runtime.ExecutionContextID, nodes ...*cdp.Node) error {
+		if len(nodes) == 0 {
+			return fail("target_missing", "target detached before click")
+		}
+		var x, y float64
+		capture := func(p *input.DispatchMouseEventParams) *input.DispatchMouseEventParams {
+			x, y = p.X, p.Y
+			return p
+		}
+		if err := chromedp.MouseClickNode(nodes[0], capture).Do(ctx); err != nil {
+			return err
+		}
+		t.activity("click", x, y)
+		return nil
+	}, chromedp.ByQuery, chromedp.NodeVisible)
+	if err := s.runTab(ctx, t, click); err != nil {
 		return nil, err
 	}
 	return map[string]any{"clicked": true}, nil
@@ -204,24 +222,30 @@ func (s *session) setControlValue(ctx context.Context, params map[string]any, se
 		return nil, err
 	}
 	payload, _ := json.Marshal(map[string]any{"selector": sel, "value": value, "selectOnly": selectOnly})
-	script := `(()=>{const q=` + string(payload) + `,e=document.querySelector(q.selector);if(!e)return 'missing';
- if(q.selectOnly&&e.tagName!=='SELECT')return 'not_select';
- if(q.selectOnly&&![...e.options].some(o=>o.value===q.value&&!o.disabled))return 'option_missing';
- if(!q.selectOnly&&!['INPUT','TEXTAREA'].includes(e.tagName)&&!e.isContentEditable)return 'not_editable';
- if(e.disabled||e.readOnly)return 'blocked';e.focus();
+	script := `(()=>{const q=` + string(payload) + `,e=document.querySelector(q.selector);if(!e)return {state:'missing'};
+ if(q.selectOnly&&e.tagName!=='SELECT')return {state:'not_select'};
+ if(q.selectOnly&&![...e.options].some(o=>o.value===q.value&&!o.disabled))return {state:'option_missing'};
+ if(!q.selectOnly&&!['INPUT','TEXTAREA'].includes(e.tagName)&&!e.isContentEditable)return {state:'not_editable'};
+ if(e.disabled||e.readOnly)return {state:'blocked'};
+ e.focus();const r=e.getBoundingClientRect(),v=window.visualViewport,x=r.left+r.width/2-(v?.offsetLeft||0),y=r.top+r.height/2-(v?.offsetTop||0);
  if(e.isContentEditable)e.textContent=q.value;
  else{const proto=e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:e.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype;const setter=Object.getOwnPropertyDescriptor(proto,'value').set;setter.call(e,q.value);}
- e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return 'ok';})()`
-	var state string
-	if err := s.runTab(ctx, t, chromedp.Evaluate(script, &state)); err != nil {
+ e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return {state:'ok',x,y};})()`
+	var result struct {
+		State string  `json:"state"`
+		X     float64 `json:"x"`
+		Y     float64 `json:"y"`
+	}
+	if err := s.runTab(ctx, t, chromedp.Evaluate(script, &result)); err != nil {
 		return nil, err
 	}
-	switch state {
+	switch result.State {
 	case "ok":
+		t.activity("fill", result.X, result.Y)
 		return map[string]any{"updated": true}, nil
 	case "missing":
 		return nil, fail("target_missing", "target detached before update")
 	default:
-		return nil, fail("invalid_target", "cannot update control: %s", state)
+		return nil, fail("invalid_target", "cannot update control: %s", result.State)
 	}
 }

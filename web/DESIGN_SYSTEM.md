@@ -175,3 +175,18 @@ shimmering Running label and eight-second border beam. Both use the row's text
 color, preserving selected-row contrast in light and dark themes without changing
 row geometry or covering the separate settle action. Reduced motion uses a static
 border and solid text; forced-color mode uses a system-colored solid border.
+
+## Live browser workspace
+
+The chat-header Browser toggle opens a neutral, border-separated desktop split.
+The panel expands within the workspace, not over the whole application; below
+1024px it replaces chat content while preserving drafts. Closing restores toggle
+focus. Tabs and browser navigation use shared compact controls with the existing
+48px touch-target override. The address controls wrap rather than compress targets.
+The URL row also holds expand/narrow and close; it stays together when history
+controls wrap. There is no separate panel title bar or shared-control notice.
+Interaction never requires takeover.
+Frames retain their source aspect ratio with letterboxing; only the actual frame
+rectangle accepts page input. Keyboard focus is visibly outlined and accompanied
+by an Escape-to-release hint. Ted’s labeled pointer is pointer-events-none, with a
+1.5-second idle fade and no animation when reduced motion is requested.

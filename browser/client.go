@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -20,25 +21,9 @@ func Call(ctx context.Context, req Request) (Response, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := ctx.Err(); err != nil {
-		return Response{}, err
-	}
-	path, err := socketPath()
+	conn, err := connectDaemon(ctx, req.Home)
 	if err != nil {
 		return Response{}, err
-	}
-	conn, err := dialDaemon(ctx, path)
-	if err != nil {
-		if err := ctx.Err(); err != nil {
-			return Response{}, err
-		}
-		if err := startDaemon(path); err != nil {
-			return Response{}, err
-		}
-		conn, err = waitForDaemon(ctx, path)
-		if err != nil {
-			return Response{}, fmt.Errorf("connect to browser daemon: %w", err)
-		}
 	}
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
@@ -61,6 +46,31 @@ func Call(ctx context.Context, req Request) (Response, error) {
 		return Response{}, fmt.Errorf("read browser response: %w", err)
 	}
 	return resp, nil
+}
+
+func connectDaemon(ctx context.Context, home string) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path, err := socketPathForHome(home)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := dialDaemon(ctx, path)
+	if err == nil {
+		return conn, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := startDaemonInHome(home); err != nil {
+		return nil, err
+	}
+	conn, err = waitForDaemon(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("connect to browser daemon: %w", err)
+	}
+	return conn, nil
 }
 
 func dialDaemon(ctx context.Context, path string) (net.Conn, error) {
@@ -90,12 +100,12 @@ func waitForDaemon(ctx context.Context, path string) (net.Conn, error) {
 	}
 }
 
-func startDaemon(socket string) error {
+func startDaemonInHome(home string) error {
 	exe, err := executablePath()
 	if err != nil {
 		return fmt.Errorf("locate current executable: %w", err)
 	}
-	h, err := Home()
+	h, err := resolveHome(home)
 	if err != nil {
 		return err
 	}
@@ -106,6 +116,12 @@ func startDaemon(socket string) error {
 	}
 	_ = os.Chmod(logPath, 0o600)
 	cmd := exec.Command(exe, "browser", "serve")
+	for _, variable := range os.Environ() {
+		if !strings.HasPrefix(variable, "TED_HOME=") {
+			cmd.Env = append(cmd.Env, variable)
+		}
+	}
+	cmd.Env = append(cmd.Env, "TED_HOME="+h)
 	cmd.Stdin = nil
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -119,18 +135,18 @@ func startDaemon(socket string) error {
 	return nil
 }
 
-// CloseSessionIfRunning asks an already-running daemon to close all tabs owned
-// by thread. It never starts the daemon and never creates TED_HOME; a missing
+// CloseSessionIfRunning asks an already-running daemon in home to close all tabs
+// owned by thread. It never starts the daemon or creates home; a missing
 // or refused daemon socket is treated as success. This makes it safe to call
 // unconditionally from host/agent cleanup paths.
-func CloseSessionIfRunning(ctx context.Context, project, thread string) error {
+func CloseSessionIfRunning(ctx context.Context, home, project, thread string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := validateThread(thread); err != nil {
 		return err
 	}
-	path, err := existingSocketPath()
+	path, err := existingSocketPath(home)
 	if err != nil {
 		return err
 	}

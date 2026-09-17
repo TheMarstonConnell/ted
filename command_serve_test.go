@@ -53,7 +53,7 @@ func TestServeShutdownClosesWebSocketsAndReleasesStore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- serveControlPlane(ctx, listener, service) }()
+	go func() { done <- serveControlPlane(ctx, listener, service, "") }()
 	base := "http://" + listener.Addr().String()
 	if err := checkServer(ctx, base); err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func TestServeBindFailureBeforeCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	err = runServe(context.Background(), listener.Addr().String(), t.TempDir())
+	err = runServe(context.Background(), listener.Addr().String(), t.TempDir(), "")
 	if err == nil || !strings.Contains(err.Error(), "listen") {
 		t.Fatal(err)
 	}

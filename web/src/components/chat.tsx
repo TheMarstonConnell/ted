@@ -15,6 +15,7 @@ import Markdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Archive,
+  Globe,
   ArrowUp,
   Bot,
   ChevronRight,
@@ -73,6 +74,7 @@ import {
 } from "@/lib/store";
 import { ErrorNotice, Loading, ModelFields } from "./common";
 import { ChatImage } from "./chat-image";
+import { BrowserPanel } from "./browser-live";
 import {
   WorkspaceFields,
   WorkspaceIndicator,
@@ -500,6 +502,12 @@ export function Chat() {
   );
 }
 
+function subscribeBrowserSplit(listener: () => void) {
+  const media = window.matchMedia("(min-width: 1024px)");
+  media.addEventListener("change", listener);
+  return () => media.removeEventListener("change", listener);
+}
+
 function ChatWorkspace() {
   const { agentId = "" } = useParams();
   const {
@@ -541,6 +549,14 @@ function ChatWorkspace() {
     scrollIntentVersion.current++;
   }, []);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const browserToggleRef = useRef<HTMLButtonElement>(null);
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const [browserExpanded, setBrowserExpanded] = useState(false);
+  const desktopBrowserSplit = useSyncExternalStore(
+    subscribeBrowserSplit,
+    () => window.matchMedia("(min-width: 1024px)").matches,
+    () => false,
+  );
   const [editCandidate, setEditCandidate] = useState<QueueMessage | null>(null);
   const error = useSyncExternalStore(
     subscribeComposer,
@@ -558,7 +574,9 @@ function ChatWorkspace() {
     agentId,
     responseCursor,
     agent?.read_cursor || 0,
-    !!ready && status === "live",
+    !!ready &&
+      status === "live" &&
+      (!browserOpen || (!browserExpanded && desktopBrowserSplit)),
   );
   const queue = agent?.queue || [];
   const pending = queue.filter((m) => m.status === "pending");
@@ -820,6 +838,15 @@ function ChatWorkspace() {
           </h1>
         </div>
         <Button
+          ref={browserToggleRef}
+          variant={browserOpen ? "secondary" : "ghost"}
+          aria-pressed={browserOpen}
+          onClick={() => setBrowserOpen(!browserOpen)}
+        >
+          <Globe />
+          Browser
+        </Button>
+        <Button
           variant="ghost"
           size="icon"
           aria-label={agent.settled ? "Restore agent" : "Settle agent"}
@@ -832,356 +859,387 @@ function ChatWorkspace() {
           <Archive />
         </Button>
       </header>
-      <div className="flex min-h-0 flex-1 flex-col">
-        <Transcript
-          items={items}
-          ready={!!ready}
-          state={agent.state}
-          onScrollIntent={onScrollIntent}
-        />
-        <div className="workspace-scroll-gutter scrollbar-thin max-h-full shrink-0 overflow-y-auto">
-          <div className="mx-auto w-full max-w-chat space-y-4 px-4 pb-4 pt-2 md:px-8">
-            <ErrorNotice error={error} />
-            {workspace && workspace.status !== "draft" && (
-              <WorkspaceSetupBlock workspace={workspace} />
-            )}
-            {notice && (
-              <Alert>
-                <AlertDescription>{notice}</AlertDescription>
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => setNotice(null)}
-                >
-                  Dismiss
-                </Button>
-              </Alert>
-            )}
-            {agent.settled && (
-              <p className="text-xs text-muted-foreground">
-                This chat is settled. Sending a message restores it
-                {pending.length ? " and releases queued work in order" : ""}.
-              </p>
-            )}
-            {(pending.length > 0 || agent.held) && (
-              <div
-                role="region"
-                aria-label="Pending messages"
-                className="max-h-40 scroll-pt-8 overflow-y-auto rounded-lg border border-border bg-muted"
-              >
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <div
+          className={cn(
+            "min-h-0 min-w-0 flex-1 flex-col",
+            browserOpen
+              ? browserExpanded
+                ? "hidden"
+                : "hidden lg:flex"
+              : "flex",
+          )}
+        >
+          <Transcript
+            items={items}
+            ready={!!ready}
+            state={agent.state}
+            onScrollIntent={onScrollIntent}
+          />
+          <div className="workspace-scroll-gutter scrollbar-thin max-h-full shrink-0 overflow-y-auto">
+            <div className="mx-auto w-full max-w-chat space-y-4 px-4 pb-4 pt-2 md:px-8">
+              <ErrorNotice error={error} />
+              {workspace && workspace.status !== "draft" && (
+                <WorkspaceSetupBlock workspace={workspace} />
+              )}
+              {notice && (
+                <Alert>
+                  <AlertDescription>{notice}</AlertDescription>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setNotice(null)}
+                  >
+                    Dismiss
+                  </Button>
+                </Alert>
+              )}
+              {agent.settled && (
+                <p className="text-xs text-muted-foreground">
+                  This chat is settled. Sending a message restores it
+                  {pending.length ? " and releases queued work in order" : ""}.
+                </p>
+              )}
+              {(pending.length > 0 || agent.held) && (
                 <div
-                  data-slot="pending-queue-header"
-                  className="sticky top-0 z-10 flex items-center justify-between bg-muted px-4 py-2 text-xs"
+                  role="region"
+                  aria-label="Pending messages"
+                  className="max-h-40 scroll-pt-8 overflow-y-auto rounded-lg border border-border bg-muted"
                 >
-                  <span className="font-medium">
-                    {agent.held ? "Queue held" : "Up next"} · {pending.length}{" "}
-                    pending
-                  </span>
-                </div>
-                {pending.length > 0 && (
-                  <div className="px-4 pb-2">
-                    {pending.map((m) => (
-                      <div
-                        key={m.id}
-                        data-pending-message-id={m.id}
-                        className="mt-2 flex items-center gap-2 border-t border-border pt-2 text-xs first:mt-0"
-                      >
-                        <span
-                          className="flex min-w-0 flex-1 items-center gap-2"
-                          title={m.text}
+                  <div
+                    data-slot="pending-queue-header"
+                    className="sticky top-0 z-10 flex items-center justify-between bg-muted px-4 py-2 text-xs"
+                  >
+                    <span className="font-medium">
+                      {agent.held ? "Queue held" : "Up next"} · {pending.length}{" "}
+                      pending
+                    </span>
+                  </div>
+                  {pending.length > 0 && (
+                    <div className="px-4 pb-2">
+                      {pending.map((m) => (
+                        <div
+                          key={m.id}
+                          data-pending-message-id={m.id}
+                          className="mt-2 flex items-center gap-2 border-t border-border pt-2 text-xs first:mt-0"
                         >
-                          {m.kind === "bot" && (
-                            <Bot
-                              className="size-4 shrink-0"
-                              aria-hidden="true"
-                            />
-                          )}
-                          <span className="min-w-0 truncate">
-                            {m.kind === "bot"
-                              ? `Bot notification${
-                                  m.sender_agent_id
-                                    ? ` from ${botSourceLabel(m.sender_agent_id)}`
-                                    : ""
-                                }: ${m.text}`
-                              : m.text || "Images"}
-                            {!!m.attachments?.length &&
-                              ` · ${m.attachments.length} image${m.attachments.length === 1 ? "" : "s"}`}
+                          <span
+                            className="flex min-w-0 flex-1 items-center gap-2"
+                            title={m.text}
+                          >
+                            {m.kind === "bot" && (
+                              <Bot
+                                className="size-4 shrink-0"
+                                aria-hidden="true"
+                              />
+                            )}
+                            <span className="min-w-0 truncate">
+                              {m.kind === "bot"
+                                ? `Bot notification${
+                                    m.sender_agent_id
+                                      ? ` from ${botSourceLabel(m.sender_agent_id)}`
+                                      : ""
+                                  }: ${m.text}`
+                                : m.text || "Images"}
+                              {!!m.attachments?.length &&
+                                ` · ${m.attachments.length} image${m.attachments.length === 1 ? "" : "s"}`}
+                            </span>
                           </span>
-                        </span>
-                        {m.kind !== "bot" && (
+                          {m.kind !== "bot" && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="xs"
+                              title="Move this message back to the composer"
+                              disabled={
+                                busy || reading || !ready || status !== "live"
+                              }
+                              onClick={() => requestEdit(m)}
+                            >
+                              Edit
+                            </Button>
+                          )}
                           <Button
-                            type="button"
                             variant="ghost"
                             size="xs"
-                            title="Move this message back to the composer"
-                            disabled={
-                              busy || reading || !ready || status !== "live"
+                            disabled={busy}
+                            onClick={() =>
+                              void action(() => control.cancel(agentId, m.id))
                             }
-                            onClick={() => requestEdit(m)}
                           >
-                            Edit
+                            Cancel
                           </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="xs"
-                          disabled={busy}
-                          onClick={() =>
-                            void action(() => control.cancel(agentId, m.id))
-                          }
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            {!!outgoing[agentId]?.length && (
-              <section
-                ref={outgoingViewport}
-                aria-label="Outgoing messages"
-                className="workspace-scroll-gutter scrollbar-thin max-h-40 space-y-6 overflow-y-auto"
-              >
-                {outgoing[agentId].map((message) => (
-                  <ConversationMessage
-                    key={message.key}
-                    text={message.text}
-                    attachments={message.attachments}
-                    user
-                  />
-                ))}
-              </section>
-            )}
-            <form
-              onSubmit={submit}
-              aria-label="Message composer"
-              onPaste={(event) => {
-                const files = Array.from(event.clipboardData.files);
-                if (files.length) {
-                  event.preventDefault();
-                  void attachFiles(files);
-                }
-              }}
-              onDragOver={(event) => {
-                if (event.dataTransfer.types.includes("Files"))
-                  event.preventDefault();
-              }}
-              onDrop={(event) => {
-                if (event.dataTransfer.types.includes("Files")) {
-                  event.preventDefault();
-                  void attachFiles(Array.from(event.dataTransfer.files));
-                }
-              }}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept={IMAGE_ACCEPT}
-                multiple
-                hidden
-                aria-label="Attach images"
-                onChange={(event) => {
-                  const files = Array.from(event.target.files || []);
-                  event.target.value = "";
-                  void attachFiles(files);
-                }}
-              />
-              <InputGroup
-                aria-label="Message input"
-                className="rounded-xl has-disabled:opacity-100 has-disabled:bg-transparent dark:has-disabled:bg-input/30"
-              >
-                {reading && (
-                  <span
-                    role="status"
-                    className="px-4 pt-4 text-xs text-muted-foreground md:px-inset"
-                  >
-                    Reading images…
-                  </span>
-                )}
-                <DraftImages
-                  agentId={agentId}
-                  disabled={editingDraft || reading}
-                  inputRef={composerRef}
-                />
-                <ComposerInput
-                  agentId={agentId}
-                  inputRef={composerRef}
-                  readOnly={editingDraft}
-                  settled={agent.settled}
-                />
-                <InputGroupAddon
-                  align="block-end"
-                  className="items-end px-4 pb-4 pt-2 md:px-inset md:pb-inset"
-                  aria-label="Composer toolbar"
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {!!outgoing[agentId]?.length && (
+                <section
+                  ref={outgoingViewport}
+                  aria-label="Outgoing messages"
+                  className="workspace-scroll-gutter scrollbar-thin max-h-40 space-y-6 overflow-y-auto"
                 >
-                  <div
-                    role="group"
-                    aria-label="Chat settings"
-                    className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
-                  >
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label="Attach screenshots"
-                      title="Attach screenshots (PNG, JPEG, WebP, GIF; up to 4, 5 MiB each)"
-                      disabled={editingDraft || reading || workspaceBlocked}
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <Paperclip />
-                    </Button>
-                    <ModelFields
-                      compact
-                      disabled={
-                        busy ||
-                        reading ||
-                        !ready ||
-                        status !== "live" ||
-                        workspaceBlocked
-                      }
-                      model={agent.settings.model}
-                      effort={agent.settings.effort}
-                      onChange={(model, effort) =>
-                        void action(() =>
-                          control.settings(agentId, { model, effort }),
-                        )
-                      }
+                  {outgoing[agentId].map((message) => (
+                    <ConversationMessage
+                      key={message.key}
+                      text={message.text}
+                      attachments={message.attachments}
+                      user
                     />
-                  </div>
-                  <div
-                    role="group"
-                    aria-label="Message actions"
-                    className="ml-auto flex shrink-0 items-center gap-2"
+                  ))}
+                </section>
+              )}
+              <form
+                onSubmit={submit}
+                aria-label="Message composer"
+                onPaste={(event) => {
+                  const files = Array.from(event.clipboardData.files);
+                  if (files.length) {
+                    event.preventDefault();
+                    void attachFiles(files);
+                  }
+                }}
+                onDragOver={(event) => {
+                  if (event.dataTransfer.types.includes("Files"))
+                    event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  if (event.dataTransfer.types.includes("Files")) {
+                    event.preventDefault();
+                    void attachFiles(Array.from(event.dataTransfer.files));
+                  }
+                }}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={IMAGE_ACCEPT}
+                  multiple
+                  hidden
+                  aria-label="Attach images"
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files || []);
+                    event.target.value = "";
+                    void attachFiles(files);
+                  }}
+                />
+                <InputGroup
+                  aria-label="Message input"
+                  className="rounded-xl has-disabled:opacity-100 has-disabled:bg-transparent dark:has-disabled:bg-input/30"
+                >
+                  {reading && (
+                    <span
+                      role="status"
+                      className="px-4 pt-4 text-xs text-muted-foreground md:px-inset"
+                    >
+                      Reading images…
+                    </span>
+                  )}
+                  <DraftImages
+                    agentId={agentId}
+                    disabled={editingDraft || reading}
+                    inputRef={composerRef}
+                  />
+                  <ComposerInput
+                    agentId={agentId}
+                    inputRef={composerRef}
+                    readOnly={editingDraft}
+                    settled={agent.settled}
+                  />
+                  <InputGroupAddon
+                    align="block-end"
+                    className="items-end px-4 pb-4 pt-2 md:px-inset md:pb-inset"
+                    aria-label="Composer toolbar"
                   >
-                    {agent.held && !agent.settled && (
+                    <div
+                      role="group"
+                      aria-label="Chat settings"
+                      className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
+                    >
                       <Button
                         type="button"
-                        size="icon"
                         variant="ghost"
-                        aria-label="Continue"
-                        title="Continue queued work"
+                        size="icon"
+                        aria-label="Attach screenshots"
+                        title="Attach screenshots (PNG, JPEG, WebP, GIF; up to 4, 5 MiB each)"
+                        disabled={editingDraft || reading || workspaceBlocked}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <Paperclip />
+                      </Button>
+                      <ModelFields
+                        compact
                         disabled={
                           busy ||
+                          reading ||
                           !ready ||
                           status !== "live" ||
                           workspaceBlocked
                         }
-                        onClick={() =>
-                          void action(() => control.continue(agentId))
+                        model={agent.settings.model}
+                        effort={agent.settings.effort}
+                        onChange={(model, effort) =>
+                          void action(() =>
+                            control.settings(agentId, { model, effort }),
+                          )
                         }
-                      >
-                        <Play />
-                      </Button>
-                    )}
-                    {running && (
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="icon"
-                        aria-label="Stop"
+                      />
+                    </div>
+                    <div
+                      role="group"
+                      aria-label="Message actions"
+                      className="ml-auto flex shrink-0 items-center gap-2"
+                    >
+                      {agent.held && !agent.settled && (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label="Continue"
+                          title="Continue queued work"
+                          disabled={
+                            busy ||
+                            !ready ||
+                            status !== "live" ||
+                            workspaceBlocked
+                          }
+                          onClick={() =>
+                            void action(() => control.continue(agentId))
+                          }
+                        >
+                          <Play />
+                        </Button>
+                      )}
+                      {running && (
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="icon"
+                          aria-label="Stop"
+                          disabled={
+                            busy || reading || !ready || status !== "live"
+                          }
+                          title="Stop this turn; the next pending message can then run"
+                          onClick={() =>
+                            void action(() =>
+                              control.stopTurn(agentId, running.id),
+                            )
+                          }
+                        >
+                          <Square className="size-3 fill-current" />
+                        </Button>
+                      )}
+                      <SendMessageButton
+                        agentId={agentId}
+                        disabled={
+                          busy ||
+                          reading ||
+                          !ready ||
+                          status !== "live" ||
+                          workspaceBlocked
+                        }
+                      />
+                    </div>
+                  </InputGroupAddon>
+                </InputGroup>
+              </form>
+              <div
+                role="group"
+                aria-label="Composer footer"
+                className="flex min-w-0 min-h-8 items-center gap-2 border-x border-transparent px-4 md:px-inset"
+              >
+                {project && (
+                  <div
+                    role="group"
+                    aria-label="Project location"
+                    className="flex min-w-0 flex-1 flex-wrap items-center gap-2 font-mono text-xs text-muted-foreground"
+                  >
+                    {workspaceLocked ? (
+                      <>
+                        <WorkspaceIndicator
+                          workspace={
+                            workspace || {
+                              mode: "current_checkout",
+                              locked: true,
+                              status: "ready",
+                            }
+                          }
+                          fallbackPath={project.root}
+                        />
+                        {gitBranch && (
+                          <WorkspaceBranch
+                            branch={gitBranch}
+                            prNumber={prNumber}
+                          />
+                        )}
+                      </>
+                    ) : (
+                      <WorkspaceFields
+                        compact
+                        gitBranch={gitBranch}
+                        prNumber={prNumber}
+                        projectId={project.id}
+                        value={workspaceSelection}
                         disabled={
                           busy || reading || !ready || status !== "live"
                         }
-                        title="Stop this turn; the next pending message can then run"
-                        onClick={() =>
+                        onChange={(selection) =>
                           void action(() =>
-                            control.stopTurn(agentId, running.id),
+                            control.updateWorkspace(agentId, selection),
                           )
                         }
-                      >
-                        <Square className="size-3 fill-current" />
-                      </Button>
-                    )}
-                    <SendMessageButton
-                      agentId={agentId}
-                      disabled={
-                        busy ||
-                        reading ||
-                        !ready ||
-                        status !== "live" ||
-                        workspaceBlocked
-                      }
-                    />
-                  </div>
-                </InputGroupAddon>
-              </InputGroup>
-            </form>
-            <div
-              role="group"
-              aria-label="Composer footer"
-              className="flex min-w-0 min-h-8 items-center gap-2 border-x border-transparent px-4 md:px-inset"
-            >
-              {project && (
-                <div
-                  role="group"
-                  aria-label="Project location"
-                  className="flex min-w-0 flex-1 flex-wrap items-center gap-2 font-mono text-xs text-muted-foreground"
-                >
-                  {workspaceLocked ? (
-                    <>
-                      <WorkspaceIndicator
-                        workspace={
-                          workspace || {
-                            mode: "current_checkout",
-                            locked: true,
-                            status: "ready",
-                          }
-                        }
-                        fallbackPath={project.root}
                       />
-                      {gitBranch && (
-                        <WorkspaceBranch
-                          branch={gitBranch}
-                          prNumber={prNumber}
-                        />
-                      )}
-                    </>
-                  ) : (
-                    <WorkspaceFields
-                      compact
-                      gitBranch={gitBranch}
-                      prNumber={prNumber}
-                      projectId={project.id}
-                      value={workspaceSelection}
-                      disabled={busy || reading || !ready || status !== "live"}
-                      onChange={(selection) =>
-                        void action(() =>
-                          control.updateWorkspace(agentId, selection),
-                        )
-                      }
-                    />
-                  )}
-                </div>
-              )}
-              {project && <FooterSeparator />}
-              <div className="ml-auto flex shrink-0 items-center gap-2 md:gap-4">
-                <span
-                  data-slot="context-usage"
-                  className="font-mono text-xs text-muted-foreground"
-                  title={`Context usage: ${contextPercent}%`}
-                >
-                  <span className="hidden md:inline">
-                    Context {contextPercent}%
+                    )}
+                  </div>
+                )}
+                {project && <FooterSeparator />}
+                <div className="ml-auto flex shrink-0 items-center gap-2 md:gap-4">
+                  <span
+                    data-slot="context-usage"
+                    className="font-mono text-xs text-muted-foreground"
+                    title={`Context usage: ${contextPercent}%`}
+                  >
+                    <span className="hidden md:inline">
+                      Context {contextPercent}%
+                    </span>
+                    <span className="md:hidden">{contextPercent}%</span>
                   </span>
-                  <span className="md:hidden">{contextPercent}%</span>
-                </span>
-                <FooterSeparator className="md:hidden" />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="md:hidden"
-                  aria-label="Open sidebar"
-                  onClick={() => open("sidebar", "open")}
-                >
-                  <Menu />
-                </Button>
+                  <FooterSeparator className="md:hidden" />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="md:hidden"
+                    aria-label="Open sidebar"
+                    onClick={() => open("sidebar", "open")}
+                  >
+                    <Menu />
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
         </div>
+        {browserOpen && (
+          <div
+            className={cn(
+              "flex min-h-0 min-w-0 flex-1",
+              !browserExpanded && "lg:w-1/2 lg:flex-none",
+            )}
+          >
+            <BrowserPanel
+              agentId={agentId}
+              expanded={browserExpanded}
+              onExpand={() => setBrowserExpanded(!browserExpanded)}
+              onClose={() => {
+                setBrowserOpen(false);
+                browserToggleRef.current?.focus();
+              }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

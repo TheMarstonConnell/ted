@@ -373,3 +373,17 @@ to its results. To also retain workflow video:
 TED_WEB_RECORD=1 npm run test:e2e -- --grep "plain interface"
 # Artifacts: web/test-results/ (when viewed from the repository root)
 ```
+
+## Shared live browser
+
+The chat header’s **Browser** toggle opens a shared interactive viewport beside
+chat (full-width on narrow screens). Human input never pauses or takes over the
+agent. Closing the viewer does not close Chrome.
+
+See [Interactive shared browser](../docs/browser-ui.md) for interaction,
+architecture, security and real-stack validation, and the
+[live browser protocol](../api/browser.md) for the transport contract.
+Unit coverage is in `src/lib/browser-live.test.ts`; deterministic panel/input
+scenarios are in `e2e/browser-live.spec.ts`. The assertion-bearing
+`e2e/browser-system.spec.ts` validates the real UI/API/daemon/Chrome path and
+retains screenshot/video capture capability (see the validation docs above).

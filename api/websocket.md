@@ -3,8 +3,12 @@
 Connect to `GET /v1/ws` using RFC 6455. One connection can observe and submit to
 many agents in many projects. No SDK is required. There is no authentication;
 expose only on a trusted interface or behind an authenticated reverse proxy.
-Browser `Origin` must match the request's scheme and host (including port).
-Non-browser clients may omit `Origin`. No wildcard CORS is enabled.
+By default, browser `Origin` must match the request's scheme and host (including
+port). Behind a TLS-terminating authenticated proxy, configure
+`ted serve --public-origin https://ted.example.com` to require that public origin
+instead of the backend HTTP origin. Forward the browser's Origin unchanged;
+forwarded headers alone never establish trust. Non-browser clients may omit
+`Origin`. No wildcard CORS is enabled.
 
 The normative payload schemas are `WSSubscribe`, `WSSubmit`, `WSSubscribed`,
 `WSInventory`, `WSEvent`, `WSEventReference`, `WSAck`, and `WSError` in

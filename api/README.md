@@ -31,6 +31,7 @@ generated. Edit the YAML, then regenerate; never edit `generated.go` manually.
 | GET, PATCH, DELETE | `/v1/projects/{project_id}` | Read, update name/defaults, delete a project and its settled agents |
 | GET, POST | `/v1/agents` | List or create durable agents |
 | GET, PATCH | `/v1/agents/{agent_id}` | Read an agent, update `settled`, or advance `read_cursor` |
+| GET | `/v1/agents/{agent_id}/browser` | Live browser WebSocket; see [protocol](browser.md) |
 | GET | `/v1/agents/{agent_id}/pull-request` | Resolve the GitHub pull request for the agent's branch |
 | PATCH | `/v1/agents/{agent_id}/settings` | Patch model and/or effort for future turns |
 | GET, POST | `/v1/agents/{agent_id}/messages` | Inspect queue (including terminal entries) or submit user text/images or bot text |
@@ -205,7 +206,7 @@ All HTTP errors use the generated `Error` envelope:
 | 413 | `too_large` | HTTP request body exceeds its limit (30 MiB for submit, 2 MiB elsewhere), subscribe exceeds 64 KiB, or merged bot text exceeds 1,048,576 characters |
 | 415 | `unsupported_media_type` | Expected JSON Content-Type |
 | 500 | `internal` | Unexpected failure; internal details are not exposed |
-| 503 | `shutting_down`, `storage_failed` | Runtime unavailable; failed mutations are not acknowledged as successful |
+| 503 | `shutting_down`, `storage_failed`, `browser_unavailable`, `browser_limit` | Runtime unavailable; failed mutations are not acknowledged as successful |
 
 WS error frames share `ErrorCode` and add optional `request_id`; see the protocol.
 Some codes are reserved generic categories, while runtime errors are more
