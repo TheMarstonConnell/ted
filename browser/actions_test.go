@@ -41,8 +41,8 @@ func TestParameterValidation(t *testing.T) {
 		t.Fatal("accepted javascript URL")
 	}
 	var se *serviceError
-	if !errors.As(validateURL("relative"), &se) || se.code != "invalid_params" {
-		t.Fatalf("unexpected URL error: %v", validateURL("relative"))
+	if !errors.As(validateURL("ftp://example.test"), &se) || se.code != "invalid_params" {
+		t.Fatalf("unexpected URL error: %v", validateURL("ftp://example.test"))
 	}
 }
 

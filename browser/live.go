@@ -205,6 +205,13 @@ func ParseLiveCommand(data []byte) (LiveCommand, error) {
 	if err := validateLiveCommand(command); err != nil {
 		return command, err
 	}
+	if (command.Type == "navigate" || command.Type == "new") && command.URL != "" {
+		var err error
+		command.URL, err = normalizeURL(command.URL)
+		if err != nil {
+			return command, err
+		}
+	}
 	return command, nil
 }
 

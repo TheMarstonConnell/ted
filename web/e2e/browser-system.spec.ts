@@ -145,11 +145,12 @@ test("real browser shares human input, agent clicks and recording", async ({
       page.getByRole("textbox", { name: "Interactive browser viewport" }),
     ).toBeVisible({ timeout: 15_000 });
     const addressBar = page.getByRole("textbox", { name: "Browser address" });
-    await addressBar.fill(fixtureURL);
+    await addressBar.fill(fixtureURL.replace("http://", ""));
     await addressBar.press("Enter");
     await expect
       .poll(async () => JSON.stringify(await browser("snapshot")))
       .toContain("Human + agent, one browser");
+    await expect(addressBar).toHaveValue(fixtureURL + "/");
     const viewport = page.getByRole("textbox", {
       name: "Interactive browser viewport",
     });
@@ -173,6 +174,10 @@ test("real browser shares human input, agent clicks and recording", async ({
     };
     const clickRemote = async (selector: string) => {
       const p = await position(selector);
+      expect({ width: p.width, height: p.height }).toEqual({
+        width: 1440,
+        height: 900,
+      });
       const box = await viewport.boundingBox();
       if (!box) throw new Error("viewport missing");
       await page.mouse.click(

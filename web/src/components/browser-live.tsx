@@ -314,6 +314,7 @@ function BrowserViewport({
   const host = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const [actualSize, setActualSize] = useState(false);
   const composing = useRef(false);
   const blurring = useRef(false);
   const pressed = useRef(false);
@@ -654,15 +655,14 @@ function BrowserViewport({
       ...(text ? { text } : {}),
     });
   };
-  const scale = Math.min(size.width / frame.width, size.height / frame.height);
+  const scale = actualSize
+    ? 1
+    : Math.min(1, size.width / frame.width, size.height / frame.height);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div
-        ref={host}
-        className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-muted/40"
-      >
+      <div ref={host} className="flex min-h-0 flex-1 overflow-auto bg-muted/40">
         <div
-          className="relative shrink-0 overflow-hidden focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring"
+          className="relative m-auto shrink-0 overflow-hidden focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring"
           style={{ width: frame.width * scale, height: frame.height * scale }}
         >
           <img
@@ -738,12 +738,30 @@ function BrowserViewport({
           )}
         </div>
       </div>
-      <p
-        id="browser-focus-help"
-        className="shrink-0 border-t px-4 py-2 text-xs text-muted-foreground"
-      >
-        Click the page to type · Escape releases focus
-      </p>
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-4 py-2 text-xs text-muted-foreground">
+        <p id="browser-focus-help">
+          Click the page to type · Escape releases focus
+        </p>
+        <div className="flex items-center gap-2">
+          <span>
+            {Math.round(frame.width)} × {Math.round(frame.height)}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label="Show browser at 100%"
+            aria-pressed={actualSize}
+            title={
+              actualSize
+                ? "Fit the page to the panel"
+                : "Show at 100% with scrollbars"
+            }
+            onClick={() => setActualSize((value) => !value)}
+          >
+            {actualSize ? "Fit to panel" : "100%"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

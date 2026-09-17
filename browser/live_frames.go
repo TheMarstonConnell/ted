@@ -25,7 +25,7 @@ func (t *browserTab) acquireStream(ctx context.Context) error {
 		t.liveMu.Unlock()
 		// Activate background tabs so Chrome produces an initial frame.
 		start := page.StartScreencast().WithFormat(page.ScreencastFormatJpeg).
-			WithQuality(80).WithEveryNthFrame(1)
+			WithQuality(90).WithEveryNthFrame(1)
 		if err := t.runStream(ctx, page.BringToFront(), start); err != nil {
 			// Cancellation may race Chrome accepting StartScreencast.
 			_ = t.stopStream(ctx)

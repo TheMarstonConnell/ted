@@ -329,7 +329,7 @@ func TestBrowserStrictCommandValidation(t *testing.T) {
 		`{"type":null}`, `{"type":"watch","project":"/tmp"}`, `{"type":"watch","thread":"other"}`, `{"type":"watch","home":"/tmp"}`,
 		`{"type":"cdp"}`, `{"type":"watch","tab_id":null}`, `{"type":"watch","url":"https://example.test"}`,
 		`{"type":"new","tab_id":"tab"}`, `{"type":"navigate"}`, `{"type":"navigate","url":"javascript:alert(1)"}`,
-		`{"type":"navigate","url":"relative"}`, `{"type":"navigate","url":"https://[invalid"}`,
+		`{"type":"navigate","url":"/relative"}`, `{"type":"navigate","url":"https://[invalid"}`,
 		`{"type":"back"}`, `{"type":"reload","tab_id":""}`, `{"type":"close","tab_id":12}`, `{"type":"release"}`,
 		`{"type":"text","tab_id":"tab","text":null}`, `{"type":"text","tab_id":"tab","text":42}`,
 		`{"type":"mouse","tab_id":"tab","event":"keyDown","x":1,"y":2}`,
@@ -366,6 +366,22 @@ func TestBrowserStrictCommandValidation(t *testing.T) {
 	for _, raw := range valid {
 		if _, err := browser.ParseLiveCommand([]byte(raw)); err != nil {
 			t.Errorf("rejected valid boundary command: %.200s: %v", raw, err)
+		}
+	}
+}
+
+func TestBrowserAddressCommandNormalization(t *testing.T) {
+	for _, tt := range []struct{ raw, want string }{
+		{`{"type":"navigate","url":"relative"}`, "http://relative"},
+		{`{"type":"navigate","tab_id":"tab","url":" localhost:3000/path "}`, "http://localhost:3000/path"},
+		{`{"type":"new","url":"127.0.0.1:8080"}`, "http://127.0.0.1:8080"},
+		{`{"type":"new","url":"[::1]:8080"}`, "http://[::1]:8080"},
+		{`{"type":"navigate","url":"//example.test/path"}`, "http://example.test/path"},
+		{`{"type":"new","url":"https://example.test/path"}`, "https://example.test/path"},
+	} {
+		command, err := browser.ParseLiveCommand([]byte(tt.raw))
+		if err != nil || command.URL != tt.want {
+			t.Errorf("ParseLiveCommand(%s) = %+v, %v; want URL %q", tt.raw, command, err, tt.want)
 		}
 	}
 }

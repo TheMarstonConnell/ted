@@ -477,6 +477,10 @@ ted browser errors
 ted browser close  # Closes thread tabs; does not delete the project profile.
 ```
 
+For blocked pages, failed resources, certificates, or site compatibility, see
+[Browser diagnostics](docs/browser-diagnostics.md). The live panel uses a
+1440 × 900 desktop viewport with fit-to-panel and **100%** display modes.
+
 Prefer compact snapshots and semantic targets (`--label`, `--role` with
 `--name`) or snapshot references (`--ref`) over dumping HTML. CSS targeting is
 available with `--selector`. `fill` and `select` accept `--value`; `press`

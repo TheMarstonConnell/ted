@@ -748,3 +748,73 @@ test("static page remains interactive for same-tab pin/follow, history no-op and
     )
     .toBe(1);
 });
+
+test("100% view keeps native size, scrolls without clipping, and maps input", async ({
+  page,
+}) => {
+  const live = await liveBrowser(page);
+  await live.open();
+  live.newTab();
+  await expect(live.viewport).toBeVisible();
+  const fitted = await live.viewport.boundingBox();
+  expect(fitted!.width).toBeLessThan(1280);
+  const toggle = page.getByRole("button", { name: "Show browser at 100%" });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect
+    .poll(async () => (await live.viewport.boundingBox())!.width)
+    .toBe(1280);
+  const geometry = await live.viewport.evaluate((element) => {
+    const host = element.parentElement!.parentElement!;
+    const origin = element.getBoundingClientRect();
+    const container = host.getBoundingClientRect();
+    host.scrollLeft = 300;
+    host.scrollTop = 100;
+    return {
+      left: origin.left - container.left,
+      top: origin.top - container.top,
+      scrollLeft: host.scrollLeft,
+      scrollTop: host.scrollTop,
+    };
+  });
+  expect(geometry.left).toBe(0);
+  expect(geometry.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.scrollLeft).toBe(300);
+  const box = (await live.viewport.boundingBox())!;
+  await page.mouse.click(box.x + 400, box.y + geometry.scrollTop + 50);
+  await expect
+    .poll(() =>
+      live.commands
+        .filter(
+          (command) =>
+            command.type === "mouse" && command.event === "mousePressed",
+        )
+        .at(-1),
+    )
+    .toMatchObject({ x: 400, y: geometry.scrollTop + 50 });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect
+    .poll(async () => (await live.viewport.boundingBox())!.width)
+    .toBe(fitted!.width);
+});
+
+test("fit view never magnifies a small source frame", async ({ page }) => {
+  const live = await liveBrowser(page);
+  await live.open();
+  const id = live.newTab();
+  await expect(live.viewport).toBeVisible();
+  live.send({
+    type: "frame",
+    tab_id: id,
+    data: "jpeg",
+    width: 160,
+    height: 90,
+  });
+  await expect
+    .poll(async () => (await live.viewport.boundingBox())!.width)
+    .toBe(160);
+  await expect
+    .poll(async () => (await live.viewport.boundingBox())!.height)
+    .toBe(90);
+});

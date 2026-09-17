@@ -453,8 +453,8 @@ func TestLivePageCreatedTabsIntegration(t *testing.T) {
 		return e.Type == "state" && e.TabID == scriptID && e.Pinned == scriptID
 	})
 	frame := receiveLive(t, viewer, func(e LiveEvent) bool { return e.Type == "frame" && e.TabID == scriptID })
-	if frame.Data == "" || frame.Width <= 0 || frame.Height <= 0 {
-		t.Fatalf("popup frame is not viewable: %+v", frame)
+	if frame.Data == "" || frame.Width != 1440 || frame.Height != 900 {
+		t.Fatalf("popup frame lacks the desktop viewport: %gx%g", frame.Width, frame.Height)
 	}
 
 	otherTabs := call(otherReq, "tabs", nil).(map[string]any)["tabs"].([]map[string]any)

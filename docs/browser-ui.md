@@ -12,6 +12,10 @@ their conversation to inspect them.
 - Watch beside chat, expand the panel, or use the full-width view on narrow screens.
   Expand/narrow and close sit alongside the URL field; there is no separate title
   bar or shared-control notice.
+- New tabs use a 1440 × 900 desktop viewport. The live view fits the panel without
+  enlarging small frames; **100%** shows native CSS size with scrollbars for reading
+  small text. **Fit to panel** restores the overview. These controls do not change
+  page layout or an agent’s explicit CDP device emulation.
 - The viewport is always interactive. Clicking focuses it for keyboard input;
   Escape releases local focus. On touchscreens, a tap clicks the remote page and
   a drag scrolls it. The address bar, tab strip and history controls operate on
@@ -41,7 +45,9 @@ screencast frames and accepts constrained mouse, keyboard, text and navigation
 commands. The daemon shares screencast capture with video recording, bounds
 viewer buffers, and keeps human input independent of long-running agent waits.
 The UI scales the stable browser viewport instead of resizing the page on every
-panel layout change.
+panel layout change. JPEG capture uses quality 90 without a downsampling cap;
+recordings share this same stream. Desktop defaults are also applied to adopted
+popups. Existing running daemons must be restarted to load browser changes.
 
 This is webpage interaction, not a streamed operating-system desktop. Native
 Chrome UI, audio, system file pickers, file transfer and remote clipboard readback
