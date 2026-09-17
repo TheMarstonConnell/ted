@@ -3,16 +3,9 @@ import {
   expect,
   type Page,
   type WebSocketRoute,
-  type TestInfo,
 } from "@playwright/test";
 import { workspace } from "./fixtures";
 import type { LiveCommand, LiveTab } from "../src/lib/browser-live";
-
-async function capture(page: Page, info: TestInfo, name: string) {
-  const path = info.outputPath(`${name}.png`);
-  await page.screenshot({ path });
-  await info.attach(name, { path, contentType: "image/png" });
-}
 
 async function touchGesture(
   page: Page,
@@ -390,17 +383,12 @@ test("scaled hover, click, drag, double click, wheel, keys, paste, composition a
 
 test("touch pan scrolls remotely, touch tap clicks, and mouse drag remains a drag", async ({
   page,
-}, testInfo) => {
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const live = await liveBrowser(page);
   await live.open();
   live.newTab();
   await expect(live.viewport).toBeVisible();
-  const demoHold = () =>
-    process.env.TED_WEB_RECORD === "1"
-      ? page.waitForTimeout(1800)
-      : Promise.resolve();
-  await demoHold();
   const box = (await live.viewport.boundingBox())!;
   const x = box.x + box.width / 2;
   const startY = box.y + box.height * 0.72;
@@ -435,9 +423,6 @@ test("touch pan scrolls remotely, touch tap clicks, and mouse drag remains a dra
     ),
   ).toBe(false);
   await expect.poll(() => image.getAttribute("src")).not.toBe(beforeSrc);
-  await demoHold();
-  await capture(page, testInfo, "live-browser-touch-scroll-mobile");
-  await demoHold();
 
   const beforeTap = live.commands.length;
   await touchGesture(page, [{ x: box.x + 80, y: box.y + 80 }]);
@@ -465,7 +450,6 @@ test("touch pan scrolls remotely, touch tap clicks, and mouse drag remains a dra
     ["mousePressed", "left", 1],
     ["mouseReleased", "left", 0],
   ]);
-  await demoHold();
 
   const beforeMouse = live.commands.length;
   await page.mouse.move(x, startY);
@@ -495,7 +479,6 @@ test("touch pan scrolls remotely, touch tap clicks, and mouse drag remains a dra
   expect(mouseDrag.some((command) => command.event === "mouseReleased")).toBe(
     true,
   );
-  await demoHold();
 });
 
 test("agent overlay is tab-filtered, pointer-transparent, expires and clears on navigation", async ({
@@ -568,7 +551,7 @@ test("disconnect disables stale input and reconnects watch; errors remain visibl
 for (const width of [320, 390, 768]) {
   test(`narrow ${width}px panel replaces chat, fits and restores draft`, async ({
     page,
-  }, testInfo) => {
+  }) => {
     await page.setViewportSize({ width, height: 844 });
     const live = await liveBrowser(page);
     await page
@@ -586,65 +569,12 @@ for (const width of [320, 390, 768]) {
     const box = (await live.viewport.boundingBox())!;
     expect(box.width).toBeGreaterThan(250);
     expect(box.x + box.width).toBeLessThanOrEqual(width);
-    await capture(page, testInfo, `live-browser-${width}`);
     await page.getByRole("button", { name: "Close browser panel" }).click();
     await expect(
       page.getByRole("textbox", { name: "Message", exact: true }),
     ).toHaveValue("Mobile draft");
   });
 }
-
-test("live browser preview demo", async ({ page }, testInfo) => {
-  test.skip(
-    process.env.TED_WEB_RECORD !== "1",
-    "Opt-in visual evidence capture",
-  );
-  const live = await liveBrowser(page);
-  live.emit("a1", "output", {
-    ResponseType: "agent",
-    Content:
-      "I’m reviewing the shop. You can use the browser alongside me — there’s no need to pause or take over.",
-  });
-  const hold = () => page.waitForTimeout(1100);
-  await hold();
-  await live.open();
-  await hold();
-  await capture(page, testInfo, "live-browser-empty");
-  await page.getByRole("button", { name: "Open browser", exact: true }).click();
-  await hold();
-  live.send({ type: "activity", tab_id: "1", kind: "click", x: 928, y: 508 });
-  await page.waitForTimeout(150);
-  await capture(page, testInfo, "live-browser-desktop");
-  await hold();
-  await live.viewport.click({ position: { x: 80, y: 80 } });
-  await hold();
-  await live.viewport.press("Escape");
-  await hold();
-  const second = live.newTab("https://docs.test", "Research");
-  await hold();
-  await page.getByRole("button", { name: "Demo shop", exact: true }).click();
-  await hold();
-  live.select(second);
-  await hold();
-  await page.getByRole("button", { name: "Follow agent", exact: true }).click();
-  await hold();
-  await page
-    .getByRole("button", { name: "Expand browser", exact: true })
-    .click();
-  await hold();
-  await capture(page, testInfo, "live-browser-expanded");
-  await page
-    .getByRole("button", { name: "Narrow browser", exact: true })
-    .click();
-  await hold();
-  await page.emulateMedia({ colorScheme: "dark" });
-  await hold();
-  await capture(page, testInfo, "live-browser-dark");
-  await page
-    .getByRole("button", { name: "Close browser panel", exact: true })
-    .click();
-  await hold();
-});
 
 test("expanded browser does not acknowledge hidden new chat responses", async ({
   page,

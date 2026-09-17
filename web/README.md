@@ -365,18 +365,6 @@ See [Interactive shared browser](../docs/browser-ui.md) for interaction,
 architecture, security and real-stack validation, and the
 [live browser protocol](../api/browser.md) for the transport contract.
 Unit coverage is in `src/lib/browser-live.test.ts`; deterministic panel/input
-scenarios are in `e2e/browser-live.spec.ts`. Its paced visual-evidence scenario
-is opt-in, not part of the ordinary test run:
-
-```sh
-cd web
-TED_WEB_RECORD=1 npm run test:e2e -- browser-live.spec.ts
-```
-
-Fixture preview artifacts (not real daemon integration):
-[Desktop split](../docs/screenshots/live-browser-desktop.png),
-[empty session](../docs/screenshots/live-browser-empty.png),
-[expanded](../docs/screenshots/live-browser-expanded.png),
-[dark](../docs/screenshots/live-browser-dark.png),
-[mobile](../docs/screenshots/live-browser-mobile.png), and
-[17-second walkthrough](../docs/screenshots/web-live-browser-demo.webm).
+scenarios are in `e2e/browser-live.spec.ts`. The assertion-bearing
+`e2e/browser-system.spec.ts` validates the real UI/API/daemon/Chrome path and
+retains screenshot/video capture capability (see the validation docs above).
