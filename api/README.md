@@ -49,10 +49,8 @@ parameters, malformed escapes, trailing JSON, and bodies on bodyless operations
 are rejected. JSON operations require `Content-Type: application/json`; entire
 request bodies are limited to **2 MiB**, and text to **1,048,576 characters**.
 Names are limited to 256 characters, roots to 4096, model identifiers to 256,
-effort strings to 64, and idempotency keys to 256. Root paths, including the
-directory branch-preview query, must be existing absolute server-local directories.
-Branch previews inspect only local Git refs and do not create a project or fetch from
-a remote. Model/effort availability is checked against
+effort strings to 64, and idempotency keys to 256. Root paths must be existing
+absolute server-local directories. Model/effort availability is checked against
 the runtime provider catalog. See YAML for every request field and bound.
 
 Project creation requires `name`, `root`, and complete `defaults` (`model` and

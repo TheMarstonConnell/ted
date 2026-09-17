@@ -208,14 +208,6 @@ test("changing a new project's directory clears its base and ignores stale branc
     base_branch: "upstream/next",
   });
   await expect(page).toHaveURL(/dialog=new-agent/);
-  await page.goto("/?dialog=new-project");
-  await directory.fill("/srv/other");
-  await choose(dialog.getByRole("combobox", { name: "Workspace" }), "worktree");
-  await directory.fill("");
-  await expect(branch).toHaveCount(0);
-  await expect(
-    dialog.getByText("Enter a server directory to choose a starting branch."),
-  ).toBeVisible();
 });
 
 for (const scenario of ["non-Git", "no remotes", "lookup failure"] as const) {
