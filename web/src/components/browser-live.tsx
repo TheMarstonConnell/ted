@@ -34,6 +34,8 @@ import {
   type LiveActivity,
 } from "@/lib/browser-live";
 
+type MouseCommand = Extract<LiveCommand, { type: "mouse" }>;
+
 export function BrowserPanel({
   agentId,
   expanded,
@@ -63,8 +65,8 @@ export function BrowserPanel({
   useEffect(() => {
     if (!addressEditing.current) setAddress(tab?.url || "");
   }, [tab?.url, tab?.id]);
-  const connected = state.status === "live" && state.initialized;
-  const command = (type: LiveCommand["type"]) =>
+  const connected = state.status === "live";
+  const command = (type: "back" | "forward" | "reload") =>
     connection.command({ type, tab_id: state.viewed });
   return (
     <section
@@ -306,11 +308,11 @@ function BrowserViewport({
   const blurring = useRef(false);
   const pressed = useRef(false);
   const capturedPointer = useRef<number | null>(null);
-  const move = useRef<LiveCommand | null>(null);
+  const move = useRef<MouseCommand | null>(null);
   const moveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
-  const wheel = useRef<LiveCommand | null>(null);
+  const wheel = useRef<MouseCommand | null>(null);
   const wheelTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
@@ -344,7 +346,7 @@ function BrowserViewport({
     }
   }, [send]);
   const queueWheel = useCallback(
-    (command: LiveCommand) => {
+    (command: MouseCommand) => {
       const bound = (delta: number) =>
         Math.max(-100000, Math.min(100000, delta));
       wheel.current = {
@@ -557,34 +559,35 @@ function BrowserViewport({
       };
     }
     const buttons = pressed.current ? event.buttons : 0;
-    const button =
-      kind === "mouseMoved"
-        ? buttons & 1
-          ? "left"
-          : buttons & 2
-            ? "right"
-            : buttons & 4
-              ? "middle"
-              : "none"
-        : (["left", "middle", "right"] as const)[event.button];
-    const command: LiveCommand = {
-      type: "mouse",
+    const common = {
+      type: "mouse" as const,
       tab_id: frame.tab_id,
-      event: kind,
       ...point,
-      button,
       buttons,
       modifiers: browserModifiers(event),
-      ...(kind !== "mouseMoved"
-        ? { click_count: click.current.count || 1 }
-        : {}),
     };
     if (kind === "mouseMoved") {
-      move.current = command;
+      move.current = {
+        ...common,
+        event: kind,
+        button:
+          buttons & 1
+            ? "left"
+            : buttons & 2
+              ? "right"
+              : buttons & 4
+                ? "middle"
+                : "none",
+      };
       if (!moveTimer.current) moveTimer.current = setTimeout(flushMove, 32);
     } else {
       flushMove();
-      send(command);
+      send({
+        ...common,
+        event: kind,
+        button: (["left", "middle", "right"] as const)[event.button],
+        click_count: click.current.count || 1,
+      });
     }
     if (kind === "mouseReleased" && event.buttons === 0) {
       pressed.current = false;

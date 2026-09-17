@@ -70,14 +70,13 @@ type LiveEvent struct {
 	Code     string    `json:"code,omitempty"`
 }
 
-// LiveClient keeps one daemon subscription. Send and Receive may run concurrently.
+// LiveClient supports one sender and one receiver concurrently.
 // Canceling the OpenLive context also closes the connection.
 type LiveClient struct {
-	conn   net.Conn
-	dec    *json.Decoder
-	sendMu sync.Mutex
-	once   sync.Once
-	stop   func() bool
+	conn net.Conn
+	dec  *json.Decoder
+	once sync.Once
+	stop func() bool
 }
 
 func OpenLive(ctx context.Context, req Request) (*LiveClient, error) {
@@ -116,8 +115,6 @@ func OpenLive(ctx context.Context, req Request) (*LiveClient, error) {
 }
 
 func (c *LiveClient) Send(command LiveCommand) error {
-	c.sendMu.Lock()
-	defer c.sendMu.Unlock()
 	_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	return json.NewEncoder(c.conn).Encode(command)
 }

@@ -75,10 +75,11 @@ describe("dedicated live-browser transport", () => {
     );
     const { connection, socket } = setup();
     expect(socket.sent).toEqual([{ type: "watch", tab_id: "" }]);
+    expect(connection.snapshot().status).toBe("connecting");
     socket.event({ type: "state" });
     expect(connection.snapshot()).toMatchObject({
       tabs: [],
-      initialized: true,
+      status: "live",
       frame: null,
     });
     connection.disconnect();
@@ -158,7 +159,10 @@ describe("dedicated live-browser transport", () => {
     expect(connection.send({ type: "new" })).toBe(false);
     vi.advanceTimersByTime(1000);
     sockets[1].open();
+    expect(connection.snapshot().status).toBe("reconnecting");
     expect(sockets[1].sent).toEqual([{ type: "watch", tab_id: "two" }]);
+    sockets[1].event(state("two", "one", "two"));
+    expect(connection.snapshot().status).toBe("live");
     socket.event({ type: "error", message: "stale" });
     expect(connection.snapshot().error).toBeNull();
     connection.disconnect();

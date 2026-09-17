@@ -19,7 +19,6 @@ export type LiveSnapshot = {
   frame: LiveFrame | null;
   activity: LiveActivity | null;
   error: string | null;
-  initialized: boolean;
 };
 
 export function browserSocketURL(agentId: string, origin: string) {
@@ -113,7 +112,6 @@ export class LiveBrowserConnection {
     frame: null,
     activity: null,
     error: null,
-    initialized: false,
   };
   private listeners = new Set<() => void>();
   private socket: WebSocket | null = null;
@@ -160,7 +158,7 @@ export class LiveBrowserConnection {
     socket.onopen = () => {
       if (socket !== this.socket || this.stopped) return;
       this.attempts = 0;
-      this.update({ status: "live", error: null });
+      this.update({ error: null });
       this.send({ type: "watch", tab_id: this.state.pinned });
     };
     socket.onmessage = (event) => {
@@ -188,7 +186,6 @@ export class LiveBrowserConnection {
       status: "reconnecting",
       frame: null,
       activity: null,
-      initialized: false,
     });
     clearTimeout(this.retry);
     this.retry = setTimeout(
@@ -204,7 +201,6 @@ export class LiveBrowserConnection {
       error: null,
       frame: null,
       activity: null,
-      initialized: false,
     });
     this.start();
   };
@@ -224,7 +220,10 @@ export class LiveBrowserConnection {
         !this.state.tabs.some((tab) => tab.id === command.tab_id))
     )
       return false;
-    if (Array.from(command.text ?? "").length > 16384) {
+    if (
+      (command.type === "text" || command.type === "key") &&
+      Array.from(command.text ?? "").length > 16384
+    ) {
       this.update({
         error: "Text is too long. Paste at most 16,384 characters at a time.",
       });
@@ -234,7 +233,9 @@ export class LiveBrowserConnection {
     try {
       const payload = JSON.stringify(command);
       if (new TextEncoder().encode(payload).length > 64 * 1024) {
-        this.update({ error: "Browser input exceeds the 64 KiB message limit." });
+        this.update({
+          error: "Browser input exceeds the 64 KiB message limit.",
+        });
         return false;
       }
       this.socket.send(payload);
@@ -295,7 +296,7 @@ export class LiveBrowserConnection {
           tabs,
           viewed,
           selected: event.selected ?? "",
-          initialized: true,
+          status: "live",
           ...(changed ? { activity: null } : {}),
           ...(viewChanged ? { frame: null } : {}),
           pinned: pinClosed ? "" : pinned,

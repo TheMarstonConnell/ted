@@ -252,41 +252,6 @@ func TestLiveStreamLimitIsPerCommandNotConnection(t *testing.T) {
 	}
 }
 
-func TestLiveConcurrentSendIsFramed(t *testing.T) {
-	t.Setenv("TED_HOME", t.TempDir())
-	cancel, done := startTestServer(t)
-	defer func() { cancel(); <-done }()
-	ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
-	defer stop()
-	c, err := OpenLive(ctx, Request{Project: t.TempDir(), Thread: "concurrent-send"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	sent := make(chan error, 32)
-	for range 32 {
-		go func() { sent <- c.Send(LiveCommand{Type: "close", TabID: "missing"}) }()
-	}
-	errors := 0
-	for errors < 32 {
-		event, err := c.Receive()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if event.Type == "error" {
-			if event.Code != "not_found" {
-				t.Fatalf("corrupted command: %+v", event)
-			}
-			errors++
-		}
-	}
-	for range 32 {
-		if err := <-sent; err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
 func TestLiveExplicitHomeConnectsToTrustedRuntime(t *testing.T) {
 	runtimeHome := filepath.Join(t.TempDir(), "runtime")
 	t.Setenv("TED_HOME", runtimeHome)
@@ -335,11 +300,11 @@ func TestLiveDaemonStartupUsesChildHome(t *testing.T) {
 	previous := executablePath
 	executablePath = func() (string, error) { return script, nil }
 	defer func() { executablePath = previous }()
-	path, err := socketPathForHome(runtimeHome)
+	_, err := socketPathForHome(runtimeHome)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := startDaemonInHome(path, runtimeHome); err != nil {
+	if err := startDaemonInHome(runtimeHome); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(2 * time.Second)

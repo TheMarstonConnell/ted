@@ -63,7 +63,7 @@ func connectDaemon(ctx context.Context, home string) (net.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := startDaemonInHome(path, home); err != nil {
+	if err := startDaemonInHome(home); err != nil {
 		return nil, err
 	}
 	conn, err = waitForDaemon(ctx, path)
@@ -100,7 +100,7 @@ func waitForDaemon(ctx context.Context, path string) (net.Conn, error) {
 	}
 }
 
-func startDaemonInHome(socket, home string) error {
+func startDaemonInHome(home string) error {
 	exe, err := executablePath()
 	if err != nil {
 		return fmt.Errorf("locate current executable: %w", err)

@@ -1010,35 +1010,17 @@ components:
             type: integer
             minimum: 0
             maximum: 65535
-        oneOf:
-        - required: [key]
-          properties:
-            key:
-              type: string
-              minLength: 1
-              maxLength: 128
-            code:
-              type: string
-              enum: ['']
-        - required: [code]
-          properties:
-            key:
-              type: string
-              maxLength: 0
-            code:
-              type: string
-              minLength: 1
-              maxLength: 128
-        - required: [key, code]
-          properties:
-            key:
-              type: string
-              minLength: 1
-              maxLength: 128
-            code:
-              type: string
-              minLength: 1
-              maxLength: 128
+        allOf:
+        - anyOf:
+          - required: [key]
+            properties:
+              key:
+                type: string
+          - required: [code]
+            properties:
+              code:
+                type: string
+                minLength: 1
       - type: object
         additionalProperties: false
         required: [type, tab_id, text]

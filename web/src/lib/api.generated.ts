@@ -424,13 +424,7 @@ export interface components {
             key_code?: number;
         } & ({
             key: string;
-            /** @enum {string} */
-            code?: "";
         } | {
-            key?: string;
-            code: string;
-        } | {
-            key: string;
             code: string;
         })) | {
             /** @enum {string} */
