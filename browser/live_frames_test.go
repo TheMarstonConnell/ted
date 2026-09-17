@@ -136,7 +136,7 @@ func liveTestSession(t *testing.T) (context.Context, *session, *browserTab) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := m.project(root, projectKey(root)).getSession(ctx, "live-frames", false)
+	s, _, err := m.project(root, projectKey(root)).getSession(ctx, "live-frames", false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -247,7 +247,7 @@ func (m *manager) dispatch(serverCtx context.Context, req Request) (any, error) 
 	if err != nil {
 		return nil, err
 	}
-	s, err := p.getSession(opCtx, req.Thread, isolated)
+	s, _, err := p.getSession(opCtx, req.Thread, isolated)
 	if err != nil {
 		return nil, err
 	}
@@ -381,20 +381,20 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 	return nil
 }
 
-func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated bool) (*session, error) {
+func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated bool) (*session, bool, error) {
 	// Keep the project lock through initialization so concurrent first requests
 	// for one thread cannot observe a half-created session.
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if s := p.sessions[thread]; s != nil {
 		if s.isolated != isolated && isolated {
-			return nil, fail("conflict", "thread session already exists without isolation")
+			return nil, false, fail("conflict", "thread session already exists without isolation")
 		}
-		return s, nil
+		return s, false, nil
 	}
 	dir, err := threadDir(p.manager.home, thread)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	s := &session{
 		project: p, thread: thread, dir: dir, isolated: isolated, parentCtx: p.browserCtx,
@@ -408,7 +408,7 @@ func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated
 		executor := cdp.WithExecutor(ctx, browser)
 		id, err := target.CreateBrowserContext().WithDisposeOnDetach(true).Do(executor)
 		if err != nil {
-			return nil, fail("browser_unavailable", "create isolated browser context: %v", err)
+			return nil, false, fail("browser_unavailable", "create isolated browser context: %v", err)
 		}
 		dispose := func() {
 			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -418,13 +418,13 @@ func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated
 		ownerID, err := target.CreateTarget("about:blank").WithBrowserContextID(id).WithNewWindow(true).Do(executor)
 		if err != nil {
 			dispose()
-			return nil, fail("browser_unavailable", "create isolated window: %v", err)
+			return nil, false, fail("browser_unavailable", "create isolated window: %v", err)
 		}
 		ownerCtx, ownerCancel := chromedp.NewContext(p.browserCtx, chromedp.WithTargetID(ownerID))
 		if err := initializeContext(ownerCtx, ctx, ownerCancel); err != nil {
 			ownerCancel()
 			dispose()
-			return nil, fail("browser_unavailable", "attach isolated window: %v", err)
+			return nil, false, fail("browser_unavailable", "attach isolated window: %v", err)
 		}
 		s.ownerCtx = ownerCtx
 		s.ownerCancel = func() { ownerCancel(); dispose() }
@@ -434,14 +434,14 @@ func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated
 
 	if err := s.startTargetTracking(ctx); err != nil {
 		s.closeLocked()
-		return nil, err
+		return nil, false, err
 	}
 	if _, err := s.newTab(ctx, "about:blank"); err != nil {
 		s.closeLocked()
-		return nil, err
+		return nil, false, err
 	}
 	p.sessions[thread] = s
-	return s, nil
+	return s, true, nil
 }
 
 func linkedContext(parent, request context.Context) (context.Context, context.CancelFunc) {

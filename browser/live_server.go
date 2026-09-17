@@ -156,6 +156,8 @@ func (l *liveSubscription) observe(ctx context.Context, states, frames, events c
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	var viewing *browserTab
+	var attempted *browserTab
+	var failedStream *browserTab
 	var previousFrame LiveEvent
 	var activitySeq uint64
 	var nextState time.Time
@@ -188,25 +190,43 @@ func (l *liveSubscription) observe(ctx context.Context, states, frames, events c
 			}
 		}
 		if desired != viewing {
-			opCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			if viewing != nil {
-				_ = viewing.releaseStream(opCtx)
+			changed := desired != attempted
+			if changed {
+				opCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				if viewing != nil {
+					_ = viewing.releaseStream(opCtx)
+				}
+				cancel()
+				viewing = nil
+				attempted = desired
+				failedStream = nil
+				previousFrame = LiveEvent{}
+				activitySeq = 0
+				nextState = time.Time{}
 			}
-			viewing = nil
-			previousFrame = LiveEvent{}
-			activitySeq = 0
 			if desired != nil {
-				if err := desired.acquireStream(opCtx); err == nil {
+				opCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				err := desired.acquireStream(opCtx)
+				cancel()
+				if err == nil {
 					viewing = desired
+					failedStream = nil
+					nextState = time.Time{}
+				} else if failedStream != desired && ctx.Err() == nil {
+					failedStream = desired
+					response := errorResponse(err)
+					select {
+					case events <- LiveEvent{Type: "error", Code: response.Error.Code, Message: response.Error.Message}:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
-			cancel()
-			nextState = time.Time{}
 		}
 		if time.Now().After(nextState) {
 			state := LiveEvent{Type: "state", Selected: string(selected), Pinned: watch, Tabs: make([]LiveTab, 0, len(tabs))}
-			if desired != nil {
-				state.TabID = string(desired.id)
+			if viewing != nil {
+				state.TabID = string(viewing.id)
 			}
 			infoByID := make(map[target.ID]*target.Info)
 			if len(tabs) > 0 {
@@ -261,16 +281,8 @@ func (l *liveSubscription) observe(ctx context.Context, states, frames, events c
 }
 
 func (l *liveSubscription) execute(ctx context.Context, c LiveCommand) error {
-	lifecycle := l.lifecycle
-	var release func()
-	if lifecycle == nil && l.manager != nil {
-		lifecycle, release = l.manager.retainSessionLifecycle(l.key, l.thread)
-		defer release()
-	}
-	if lifecycle != nil {
-		lifecycle.gate.RLock()
-		defer lifecycle.gate.RUnlock()
-	}
+	l.lifecycle.gate.RLock()
+	defer l.lifecycle.gate.RUnlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -295,41 +307,7 @@ func (l *liveSubscription) execute(ctx context.Context, c LiveCommand) error {
 	}
 	s := l.session()
 	if c.Type == "new" || (c.Type == "navigate" && c.TabID == "") {
-		if c.Type == "navigate" && s != nil {
-			tabs, _ := s.tabSnapshot()
-			if len(tabs) > 0 {
-				return fail("invalid_params", "navigate requires explicit tab_id when tabs exist")
-			}
-		}
-		fresh := s == nil
-		if fresh {
-			p := l.manager.project(l.root, l.key)
-			if err := p.ensureStarted(ctx); err != nil {
-				return fail("browser_unavailable", "start Chrome: %v", err)
-			}
-			var err error
-			s, err = p.getSession(ctx, l.thread, false)
-			if err != nil {
-				return err
-			}
-		}
-		var t *browserTab
-		var err error
-		if fresh {
-			t, err = s.selectedTab()
-		} else {
-			t, err = s.createTab(ctx, "about:blank", false)
-		}
-		if err != nil {
-			return err
-		}
-		l.mu.Lock()
-		l.watch = string(t.id)
-		l.mu.Unlock()
-		if c.URL != "" {
-			return liveNavigate(ctx, t, c.URL)
-		}
-		return nil
+		return l.open(ctx, c, s)
 	}
 	s, t, err := l.tab(c.TabID)
 	if err != nil {
@@ -384,6 +362,44 @@ func (l *liveSubscription) execute(ctx context.Context, c LiveCommand) error {
 		return err
 	}
 	return fail("invalid_params", "unsupported live command")
+}
+
+func (l *liveSubscription) open(ctx context.Context, c LiveCommand, s *session) error {
+	created := false
+	if s == nil {
+		p := l.manager.project(l.root, l.key)
+		if err := p.ensureStarted(ctx); err != nil {
+			return fail("browser_unavailable", "start Chrome: %v", err)
+		}
+		var err error
+		s, created, err = p.getSession(ctx, l.thread, false)
+		if err != nil {
+			return err
+		}
+	}
+	if c.Type == "navigate" && !created {
+		tabs, _ := s.tabSnapshot()
+		if len(tabs) > 0 {
+			return fail("invalid_params", "navigate requires explicit tab_id when tabs exist")
+		}
+	}
+	var t *browserTab
+	var err error
+	if created {
+		t, err = s.selectedTab()
+	} else {
+		t, err = s.createTab(ctx, "about:blank", false)
+	}
+	if err != nil {
+		return err
+	}
+	l.mu.Lock()
+	l.watch = string(t.id)
+	l.mu.Unlock()
+	if c.URL != "" {
+		return liveNavigate(ctx, t, c.URL)
+	}
+	return nil
 }
 
 func (l *liveSubscription) tab(id string) (*session, *browserTab, error) {

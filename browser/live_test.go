@@ -363,7 +363,7 @@ func TestLiveReleaseMissingAndClosedTabsIsIdempotent(t *testing.T) {
 	cancel()
 	old := &browserTab{id: "closed", ctx: closed}
 	current := &browserTab{id: "current", ctx: context.Background()}
-	sub := &liveSubscription{inputs: make(map[*browserTab]*liveInputState)}
+	sub := &liveSubscription{lifecycle: &sessionLifecycle{}, inputs: make(map[*browserTab]*liveInputState)}
 	sub.track(old, LiveCommand{Type: "key", Event: "keyDown", Key: "Alt", Code: "AltLeft"})
 	sub.track(current, LiveCommand{Type: "key", Event: "keyDown", Key: "Shift", Code: "ShiftLeft"})
 	for _, id := range []string{"closed", "closed", "missing", "foreign"} {
@@ -416,6 +416,55 @@ func TestLiveStateReportsAuthoritativePin(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("missing follow state")
+	}
+}
+
+func TestLiveStreamFailureIsReportedBeforeRecovery(t *testing.T) {
+	mgr := newManager(context.Background(), t.TempDir())
+	p := mgr.project("root", "key")
+	tab := &browserTab{id: "tab", ctx: context.Background()}
+	p.sessions["thread"] = &session{tabs: map[target.ID]*browserTab{"tab": tab}, order: []target.ID{"tab"}, selected: "tab"}
+	sub := &liveSubscription{manager: mgr, key: "key", thread: "thread"}
+	states, frames, events := make(chan LiveEvent, 1), make(chan LiveEvent, 1), make(chan LiveEvent, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	done := make(chan struct{})
+	go func() { defer close(done); sub.observe(ctx, states, frames, events) }()
+	defer func() { cancel(); <-done }()
+
+	select {
+	case event := <-events:
+		if event.Type != "error" || event.Code != "action_failed" || !strings.Contains(event.Message, "screencast") {
+			t.Fatalf("stream failure event: %+v", event)
+		}
+	case <-ctx.Done():
+		t.Fatal("stream failure was not reported")
+	}
+	select {
+	case state := <-states:
+		if state.TabID != "" || len(state.Tabs) != 1 || state.Tabs[0].ID != "tab" {
+			t.Fatalf("failed stream was advertised as viewable: %+v", state)
+		}
+	case <-ctx.Done():
+		t.Fatal("missing state after stream failure")
+	}
+	select {
+	case event := <-events:
+		t.Fatalf("repeated unchanged stream failure: %+v", event)
+	case <-time.After(120 * time.Millisecond):
+	}
+
+	tab.streamMu.Lock()
+	tab.streamUsers = 1
+	tab.streamMu.Unlock()
+	for {
+		select {
+		case state := <-states:
+			if state.TabID == "tab" {
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal("stream retry did not recover")
+		}
 	}
 }
 

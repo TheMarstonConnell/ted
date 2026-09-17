@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -279,6 +280,94 @@ func TestLiveSharedChromeIntegration(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
+}
+
+func TestLiveConcurrentViewerAndAgentSessionCreationIntegration(t *testing.T) {
+	if os.Getenv("TED_BROWSER_INTEGRATION") != "1" {
+		t.Skip("set TED_BROWSER_INTEGRATION=1")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	mgr := newManager(ctx, t.TempDir())
+	defer mgr.close()
+	root, err := ProjectRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := projectKey(root)
+	project := mgr.project(root, key)
+	if err := project.ensureStarted(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		command   LiveCommand
+		wantTabs  int
+		wantError string
+	}{
+		{name: "new", command: LiveCommand{Type: "new", URL: "data:text/html,<title>viewer</title>"}, wantTabs: 2},
+		{name: "initial navigate", command: LiveCommand{Type: "navigate", URL: "data:text/html,<title>viewer</title>"}, wantTabs: 1, wantError: "invalid_params"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			thread := "creation-race-" + strings.ReplaceAll(tc.name, " ", "-")
+			sub := &liveSubscription{manager: mgr, root: root, key: key, thread: thread}
+			observed := sub.session()
+			if observed != nil {
+				t.Fatal("test thread already has a session")
+			}
+
+			project.mu.Lock()
+			type sessionResult struct {
+				s       *session
+				created bool
+				err     error
+			}
+			agentResult := make(chan sessionResult, 1)
+			agentStarted := make(chan struct{})
+			go func() {
+				close(agentStarted)
+				s, created, err := project.getSession(ctx, thread, false)
+				agentResult <- sessionResult{s: s, created: created, err: err}
+			}()
+			<-agentStarted
+			time.Sleep(5 * time.Millisecond)
+			viewerResult := make(chan error, 1)
+			viewerStarted := make(chan struct{})
+			go func() {
+				close(viewerStarted)
+				viewerResult <- sub.open(ctx, tc.command, observed)
+			}()
+			<-viewerStarted
+			time.Sleep(5 * time.Millisecond)
+			project.mu.Unlock()
+
+			agent := <-agentResult
+			if agent.err != nil || !agent.created {
+				t.Fatalf("agent session creation: created=%v, err=%v", agent.created, agent.err)
+			}
+			viewerErr := <-viewerResult
+			if response := errorResponse(viewerErr); tc.wantError == "" {
+				if viewerErr != nil {
+					t.Fatalf("viewer command: %v", viewerErr)
+				}
+			} else if response.Error == nil || response.Error.Code != tc.wantError {
+				t.Fatalf("viewer error = %+v, want %s", response.Error, tc.wantError)
+			}
+			tabs, selected := agent.s.tabSnapshot()
+			if len(tabs) != tc.wantTabs {
+				t.Fatalf("tabs after concurrent creation = %d, want %d", len(tabs), tc.wantTabs)
+			}
+			if tc.command.Type == "new" {
+				sub.mu.Lock()
+				watch := sub.watch
+				sub.mu.Unlock()
+				if watch == "" || watch == string(selected) {
+					t.Fatalf("new did not create and pin a distinct viewer tab: watch=%q selected=%q", watch, selected)
+				}
+			}
+		})
+	}
 }
 
 func TestLivePageCreatedTabsIntegration(t *testing.T) {
