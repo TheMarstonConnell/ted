@@ -833,73 +833,238 @@ components:
       x-go-type-import:
         name: browser
         path: github.com/TheMarstonConnell/ted/browser
-      type: object
-      additionalProperties: false
-      required: [type]
       description: Typed commands only. Each type accepts only its relevant fields (see browser.md). Tab IDs are required except watch, new and initial navigate. Maximum wire message is 64 KiB.
-      properties:
-        type:
-          type: string
-          enum: [watch, new, navigate, back, forward, reload, close, mouse, key, text, release]
-        tab_id:
-          type: string
-          maxLength: 256
-        url:
-          type: string
-          minLength: 1
-          maxLength: 8192
-        x:
-          type: number
-          format: double
-          minimum: 0
-          maximum: 100000
-        y:
-          type: number
-          format: double
-          minimum: 0
-          maximum: 100000
-        delta_x:
-          type: number
-          format: double
-          minimum: -100000
-          maximum: 100000
-        delta_y:
-          type: number
-          format: double
-          minimum: -100000
-          maximum: 100000
-        event:
-          type: string
-          enum: [mouseMoved, mousePressed, mouseReleased, mouseWheel, keyDown, keyUp]
-        button:
-          type: string
-          enum: [none, left, middle, right]
-        buttons:
-          type: integer
-          minimum: 0
-          maximum: 7
-        click_count:
-          type: integer
-          minimum: 0
-          maximum: 3
-        key:
-          type: string
-          minLength: 1
-          maxLength: 128
-        code:
-          type: string
-          maxLength: 128
-        text:
-          type: string
-          maxLength: 16384
-        modifiers:
-          type: integer
-          minimum: 0
-          maximum: 15
-        key_code:
-          type: integer
-          minimum: 0
-          maximum: 65535
+      discriminator:
+        propertyName: type
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required: [type]
+        properties:
+          type:
+            type: string
+            enum: [watch]
+          tab_id:
+            type: string
+            maxLength: 256
+      - type: object
+        additionalProperties: false
+        required: [type]
+        properties:
+          type:
+            type: string
+            enum: [new]
+          url:
+            type: string
+            minLength: 1
+            maxLength: 8192
+      - type: object
+        additionalProperties: false
+        required: [type, url]
+        properties:
+          type:
+            type: string
+            enum: [navigate]
+          tab_id:
+            type: string
+            maxLength: 256
+          url:
+            type: string
+            minLength: 1
+            maxLength: 8192
+      - type: object
+        additionalProperties: false
+        required: [type, tab_id]
+        properties:
+          type:
+            type: string
+            enum: [back]
+          tab_id:
+            type: string
+            minLength: 1
+            maxLength: 256
+      - type: object
+        additionalProperties: false
+        required: [type, tab_id]
+        properties:
+          type:
+            type: string
+            enum: [forward]
+          tab_id:
+            type: string
+            minLength: 1
+            maxLength: 256
+      - type: object
+        additionalProperties: false
+        required: [type, tab_id]
+        properties:
+          type:
+            type: string
+            enum: [reload]
+          tab_id:
+            type: string
+            minLength: 1
+            maxLength: 256
+      - type: object
+        additionalProperties: false
+        required: [type, tab_id]
+        properties:
+          type:
+            type: string
+            enum: [close]
+          tab_id:
+            type: string
+            minLength: 1
+            maxLength: 256
+      - type: object
+        additionalProperties: false
+        required: [type, tab_id, event, x, y]
+        properties:
+          type:
+            type: string
+            enum: [mouse]
+          tab_id:
+            type: string
+            minLength: 1
+            maxLength: 256
+          event:
+            type: string
+            enum: [mouseMoved, mousePressed, mouseReleased, mouseWheel]
+          x:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 100000
+          y:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 100000
+          delta_x:
+            type: number
+            format: double
+            minimum: -100000
+            maximum: 100000
+          delta_y:
+            type: number
+            format: double
+            minimum: -100000
+            maximum: 100000
+          button:
+            type: string
+            enum: [none, left, middle, right]
+          buttons:
+            type: integer
+            minimum: 0
+            maximum: 7
+          click_count:
+            type: integer
+            minimum: 0
+            maximum: 3
+          modifiers:
+            type: integer
+            minimum: 0
+            maximum: 15
+        oneOf:
+        - properties:
+            event:
+              type: string
+              enum: [mouseMoved, mouseWheel]
+        - required: [button]
+          properties:
+            event:
+              type: string
+              enum: [mousePressed, mouseReleased]
+            button:
+              type: string
+              enum: [left, middle, right]
+      - type: object
+        additionalProperties: false
+        required: [type, tab_id, event]
+        properties:
+          type:
+            type: string
+            enum: [key]
+          tab_id:
+            type: string
+            minLength: 1
+            maxLength: 256
+          event:
+            type: string
+            enum: [keyDown, keyUp]
+          key:
+            type: string
+            minLength: 1
+            maxLength: 128
+          code:
+            type: string
+            maxLength: 128
+          text:
+            type: string
+            maxLength: 16384
+          modifiers:
+            type: integer
+            minimum: 0
+            maximum: 15
+          key_code:
+            type: integer
+            minimum: 0
+            maximum: 65535
+        oneOf:
+        - required: [key]
+          properties:
+            key:
+              type: string
+              minLength: 1
+              maxLength: 128
+            code:
+              type: string
+              enum: ['']
+        - required: [code]
+          properties:
+            key:
+              type: string
+              maxLength: 0
+            code:
+              type: string
+              minLength: 1
+              maxLength: 128
+        - required: [key, code]
+          properties:
+            key:
+              type: string
+              minLength: 1
+              maxLength: 128
+            code:
+              type: string
+              minLength: 1
+              maxLength: 128
+      - type: object
+        additionalProperties: false
+        required: [type, tab_id, text]
+        properties:
+          type:
+            type: string
+            enum: [text]
+          tab_id:
+            type: string
+            minLength: 1
+            maxLength: 256
+          text:
+            type: string
+            minLength: 1
+            maxLength: 16384
+      - type: object
+        additionalProperties: false
+        required: [type, tab_id]
+        properties:
+          type:
+            type: string
+            enum: [release]
+          tab_id:
+            type: string
+            minLength: 1
+            maxLength: 256
     BrowserLiveTab:
       x-go-type: browser.LiveTab
       x-go-type-import:

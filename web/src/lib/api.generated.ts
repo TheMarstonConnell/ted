@@ -357,28 +357,90 @@ export interface components {
         /** @description Typed commands only. Each type accepts only its relevant fields (see browser.md). Tab IDs are required except watch, new and initial navigate. Maximum wire message is 64 KiB. */
         BrowserLiveCommand: {
             /** @enum {string} */
-            type: "watch" | "new" | "navigate" | "back" | "forward" | "reload" | "close" | "mouse" | "key" | "text" | "release";
+            type: "watch";
             tab_id?: string;
+        } | {
+            /** @enum {string} */
+            type: "new";
             url?: string;
+        } | {
+            /** @enum {string} */
+            type: "navigate";
+            tab_id?: string;
+            url: string;
+        } | {
+            /** @enum {string} */
+            type: "back";
+            tab_id: string;
+        } | {
+            /** @enum {string} */
+            type: "forward";
+            tab_id: string;
+        } | {
+            /** @enum {string} */
+            type: "reload";
+            tab_id: string;
+        } | {
+            /** @enum {string} */
+            type: "close";
+            tab_id: string;
+        } | ({
+            /** @enum {string} */
+            type: "mouse";
+            tab_id: string;
+            /** @enum {string} */
+            event: "mouseMoved" | "mousePressed" | "mouseReleased" | "mouseWheel";
             /** Format: double */
-            x?: number;
+            x: number;
             /** Format: double */
-            y?: number;
+            y: number;
             /** Format: double */
             delta_x?: number;
             /** Format: double */
             delta_y?: number;
             /** @enum {string} */
-            event?: "mouseMoved" | "mousePressed" | "mouseReleased" | "mouseWheel" | "keyDown" | "keyUp";
-            /** @enum {string} */
             button?: "none" | "left" | "middle" | "right";
             buttons?: number;
             click_count?: number;
+            modifiers?: number;
+        } & ({
+            /** @enum {string} */
+            event?: "mouseMoved" | "mouseWheel";
+        } | {
+            /** @enum {string} */
+            event?: "mousePressed" | "mouseReleased";
+            /** @enum {string} */
+            button: "left" | "middle" | "right";
+        })) | ({
+            /** @enum {string} */
+            type: "key";
+            tab_id: string;
+            /** @enum {string} */
+            event: "keyDown" | "keyUp";
             key?: string;
             code?: string;
             text?: string;
             modifiers?: number;
             key_code?: number;
+        } & ({
+            key: string;
+            /** @enum {string} */
+            code?: "";
+        } | {
+            key?: string;
+            code: string;
+        } | {
+            key: string;
+            code: string;
+        })) | {
+            /** @enum {string} */
+            type: "text";
+            tab_id: string;
+            text: string;
+        } | {
+            /** @enum {string} */
+            type: "release";
+            tab_id: string;
         };
         BrowserLiveTab: {
             id: string;

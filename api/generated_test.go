@@ -3,9 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/TheMarstonConnell/ted/browser"
 )
 
 // This runs in ordinary go test / CI, not just in a developer's generation
@@ -102,5 +106,98 @@ func TestWorkspaceContract(t *testing.T) {
 		if err := spec.Components.Schemas["ErrorCode"].Value.VisitJSON(code); err != nil {
 			t.Errorf("ErrorCode rejects %q: %v", code, err)
 		}
+	}
+}
+
+func TestBrowserLiveCommandContract(t *testing.T) {
+	spec, err := GetSwagger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := spec.Components.Schemas["BrowserLiveCommand"].Value
+
+	valid := []string{
+		`{"type":"watch"}`,
+		`{"type":"watch","tab_id":""}`,
+		`{"type":"new"}`,
+		`{"type":"new","url":"https://example.com"}`,
+		`{"type":"navigate","url":"about:blank"}`,
+		`{"type":"navigate","tab_id":"","url":"data:text/plain,hello"}`,
+		`{"type":"back","tab_id":"tab"}`,
+		`{"type":"forward","tab_id":"tab"}`,
+		`{"type":"reload","tab_id":"tab"}`,
+		`{"type":"close","tab_id":"tab"}`,
+		`{"type":"mouse","tab_id":"tab","event":"mouseMoved","x":0,"y":0}`,
+		`{"type":"mouse","tab_id":"tab","event":"mouseWheel","x":100000,"y":100000,"button":"none","buttons":7,"click_count":3,"delta_x":-100000,"delta_y":100000,"modifiers":15}`,
+		`{"type":"mouse","tab_id":"tab","event":"mousePressed","x":1.5,"y":2.5,"button":"left"}`,
+		`{"type":"mouse","tab_id":"tab","event":"mouseReleased","x":1,"y":2,"button":"middle"}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","key":"a"}`,
+		`{"type":"key","tab_id":"tab","event":"keyUp","code":"KeyA"}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","key":"a","code":"KeyA","text":"a","key_code":65,"modifiers":15}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","key":"a","code":""}`,
+		`{"type":"text","tab_id":"tab","text":"hello"}`,
+		`{"type":"release","tab_id":"tab"}`,
+		fmt.Sprintf(`{"type":"watch","tab_id":%q}`, strings.Repeat("a", 256)),
+		fmt.Sprintf(`{"type":"key","tab_id":"tab","event":"keyDown","key":%q}`, strings.Repeat("a", 128)),
+		fmt.Sprintf(`{"type":"text","tab_id":"tab","text":%q}`, strings.Repeat("a", 16384)),
+	}
+	invalid := []string{
+		`{}`,
+		`{"type":"unknown"}`,
+		`{"type":"watch","url":"https://example.com"}`,
+		`{"type":"new","tab_id":"tab"}`,
+		`{"type":"navigate"}`,
+		`{"type":"navigate","url":""}`,
+		`{"type":"back"}`,
+		`{"type":"forward","tab_id":""}`,
+		`{"type":"reload","tab_id":"tab","url":"https://example.com"}`,
+		`{"type":"close","tab_id":null}`,
+		`{"type":"mouse","tab_id":"tab","event":"mouseMoved","y":1}`,
+		`{"type":"mouse","tab_id":"tab","event":"mouseMoved","x":1}`,
+		`{"type":"mouse","tab_id":"tab","x":1,"y":1}`,
+		`{"type":"mouse","event":"mouseMoved","x":1,"y":1}`,
+		`{"type":"mouse","tab_id":"tab","event":"mousePressed","x":1,"y":1}`,
+		`{"type":"mouse","tab_id":"tab","event":"mouseReleased","x":1,"y":1,"button":"none"}`,
+		`{"type":"mouse","tab_id":"tab","event":"mouseMoved","x":1,"y":1,"button":"primary"}`,
+		`{"type":"mouse","tab_id":"tab","event":"keyDown","x":1,"y":1}`,
+		`{"type":"mouse","tab_id":"tab","event":"mouseMoved","x":-1,"y":1}`,
+		`{"type":"mouse","tab_id":"tab","event":"mouseMoved","x":1,"y":1,"buttons":1.5}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown"}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","key":""}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","code":""}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","key":"","code":"KeyA"}`,
+		`{"type":"key","tab_id":"tab","event":"keypress","key":"a"}`,
+		`{"type":"key","event":"keyDown","key":"a"}`,
+		`{"type":"key","tab_id":"tab","event":"keyDown","key":"a","button":"left"}`,
+		`{"type":"text","tab_id":"tab"}`,
+		`{"type":"text","tab_id":"tab","text":""}`,
+		`{"type":"text","text":"hello"}`,
+		`{"type":"release"}`,
+		`{"type":"release","tab_id":"tab","modifiers":0}`,
+		fmt.Sprintf(`{"type":"back","tab_id":%q}`, strings.Repeat("a", 257)),
+		fmt.Sprintf(`{"type":"key","tab_id":"tab","event":"keyDown","code":%q}`, strings.Repeat("a", 129)),
+		fmt.Sprintf(`{"type":"text","tab_id":"tab","text":%q}`, strings.Repeat("a", 16385)),
+	}
+
+	check := func(raw string, wantValid bool) {
+		t.Helper()
+		var value any
+		if err := json.Unmarshal([]byte(raw), &value); err != nil {
+			t.Fatalf("bad test JSON %q: %v", raw, err)
+		}
+		schemaErr := schema.VisitJSON(value)
+		_, parserErr := browser.ParseLiveCommand([]byte(raw))
+		if got := schemaErr == nil; got != wantValid {
+			t.Errorf("schema validity for %s = %v, want %v (error: %v)", raw, got, wantValid, schemaErr)
+		}
+		if got := parserErr == nil; got != wantValid {
+			t.Errorf("parser validity for %s = %v, want %v (error: %v)", raw, got, wantValid, parserErr)
+		}
+	}
+	for _, raw := range valid {
+		check(raw, true)
+	}
+	for _, raw := range invalid {
+		check(raw, false)
 	}
 }
