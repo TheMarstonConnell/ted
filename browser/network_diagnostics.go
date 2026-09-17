@@ -13,7 +13,7 @@ func (t *browserTab) handleNetworkDiagnostic(event any) {
 	case *network.EventLoadingFailed:
 		item := map[string]any{
 			"source": "network", "type": "loading_failed", "text": e.ErrorText,
-			"request_id": e.RequestID, "resource_type": e.Type, "canceled": e.Canceled,
+			"resource_type": e.Type, "canceled": e.Canceled,
 		}
 		if e.BlockedReason != "" {
 			item["blocked_reason"] = e.BlockedReason
@@ -28,9 +28,9 @@ func (t *browserTab) handleNetworkDiagnostic(event any) {
 		}
 		t.appendError(map[string]any{
 			"source": "network", "type": "http_error",
-			"text":       fmt.Sprintf("HTTP %d", e.Response.Status),
-			"request_id": e.RequestID, "resource_type": e.Type,
-			"status": e.Response.Status,
+			"text":          fmt.Sprintf("HTTP %d", e.Response.Status),
+			"resource_type": e.Type,
+			"status":        e.Response.Status,
 		})
 	}
 }

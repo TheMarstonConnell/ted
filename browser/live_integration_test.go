@@ -333,6 +333,14 @@ func TestLiveConcurrentViewerAndAgentSessionCreationIntegration(t *testing.T) {
 		{name: "initial navigate", command: LiveCommand{Type: "navigate", URL: "data:text/html,<title>viewer</title>"}, wantTabs: 1, wantError: "invalid_params"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			wire, err := json.Marshal(tc.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command, err := ParseLiveCommand(wire)
+			if err != nil {
+				t.Fatal(err)
+			}
 			thread := "creation-race-" + strings.ReplaceAll(tc.name, " ", "-")
 			sub := &liveSubscription{manager: mgr, root: root, key: key, thread: thread}
 			observed := sub.session()
@@ -359,7 +367,7 @@ func TestLiveConcurrentViewerAndAgentSessionCreationIntegration(t *testing.T) {
 			viewerStarted := make(chan struct{})
 			go func() {
 				close(viewerStarted)
-				viewerResult <- sub.open(ctx, tc.command, observed)
+				viewerResult <- sub.open(ctx, command, observed)
 			}()
 			<-viewerStarted
 			time.Sleep(5 * time.Millisecond)

@@ -63,11 +63,6 @@ func addressHostPort(raw string) bool {
 	if !strings.EqualFold(host, "localhost") && !strings.Contains(host, ".") {
 		return false
 	}
-	for _, c := range port {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
 	return true
 }
 

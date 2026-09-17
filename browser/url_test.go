@@ -3,7 +3,10 @@ package browser
 import (
 	"encoding/json"
 	"errors"
+	"net"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeURL(t *testing.T) {
@@ -39,13 +42,6 @@ func TestNormalizeURL(t *testing.T) {
 			if again, err := normalizeURL(got); err != nil || again != got {
 				t.Fatalf("normalization is not idempotent: %q, %v", again, err)
 			}
-			for _, kind := range []string{"new", "navigate"} {
-				data, _ := json.Marshal(LiveCommand{Type: kind, URL: tt.input})
-				command, err := ParseLiveCommand(data)
-				if err != nil || command.URL != tt.want {
-					t.Errorf("ParseLiveCommand(%s) = %+v, %v", data, command, err)
-				}
-			}
 		})
 	}
 }
@@ -66,12 +62,6 @@ func TestNormalizeURLRejectsUnsafeOrMalformedAddresses(t *testing.T) {
 			if got != "" || !errors.As(err, &se) || se.code != "invalid_params" {
 				t.Fatalf("normalizeURL(%q) = %q, %v", raw, got, err)
 			}
-			for _, kind := range []string{"new", "navigate"} {
-				data, _ := json.Marshal(map[string]string{"type": kind, "url": raw})
-				if _, err := ParseLiveCommand(data); err == nil {
-					t.Errorf("ParseLiveCommand accepted %s", data)
-				}
-			}
 		})
 	}
 }
@@ -83,5 +73,41 @@ func TestLiveNewWithoutURLStillOpensBlank(t *testing.T) {
 	}
 	if _, err := ParseLiveCommand([]byte(`{"type":"navigate"}`)); err == nil {
 		t.Fatal("navigate without URL accepted")
+	}
+}
+
+func TestLiveURLBoundSurvivesForwarding(t *testing.T) {
+	for _, prefix := range []string{"example.test/", "//example.test/", "::1/", "http://example.test/"} {
+		for _, kind := range []string{"new", "navigate"} {
+			raw := prefix + strings.Repeat("é", 8192-len(prefix))
+			data, _ := json.Marshal(LiveCommand{Type: kind, URL: raw})
+			command, err := ParseLiveCommand(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			clientConn, daemonConn := net.Pipe()
+			_ = daemonConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			client := &LiveClient{conn: clientConn}
+			sent := make(chan error, 1)
+			go func() { sent <- client.Send(command) }()
+			var forwarded json.RawMessage
+			err = json.NewDecoder(daemonConn).Decode(&forwarded)
+			_ = client.Close()
+			_ = daemonConn.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := <-sent; err != nil {
+				t.Fatal(err)
+			}
+			daemonCommand, err := ParseLiveCommand(forwarded)
+			if err != nil || daemonCommand.URL != raw || daemonCommand.normalizedURL != command.normalizedURL {
+				t.Fatalf("%s %s did not survive forwarding: %v", kind, prefix, err)
+			}
+			data, _ = json.Marshal(LiveCommand{Type: kind, URL: raw + "é"})
+			if _, err := ParseLiveCommand(data); err == nil {
+				t.Fatalf("%s %s accepted 8193 input characters", kind, prefix)
+			}
+		}
 	}
 }

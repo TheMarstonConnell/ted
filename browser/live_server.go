@@ -315,7 +315,7 @@ func (l *liveSubscription) execute(ctx context.Context, c LiveCommand) error {
 	}
 	switch c.Type {
 	case "navigate":
-		return liveNavigate(ctx, t, c.URL)
+		return liveNavigate(ctx, t, c.normalizedURL)
 	case "close":
 		_ = l.release(ctx, t)
 		_, err := s.tabClose(ctx, map[string]any{"id": c.TabID})
@@ -397,7 +397,7 @@ func (l *liveSubscription) open(ctx context.Context, c LiveCommand, s *session) 
 	l.watch = string(t.id)
 	l.mu.Unlock()
 	if c.URL != "" {
-		return liveNavigate(ctx, t, c.URL)
+		return liveNavigate(ctx, t, c.normalizedURL)
 	}
 	return nil
 }

@@ -465,7 +465,7 @@ function BrowserViewport({
       frame.height,
     );
     if (event.pointerType === "touch") {
-      event.preventDefault();
+      if (!actualSize) event.preventDefault();
       if (kind === "mousePressed") {
         element.setPointerCapture(event.pointerId);
         capturedPointer.current = event.pointerId;
@@ -482,6 +482,7 @@ function BrowserViewport({
       const gesture = touch.current;
       if (!gesture || gesture.pointerId !== event.pointerId) return;
       if (kind === "mouseMoved") {
+        if (actualSize) return;
         if (
           !gesture.panning &&
           Math.hypot(
@@ -490,12 +491,7 @@ function BrowserViewport({
           ) >= 8
         )
           gesture.panning = true;
-        if (gesture.panning && actualSize) {
-          host.current?.scrollBy(
-            gesture.lastX - event.clientX,
-            gesture.lastY - event.clientY,
-          );
-        } else if (gesture.panning && point) {
+        if (gesture.panning && point) {
           queueWheel({
             type: "mouse",
             tab_id: frame.tab_id,
@@ -691,7 +687,7 @@ function BrowserViewport({
             autoCapitalize="off"
             autoComplete="off"
             spellCheck={false}
-            className="absolute inset-0 size-full resize-none cursor-default touch-none text-base md:text-sm opacity-0"
+            className={`absolute inset-0 size-full resize-none cursor-default text-base md:text-sm opacity-0 ${actualSize ? "touch-pan-x touch-pan-y" : "touch-none"}`}
             onBlur={() => {
               if (!blurring.current) release();
             }}

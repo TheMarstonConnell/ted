@@ -23,9 +23,9 @@ retains at most 500 entries, including JavaScript exceptions, Chrome log warning
 and errors, and network failure metadata observed after attachment:
 
 - `source: network`, `type: http_error`: an HTTP response of 400 or above,
-  including its numeric `status`, `request_id` and `resource_type`.
+  including its numeric `status` and `resource_type`.
 - `source: network`, `type: loading_failed`: Chrome's `text` (for example,
-  `net::ERR_CERT_AUTHORITY_INVALID`), `request_id`, `resource_type`, `canceled`,
+  `net::ERR_CERT_AUTHORITY_INVALID`), `resource_type`, `canceled`,
   and, when supplied by Chrome, `blocked_reason` and `cors_error`.
 
 HTTP error pages are still navigable: a successful `open` does **not** mean the
@@ -35,8 +35,7 @@ not a site restriction. Chrome log entries may describe the same failure as a
 network entry.
 
 Network metadata intentionally omits URLs, headers, cookies, bodies and CORS
-parameter values. Request IDs can be correlated with explicitly collected raw CDP
-network events when deeper investigation is necessary. Raw CDP and existing
+parameter values. Raw CDP and existing
 console/log output may contain secrets; inspect and share them cautiously. These
 network records are memory-only, not added to the action trace. They are not a
 complete HAR or a retrospective record of requests before target attachment.
