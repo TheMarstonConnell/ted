@@ -178,8 +178,11 @@ func isNotExist(err error) bool { return errors.Is(err, os.ErrNotExist) }
 
 // existingSocketPath computes the daemon endpoint without creating or chmodding
 // any state. Keep this in sync with socketPath.
-func existingSocketPath() (string, error) {
-	h := strings.TrimSpace(os.Getenv("TED_HOME"))
+func existingSocketPath(home string) (string, error) {
+	h := strings.TrimSpace(home)
+	if h == "" {
+		h = strings.TrimSpace(os.Getenv("TED_HOME"))
+	}
 	if h == "" {
 		user, err := os.UserHomeDir()
 		if err != nil {

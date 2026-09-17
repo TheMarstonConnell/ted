@@ -515,7 +515,18 @@ func TestBrowserInputBoundsAndBackpressure(t *testing.T) {
 
 func TestBrowserFrameCoalescingAndSlowReader(t *testing.T) {
 	live := newFakeBrowserLive()
-	f := browserFixture(t, func(context.Context, browser.Request) (browserLiveConnection, error) { return live, nil })
+	f := newHTTPFixture(t, nil)
+	f.server.Close()
+	f.server = httptest.NewUnstartedServer(newHandler(f.s, func(context.Context, browser.Request) (browserLiveConnection, error) { return live, nil }))
+	f.server.Config.ConnState = func(conn net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			if tcp, ok := conn.(*net.TCPConn); ok {
+				_ = tcp.SetWriteBuffer(1024)
+			}
+		}
+	}
+	f.server.Start()
+	t.Cleanup(f.server.Close)
 	a := f.agent(f.project())
 	c := dialBrowser(t, f, a.ID)
 	if tcp, ok := c.UnderlyingConn().(*net.TCPConn); ok {
@@ -856,5 +867,325 @@ func TestBrowserDefaultConnectorUsesRuntimeSocketNotProcessHome(t *testing.T) {
 		t.Fatal(err)
 	case <-time.After(time.Second):
 		t.Fatal("default connector did not forward command")
+	}
+}
+
+type browserCloseCall struct {
+	home, project, thread string
+}
+
+func TestBrowserViewerSessionLifecycle(t *testing.T) {
+	lives := make(chan *fakeBrowserLive, 4)
+	f := browserFixture(t, func(context.Context, browser.Request) (browserLiveConnection, error) {
+		live := newFakeBrowserLive()
+		lives <- live
+		return live, nil
+	})
+	project := f.project()
+	a := f.agent(project)
+	calls := make(chan browserCloseCall, 4)
+	f.s.mu.Lock()
+	f.s.browserClose = func(_ context.Context, home, project, thread string) error {
+		calls <- browserCloseCall{home, project, thread}
+		return nil
+	}
+	f.s.mu.Unlock()
+
+	first := dialBrowser(t, f, a.ID)
+	firstLive := <-lives
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	awaitBrowserClosed(t, firstLive)
+	select {
+	case call := <-calls:
+		t.Fatalf("ordinary disconnect closed session: %+v", call)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	second := dialBrowser(t, f, a.ID)
+	secondLive := <-lives
+	if _, err := f.s.SetSettled(a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	want := browserCloseCall{filepath.Join(f.s.dir, "runtime"), project.Root, a.ID}
+	select {
+	case call := <-calls:
+		if call != want {
+			t.Fatalf("settle close = %+v, want %+v", call, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("settle did not close viewer-created session")
+	}
+	awaitBrowserClosed(t, secondLive)
+	_ = second.Close()
+
+	third := dialBrowser(t, f, a.ID)
+	thirdLive := <-lives
+	if err := f.s.DeleteProject(project.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case call := <-calls:
+		if call != want {
+			t.Fatalf("delete close = %+v, want %+v", call, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("delete did not close reconnected settled viewer session")
+	}
+	awaitBrowserClosed(t, thirdLive)
+	_ = third.Close()
+}
+
+func TestBrowserSettleCancelsOpeningViewerBeforeCleanup(t *testing.T) {
+	entered := make(chan struct{})
+	exited := make(chan struct{})
+	f := browserFixture(t, func(ctx context.Context, _ browser.Request) (browserLiveConnection, error) {
+		close(entered)
+		<-ctx.Done()
+		close(exited)
+		return nil, ctx.Err()
+	})
+	project := f.project()
+	a := f.agent(project)
+	calls := make(chan browserCloseCall, 1)
+	f.s.mu.Lock()
+	f.s.browserClose = func(_ context.Context, home, project, thread string) error {
+		calls <- browserCloseCall{home, project, thread}
+		return nil
+	}
+	f.s.mu.Unlock()
+
+	dialed := make(chan struct{})
+	go func() {
+		defer close(dialed)
+		c, response, _ := websocket.DefaultDialer.Dial(browserWSURL(f, a.ID), nil)
+		if c != nil {
+			_ = c.Close()
+		}
+		if response != nil {
+			_ = response.Body.Close()
+		}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("connector not entered")
+	}
+	if _, err := f.s.SetSettled(a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-exited:
+	case <-time.After(time.Second):
+		t.Fatal("opening viewer was not cancelled")
+	}
+	select {
+	case call := <-calls:
+		want := browserCloseCall{filepath.Join(f.s.dir, "runtime"), project.Root, a.ID}
+		if call != want {
+			t.Fatalf("settle close = %+v, want %+v", call, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("opening viewer session was not cleaned up")
+	}
+	select {
+	case <-dialed:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled handshake did not return")
+	}
+}
+
+func TestBrowserShutdownClosesViewerSessionWithoutRuntimeInstance(t *testing.T) {
+	s, err := NewService(t.TempDir(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = s.Close(context.Background())
+		}
+	})
+	server := httptest.NewServer(newHandler(s, func(context.Context, browser.Request) (browserLiveConnection, error) {
+		return newFakeBrowserLive(), nil
+	}))
+	t.Cleanup(server.Close)
+	f := &httpFixture{s: s, server: server, t: t}
+	project, err := s.CreateProject(CreateProjectRequest{Name: "shutdown", Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.CreateAgent(CreateAgentRequest{ProjectID: project.ID}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := make(chan browserCloseCall, 1)
+	s.mu.Lock()
+	s.browserClose = func(_ context.Context, home, project, thread string) error {
+		calls <- browserCloseCall{home, project, thread}
+		return nil
+	}
+	if s.instances[a.ID] != nil {
+		t.Fatal("viewer-only agent unexpectedly has a runtime instance")
+	}
+	s.mu.Unlock()
+	c := dialBrowser(t, f, a.ID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	closed = true
+	select {
+	case call := <-calls:
+		want := browserCloseCall{filepath.Join(s.dir, "runtime"), project.Root, a.ID}
+		if call != want {
+			t.Fatalf("shutdown close = %+v, want %+v", call, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not close viewer-only session")
+	}
+	_ = c.Close()
+}
+
+func TestBrowserSettleCleanupDoesNotCreateRuntimeHome(t *testing.T) {
+	f := browserFixture(t, func(context.Context, browser.Request) (browserLiveConnection, error) {
+		return newFakeBrowserLive(), nil
+	})
+	project := f.project()
+	a := f.agent(project)
+	c := dialBrowser(t, f, a.ID)
+	if _, err := f.s.SetSettled(a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Close()
+	if _, err := os.Stat(filepath.Join(f.s.dir, "runtime")); !os.IsNotExist(err) {
+		t.Fatalf("settle cleanup created runtime home: %v", err)
+	}
+}
+
+func TestBrowserProjectDeletionRetainsIdentityAfterCleanupFailure(t *testing.T) {
+	lives := make(chan *fakeBrowserLive, 2)
+	f := browserFixture(t, func(context.Context, browser.Request) (browserLiveConnection, error) {
+		live := newFakeBrowserLive()
+		lives <- live
+		return live, nil
+	})
+	project := f.project()
+	a := f.agent(project)
+	f.s.mu.Lock()
+	f.s.browserClose = func(context.Context, string, string, string) error { return nil }
+	f.s.mu.Unlock()
+	first := dialBrowser(t, f, a.ID)
+	firstLive := <-lives
+	if _, err := f.s.SetSettled(a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	awaitBrowserClosed(t, firstLive)
+	_ = first.Close()
+
+	second := dialBrowser(t, f, a.ID)
+	secondLive := <-lives
+	f.s.mu.Lock()
+	f.s.browserClose = func(context.Context, string, string, string) error {
+		return errors.New("close unavailable")
+	}
+	f.s.mu.Unlock()
+	assertStatus(t, f.s.DeleteProject(project.ID), 503)
+	awaitBrowserClosed(t, secondLive)
+	_ = second.Close()
+	if _, err := f.s.GetAgent(a.ID); err != nil {
+		t.Fatalf("failed cleanup discarded agent identity: %v", err)
+	}
+	if _, err := f.s.GetProject(project.ID); err != nil {
+		t.Fatalf("failed cleanup discarded project identity: %v", err)
+	}
+
+	calls := make(chan browserCloseCall, 1)
+	f.s.mu.Lock()
+	f.s.browserClose = func(_ context.Context, home, project, thread string) error {
+		calls <- browserCloseCall{home, project, thread}
+		return nil
+	}
+	f.s.mu.Unlock()
+	if err := f.s.DeleteProject(project.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case call := <-calls:
+		want := browserCloseCall{filepath.Join(f.s.dir, "runtime"), project.Root, a.ID}
+		if call != want {
+			t.Fatalf("retried delete close = %+v, want %+v", call, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("project deletion did not retry retained browser identity")
+	}
+}
+
+func TestBrowserShutdownRetainsAgentCloseForUntrackedRuntimeInstance(t *testing.T) {
+	dir, err := os.MkdirTemp("", "ted-close-instance-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	s, err := NewService(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeHome := filepath.Join(s.dir, "runtime")
+	socketDir := filepath.Join(runtimeHome, "browser")
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", filepath.Join(socketDir, "daemon.sock"))
+	if err != nil {
+		t.Skipf("Unix sockets unavailable: %v", err)
+	}
+	defer listener.Close()
+	root := t.TempDir()
+	instance, err := agent.NewAgentIn(nil, nil, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.SetIdentity("misc-runtime", root, root, runtimeHome); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.instances["misc-runtime"] = instance
+	s.mu.Unlock()
+	request := make(chan browser.Request, 1)
+	serveErr := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			serveErr <- err
+			return
+		}
+		defer conn.Close()
+		var req browser.Request
+		if err := json.NewDecoder(conn).Decode(&req); err != nil {
+			serveErr <- err
+			return
+		}
+		request <- req
+		serveErr <- json.NewEncoder(conn).Encode(browser.Response{OK: true})
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-serveErr; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case req := <-request:
+		if req.Project != root || req.Thread != "misc-runtime" || req.Action != "session-close" {
+			t.Fatalf("runtime instance close request = %+v", req)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown skipped untracked runtime instance")
 	}
 }

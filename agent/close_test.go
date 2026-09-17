@@ -23,16 +23,16 @@ func TestCloseUsesStableAgentIdentity(t *testing.T) {
 	original := closeBrowserSessionIfRunning
 	defer func() { closeBrowserSessionIfRunning = original }()
 
-	var project, thread string
-	closeBrowserSessionIfRunning = func(_ context.Context, gotProject, gotThread string) error {
-		project, thread = gotProject, gotThread
+	var home, project, thread string
+	closeBrowserSessionIfRunning = func(_ context.Context, gotHome, gotProject, gotThread string) error {
+		home, project, thread = gotHome, gotProject, gotThread
 		return nil
 	}
-	a := &Agent{threadID: "thread-123", projectRoot: "/project/root"}
+	a := &Agent{threadID: "thread-123", projectRoot: "/project/root", home: "/runtime/home"}
 	if err := a.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if project != "/project/root" || thread != "thread-123" {
-		t.Fatalf("close identity = project %q thread %q", project, thread)
+	if home != "/runtime/home" || project != "/project/root" || thread != "thread-123" {
+		t.Fatalf("close identity = home %q project %q thread %q", home, project, thread)
 	}
 }

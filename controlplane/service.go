@@ -30,22 +30,26 @@ type runningTurn struct {
 }
 
 type Service struct {
-	mu           sync.RWMutex
-	dir          string
-	logger       *zap.Logger
-	providers    []agent.Provider
-	catalog      *agent.Agent
-	state        diskState
-	running      map[string]*runningTurn
-	instances    map[string]*agent.Agent
-	changed      chan struct{}
-	closing      bool
-	storageErr   error
-	workers      sync.WaitGroup
-	releaseLock  func() error
-	save         func(string, diskState) error
-	store        *sqliteStore
-	pullRequests *pullRequestResolver
+	mu                sync.RWMutex
+	dir               string
+	logger            *zap.Logger
+	providers         []agent.Provider
+	catalog           *agent.Agent
+	state             diskState
+	running           map[string]*runningTurn
+	instances         map[string]*agent.Agent
+	browserClose      browserSessionCloser
+	browserSessions   map[string]bool
+	browserClients    map[string]map[uint64]context.CancelFunc
+	nextBrowserClient uint64
+	changed           chan struct{}
+	closing           bool
+	storageErr        error
+	workers           sync.WaitGroup
+	releaseLock       func() error
+	save              func(string, diskState) error
+	store             *sqliteStore
+	pullRequests      *pullRequestResolver
 }
 
 func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Service, error) {
@@ -68,7 +72,7 @@ func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Se
 		unlock()
 		return nil, err
 	}
-	s := &Service{dir: dir, logger: logger, providers: append([]agent.Provider(nil), providers...), catalog: agent.NewAgent(logger, providers), state: state, running: map[string]*runningTurn{}, instances: map[string]*agent.Agent{}, changed: make(chan struct{}), releaseLock: unlock, store: store, pullRequests: newPullRequestResolver()}
+	s := &Service{dir: dir, logger: logger, providers: append([]agent.Provider(nil), providers...), catalog: agent.NewAgent(logger, providers), state: state, running: map[string]*runningTurn{}, instances: map[string]*agent.Agent{}, browserClose: closeBrowserSession, browserSessions: map[string]bool{}, browserClients: map[string]map[uint64]context.CancelFunc{}, changed: make(chan struct{}), releaseLock: unlock, store: store, pullRequests: newPullRequestResolver()}
 	// A durable "running" record is evidence of interrupted work, never a
 	// request to repeat tools. Even graceful shutdown follows this recovery rule.
 	recovery := newStateChanges()
@@ -319,7 +323,8 @@ func (s *Service) DeleteProject(id string) error {
 	if err := s.writableLocked(); err != nil {
 		return err
 	}
-	if _, ok := s.state.Projects[id]; !ok {
+	project, ok := s.state.Projects[id]
+	if !ok {
 		return problem(404, "not_found", "project not found")
 	}
 	for agentID, a := range s.state.Agents {
@@ -335,6 +340,13 @@ func (s *Service) DeleteProject(id string) error {
 		// Cancellation is asynchronous; workers still need their final records.
 		if s.running[agentID] != nil {
 			return problem(409, "project_not_empty", "settled agents are still stopping; try deleting the project again shortly")
+		}
+	}
+	for agentID, a := range s.state.Agents {
+		if a.Agent.ProjectID == id {
+			if err := s.closeBrowserSessionLocked(agentID, project.Root); err != nil {
+				return problem(503, "browser_unavailable", "could not close project browser sessions")
+			}
 		}
 	}
 	before := newStateChanges()
@@ -822,8 +834,19 @@ func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 			if r := s.running[target.Agent.ID]; r != nil {
 				r.stopped = true
 				r.cancel()
-			} else if instance := s.instances[target.Agent.ID]; instance != nil {
-				_ = instance.Close()
+			}
+			if instance := s.instances[target.Agent.ID]; instance != nil {
+				s.cancelBrowserViewersLocked(target.Agent.ID)
+				if err := instance.Close(); err == nil {
+					delete(s.browserSessions, target.Agent.ID)
+				} else {
+					if s.browserSessions == nil {
+						s.browserSessions = make(map[string]bool)
+					}
+					s.browserSessions[target.Agent.ID] = true
+				}
+			} else if project, ok := s.state.Projects[target.Agent.ProjectID]; ok {
+				_ = s.closeBrowserSessionLocked(target.Agent.ID, project.Root)
 			}
 		}
 	}
@@ -1117,6 +1140,9 @@ func (s *Service) BeginShutdown() error {
 		r.shutdown = true
 		r.cancel()
 	}
+	for id := range s.browserClients {
+		s.cancelBrowserViewersLocked(id)
+	}
 	s.notifyLocked()
 	return err
 }
@@ -1127,16 +1153,45 @@ func (s *Service) Close(ctx context.Context) error {
 	go func() {
 		s.workers.Wait()
 		s.mu.Lock()
-		instances := make([]*agent.Agent, 0, len(s.instances))
-		for _, instance := range s.instances {
-			instances = append(instances, instance)
+		instances := make(map[string]*agent.Agent, len(s.instances))
+		for id, instance := range s.instances {
+			instances[id] = instance
 		}
+		viewerIdentities := make(map[string]string, len(s.browserSessions))
+		for id := range s.browserSessions {
+			if instances[id] != nil {
+				continue
+			}
+			if a := s.state.Agents[id]; a != nil {
+				if project, ok := s.state.Projects[a.Agent.ProjectID]; ok {
+					viewerIdentities[id] = project.Root
+				}
+			}
+		}
+		closer := s.browserClose
+		if closer == nil {
+			closer = closeBrowserSession
+		}
+		home := filepath.Join(s.dir, "runtime")
 		s.instances = map[string]*agent.Agent{}
+		s.browserSessions = map[string]bool{}
 		s.mu.Unlock()
 		var cleanup sync.WaitGroup
 		for _, instance := range instances {
 			cleanup.Add(1)
-			go func(a *agent.Agent) { defer cleanup.Done(); _ = a.Close() }(instance)
+			go func(instance *agent.Agent) {
+				defer cleanup.Done()
+				_ = instance.Close()
+			}(instance)
+		}
+		for id, project := range viewerIdentities {
+			cleanup.Add(1)
+			go func(id, project string) {
+				defer cleanup.Done()
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				_ = closer(cleanupCtx, home, project, id)
+			}(id, project)
 		}
 		cleanup.Wait()
 		close(done)

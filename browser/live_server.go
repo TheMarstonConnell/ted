@@ -22,6 +22,7 @@ const maxLiveCommandBytes = 512 << 10
 type liveSubscription struct {
 	manager           *manager
 	root, key, thread string
+	lifecycle         *sessionLifecycle
 	mu                sync.Mutex
 	watch             string
 	inputs            map[*browserTab]*liveInputState
@@ -45,15 +46,18 @@ func serveLive(parent context.Context, mgr *manager, conn net.Conn, req Request,
 		_ = json.NewEncoder(conn).Encode(errorResponse(err))
 		return
 	}
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	key := projectKey(root)
+	lifecycle, unregister := mgr.registerLive(key, req.Thread, cancel)
+	defer unregister()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	if err := json.NewEncoder(conn).Encode(Response{OK: true}); err != nil {
 		return
 	}
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-	defer stop()
-	sub := &liveSubscription{manager: mgr, root: root, key: projectKey(root), thread: req.Thread, inputs: make(map[*browserTab]*liveInputState)}
+	sub := &liveSubscription{manager: mgr, root: root, key: key, thread: req.Thread, lifecycle: lifecycle, inputs: make(map[*browserTab]*liveInputState)}
 	states := make(chan LiveEvent, 1)
 	frames := make(chan LiveEvent, 1)
 	events := make(chan LiveEvent, 16)
@@ -274,6 +278,19 @@ func (l *liveSubscription) observe(ctx context.Context, states, frames, events c
 }
 
 func (l *liveSubscription) execute(ctx context.Context, c LiveCommand) error {
+	lifecycle := l.lifecycle
+	var release func()
+	if lifecycle == nil && l.manager != nil {
+		lifecycle, release = l.manager.retainSessionLifecycle(l.key, l.thread)
+		defer release()
+	}
+	if lifecycle != nil {
+		lifecycle.gate.RLock()
+		defer lifecycle.gate.RUnlock()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if c.Type == "release" {
 		for tab := range l.inputs {
 			if string(tab.id) == c.TabID {

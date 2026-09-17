@@ -70,9 +70,13 @@ func (v *browserViewers) release(id string) {
 	}
 }
 
-func (s *Service) browserIdentity(id string) (browser.Request, <-chan struct{}, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+type browserSessionCloser func(context.Context, string, string, string) error
+
+func closeBrowserSession(ctx context.Context, home, project, thread string) error {
+	return browser.CloseSessionIfRunning(ctx, home, project, thread)
+}
+
+func (s *Service) browserIdentityLocked(id string) (browser.Request, <-chan struct{}, error) {
 	if s.closing {
 		return browser.Request{}, nil, problem(503, "shutting_down", "server is shutting down")
 	}
@@ -84,8 +88,71 @@ func (s *Service) browserIdentity(id string) (browser.Request, <-chan struct{}, 
 	if !ok || !filepath.IsAbs(project.Root) {
 		return browser.Request{}, nil, problem(409, "workspace_unavailable", "browser project directory is unavailable")
 	}
-	// SetIdentity exports project.Root as TED_PROJECT_ROOT, including worktrees.
 	return browser.Request{Project: project.Root, Thread: a.Agent.ID, Home: filepath.Join(s.dir, "runtime")}, s.changed, nil
+}
+
+func (s *Service) browserIdentity(id string) (browser.Request, <-chan struct{}, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.browserIdentityLocked(id)
+}
+
+func (s *Service) beginBrowserViewer(id string, cancel context.CancelFunc) (browser.Request, <-chan struct{}, func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	req, changed, err := s.browserIdentityLocked(id)
+	if err != nil {
+		return browser.Request{}, nil, nil, err
+	}
+	if s.browserClients == nil {
+		s.browserClients = make(map[string]map[uint64]context.CancelFunc)
+	}
+	if s.browserClients[id] == nil {
+		s.browserClients[id] = make(map[uint64]context.CancelFunc)
+	}
+	s.nextBrowserClient++
+	token := s.nextBrowserClient
+	s.browserClients[id][token] = cancel
+	if s.browserSessions == nil {
+		s.browserSessions = make(map[string]bool)
+	}
+	s.browserSessions[id] = true
+	return req, changed, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		clients := s.browserClients[id]
+		delete(clients, token)
+		if len(clients) == 0 {
+			delete(s.browserClients, id)
+		}
+	}, nil
+}
+
+func (s *Service) cancelBrowserViewersLocked(id string) {
+	for _, cancel := range s.browserClients[id] {
+		cancel()
+	}
+	delete(s.browserClients, id)
+}
+
+func (s *Service) closeBrowserSessionLocked(id, project string) error {
+	s.cancelBrowserViewersLocked(id)
+	if !s.browserSessions[id] {
+		return nil
+	}
+	closer := s.browserClose
+	if closer == nil {
+		closer = closeBrowserSession
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	err := closer(ctx, filepath.Join(s.dir, "runtime"), project, id)
+	cancel()
+	if err == nil {
+		delete(s.browserSessions, id)
+	} else {
+		s.browserSessions[id] = true
+	}
+	return err
 }
 
 func (h *httpAPI) AgentBrowser(w http.ResponseWriter, r *http.Request, id string) {
@@ -102,26 +169,29 @@ func (h *httpAPI) AgentBrowser(w http.ResponseWriter, r *http.Request, id string
 		writeProblem(w, 400, "invalid", "invalid WebSocket handshake")
 		return
 	}
-	req, changed, err := h.service.browserIdentity(id)
-	if err != nil {
-		writeRuntimeError(w, err)
-		return
-	}
 	if !h.browserViewers.acquire(id) {
 		writeProblem(w, 503, "browser_limit", "too many browser viewers")
 		return
 	}
 	defer h.browserViewers.release(id)
+	ctx, cancel := context.WithCancel(r.Context())
+	req, changed, release, err := h.service.beginBrowserViewer(id, cancel)
+	if err != nil {
+		cancel()
+		writeRuntimeError(w, err)
+		return
+	}
+	defer release()
 	root, err := canonicalWorkspaceDirectory(req.Project)
 	if err == nil {
 		root, err = browser.ProjectRoot(root)
 	}
 	if err != nil {
+		cancel()
 		writeProblem(w, 409, "workspace_unavailable", "browser project directory is unavailable")
 		return
 	}
 	req.Project = root
-	ctx, cancel := context.WithCancel(r.Context())
 	var workers sync.WaitGroup
 	defer func() { cancel(); workers.Wait() }()
 	workers.Go(func() {

@@ -126,18 +126,18 @@ func startDaemonInHome(socket, home string) error {
 	return nil
 }
 
-// CloseSessionIfRunning asks an already-running daemon to close all tabs owned
-// by thread. It never starts the daemon and never creates TED_HOME; a missing
+// CloseSessionIfRunning asks an already-running daemon in home to close all tabs
+// owned by thread. It never starts the daemon or creates home; a missing
 // or refused daemon socket is treated as success. This makes it safe to call
 // unconditionally from host/agent cleanup paths.
-func CloseSessionIfRunning(ctx context.Context, project, thread string) error {
+func CloseSessionIfRunning(ctx context.Context, home, project, thread string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := validateThread(thread); err != nil {
 		return err
 	}
-	path, err := existingSocketPath()
+	path, err := existingSocketPath(home)
 	if err != nil {
 		return err
 	}

@@ -470,3 +470,126 @@ func TestLiveStateReportsAuthoritativePin(t *testing.T) {
 		t.Fatal("missing follow state")
 	}
 }
+
+func TestSessionCloseWaitsForInflightLiveSessionCreation(t *testing.T) {
+	mgr := newManager(context.Background(), t.TempDir())
+	defer mgr.close()
+	root, err := ProjectRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, thread := projectKey(root), "closing-live"
+	project := mgr.project(root, key)
+	lifecycle, release := mgr.retainSessionLifecycle(key, thread)
+	defer release()
+	lifecycle.gate.RLock()
+
+	closed := make(chan error, 1)
+	go func() {
+		_, err := mgr.dispatch(context.Background(), Request{Project: root, Thread: thread, Action: "session-close"})
+		closed <- err
+	}()
+	select {
+	case err := <-closed:
+		t.Fatalf("session close passed in-flight live command: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	s := &session{project: project, thread: thread, dir: t.TempDir(), tabs: make(map[target.ID]*browserTab)}
+	project.mu.Lock()
+	project.sessions[thread] = s
+	project.mu.Unlock()
+	lifecycle.gate.RUnlock()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("session close did not resume")
+	}
+	project.mu.Lock()
+	remaining := project.sessions[thread]
+	project.mu.Unlock()
+	if remaining != nil || !s.closed {
+		t.Fatal("session created by in-flight live command survived cleanup")
+	}
+}
+
+func TestSessionCloseCancelsQueuedLiveNewBeforeCleanup(t *testing.T) {
+	mgr := newManager(context.Background(), t.TempDir())
+	defer mgr.close()
+	root, err := ProjectRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := "cancelled-live"
+	key := projectKey(root)
+	viewerCtx, cancelViewer := context.WithCancel(context.Background())
+	defer cancelViewer()
+	viewer := liveTestClient(t, viewerCtx, mgr, Request{Project: root, Thread: thread})
+	receiveLive(t, viewer, func(event LiveEvent) bool { return event.Type == "state" })
+
+	lifecycle, release := mgr.retainSessionLifecycle(key, thread)
+	released := false
+	defer func() {
+		if !released {
+			release()
+		}
+	}()
+	lifecycle.gate.Lock()
+	if err := viewer.Send(LiveCommand{Type: "new"}); err != nil {
+		lifecycle.gate.Unlock()
+		t.Fatal(err)
+	}
+	closed := make(chan error, 1)
+	go func() {
+		_, err := mgr.dispatch(context.Background(), Request{Project: root, Thread: thread, Action: "session-close"})
+		closed <- err
+	}()
+	disconnected := make(chan error, 1)
+	go func() {
+		for {
+			if _, err := viewer.Receive(); err != nil {
+				disconnected <- err
+				return
+			}
+		}
+	}()
+	select {
+	case <-disconnected:
+	case <-time.After(time.Second):
+		lifecycle.gate.Unlock()
+		t.Fatal("session close did not cancel live subscription before cleanup")
+	}
+	lifecycle.gate.Unlock()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("session close remained blocked")
+	}
+	mgr.mu.Lock()
+	projects := len(mgr.projects)
+	mgr.mu.Unlock()
+	if projects != 0 {
+		t.Fatal("canceled queued new recreated a browser project")
+	}
+	release()
+	released = true
+	deadline := time.Now().Add(time.Second)
+	for {
+		mgr.mu.Lock()
+		lifecycles := len(mgr.lifecycles)
+		mgr.mu.Unlock()
+		if lifecycles == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("closed thread lifecycle gate was retained")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}

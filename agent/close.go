@@ -14,7 +14,7 @@ var closeBrowserSessionIfRunning = browser.CloseSessionIfRunning
 // the browser cannot start one.
 func (a *Agent) Close() error {
 	a.mu.Lock()
-	threadID, projectRoot := a.threadID, a.projectRoot
+	threadID, projectRoot, home := a.threadID, a.projectRoot, a.home
 	a.mu.Unlock()
 	if threadID == "" {
 		return nil
@@ -22,5 +22,5 @@ func (a *Agent) Close() error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	return closeBrowserSessionIfRunning(ctx, projectRoot, threadID)
+	return closeBrowserSessionIfRunning(ctx, home, projectRoot, threadID)
 }

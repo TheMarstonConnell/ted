@@ -17,11 +17,24 @@ import (
 )
 
 type manager struct {
-	ctx      context.Context
-	home     string
-	mu       sync.Mutex
-	projects map[string]*projectBrowser
-	traceMu  sync.Mutex
+	ctx        context.Context
+	home       string
+	mu         sync.Mutex
+	projects   map[string]*projectBrowser
+	lifecycles map[sessionIdentity]*sessionLifecycle
+	nextLive   uint64
+	traceMu    sync.Mutex
+}
+
+type sessionIdentity struct {
+	project string
+	thread  string
+}
+
+type sessionLifecycle struct {
+	gate sync.RWMutex
+	live map[uint64]context.CancelFunc
+	refs int
 }
 
 type projectBrowser struct {
@@ -81,7 +94,54 @@ type browserTab struct {
 }
 
 func newManager(ctx context.Context, home string) *manager {
-	return &manager{ctx: ctx, home: home, projects: make(map[string]*projectBrowser)}
+	return &manager{ctx: ctx, home: home, projects: make(map[string]*projectBrowser), lifecycles: make(map[sessionIdentity]*sessionLifecycle)}
+}
+
+func (m *manager) retainSessionLifecycle(project, thread string) (*sessionLifecycle, func()) {
+	m.mu.Lock()
+	identity := sessionIdentity{project: project, thread: thread}
+	lifecycle := m.lifecycles[identity]
+	if lifecycle == nil {
+		lifecycle = &sessionLifecycle{live: make(map[uint64]context.CancelFunc)}
+		m.lifecycles[identity] = lifecycle
+	}
+	lifecycle.refs++
+	m.mu.Unlock()
+	return lifecycle, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		lifecycle.refs--
+		if lifecycle.refs == 0 {
+			delete(m.lifecycles, identity)
+		}
+	}
+}
+
+func (m *manager) registerLive(project, thread string, cancel context.CancelFunc) (*sessionLifecycle, func()) {
+	lifecycle, release := m.retainSessionLifecycle(project, thread)
+	m.mu.Lock()
+	m.nextLive++
+	token := m.nextLive
+	lifecycle.live[token] = cancel
+	m.mu.Unlock()
+	return lifecycle, func() {
+		m.mu.Lock()
+		delete(lifecycle.live, token)
+		m.mu.Unlock()
+		release()
+	}
+}
+
+func (m *manager) cancelLive(lifecycle *sessionLifecycle) {
+	m.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(lifecycle.live))
+	for _, cancel := range lifecycle.live {
+		cancels = append(cancels, cancel)
+	}
+	m.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
 }
 
 func (m *manager) close() {
@@ -117,6 +177,11 @@ func (m *manager) dispatch(serverCtx context.Context, req Request) (any, error) 
 	}
 	key := projectKey(root)
 	if action == "session-close" {
+		lifecycle, release := m.retainSessionLifecycle(key, req.Thread)
+		defer release()
+		m.cancelLive(lifecycle)
+		lifecycle.gate.Lock()
+		defer lifecycle.gate.Unlock()
 		return m.closeSession(key, req.Thread), nil
 	}
 	if !knownAction(action) {

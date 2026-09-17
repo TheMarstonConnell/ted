@@ -24,7 +24,9 @@ their conversation to inspect them.
   actions cannot always be mapped to pointer coordinates.
 - Closing the viewer ends its subscription, not the browser session. Reopening
   reconnects to existing tabs. Browser lifetime remains managed by the daemon and
-  the existing agent/session cleanup paths.
+  the existing agent/session cleanup paths. Settling, project deletion and server
+  shutdown also clean up viewer-created sessions in the service’s runtime home;
+  they do not depend on an agent having run a model turn.
 
 ## Architecture and boundaries
 
