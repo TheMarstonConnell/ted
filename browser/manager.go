@@ -59,12 +59,18 @@ type session struct {
 
 	mu             sync.Mutex
 	structureMu    sync.Mutex
+	targetMu       sync.Mutex
 	recordMu       sync.Mutex
 	closed         bool
 	parentCtx      context.Context
 	ownerCtx       context.Context // hidden owner of an isolated BrowserContext
 	ownerCancel    context.CancelFunc
 	browserContext cdp.BrowserContextID
+	ownerTarget    target.ID
+	targetCancel   context.CancelFunc
+	targetDone     chan struct{}
+	targetWake     chan struct{}
+	ownedTargets   map[target.ID]struct{}
 	tabs           map[target.ID]*browserTab
 	order          []target.ID
 	selected       target.ID
@@ -356,7 +362,10 @@ func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated
 	if err != nil {
 		return nil, err
 	}
-	s := &session{project: p, thread: thread, dir: dir, isolated: isolated, parentCtx: p.browserCtx, tabs: make(map[target.ID]*browserTab)}
+	s := &session{
+		project: p, thread: thread, dir: dir, isolated: isolated, parentCtx: p.browserCtx,
+		tabs: make(map[target.ID]*browserTab), ownedTargets: make(map[target.ID]struct{}),
+	}
 
 	if isolated {
 		// Create a window explicitly: recent Chrome versions reject the first
@@ -385,9 +394,14 @@ func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated
 		}
 		s.ownerCtx = ownerCtx
 		s.ownerCancel = func() { ownerCancel(); dispose() }
+		s.ownerTarget = ownerID
 		s.browserContext = id
 	}
 
+	if err := s.startTargetTracking(ctx); err != nil {
+		s.closeLocked()
+		return nil, err
+	}
 	if _, err := s.newTab(ctx, "about:blank"); err != nil {
 		s.closeLocked()
 		return nil, err
@@ -441,6 +455,8 @@ func (s *session) newTab(ctx context.Context, url string) (*browserTab, error) {
 }
 
 func (s *session) createTab(ctx context.Context, url string, selectTab bool) (*browserTab, error) {
+	s.targetMu.Lock()
+	defer s.targetMu.Unlock()
 	var tabCtx context.Context
 	var cancel context.CancelFunc
 	if s.isolated {
@@ -468,16 +484,19 @@ func (s *session) createTab(ctx context.Context, url string, selectTab bool) (*b
 		return nil, fail("action_failed", "create tab: %v", err)
 	}
 	s.structureMu.Lock()
-	defer s.structureMu.Unlock()
 	if s.closed {
+		s.structureMu.Unlock()
 		cancel()
 		return nil, fail("not_found", "session is closed")
 	}
 	s.tabs[t.id] = t
+	s.ownedTargets[t.id] = struct{}{}
 	s.order = append(s.order, t.id)
 	if selectTab || s.selected == "" {
 		s.selected = t.id
 	}
+	s.structureMu.Unlock()
+	s.wakeTargetTracking()
 	return t, nil
 }
 
@@ -548,17 +567,31 @@ func (s *session) selectedTab() (*browserTab, error) {
 
 func (s *session) closeLocked() {
 	s.recordMu.Lock()
-	defer s.recordMu.Unlock()
 	if s.recording != nil {
 		_, _ = s.stopRecordingLocked(context.Background())
 	}
+	s.recordMu.Unlock()
+
 	s.structureMu.Lock()
 	s.closed = true
 	tabs := s.tabs
+	owned := make(map[target.ID]struct{}, len(s.ownedTargets))
+	for id := range s.ownedTargets {
+		owned[id] = struct{}{}
+	}
 	s.tabs = make(map[target.ID]*browserTab)
 	s.order = nil
 	s.selected = ""
+	targetCancel, targetDone := s.targetCancel, s.targetDone
+	s.targetCancel, s.targetDone = nil, nil
 	s.structureMu.Unlock()
+
+	if targetCancel != nil {
+		targetCancel()
+	}
+	if targetDone != nil {
+		<-targetDone
+	}
 	for _, t := range tabs {
 		if t != nil {
 			t.cancel()
@@ -568,6 +601,7 @@ func (s *session) closeLocked() {
 		s.ownerCancel()
 		s.ownerCancel = nil
 	}
+	s.closeOwnedTargets(owned)
 }
 
 func boolParam(params map[string]any, key string, fallback bool) (bool, error) {

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 )
 
@@ -276,4 +278,152 @@ func TestLiveSharedChromeIntegration(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
+}
+
+func TestLivePageCreatedTabsIntegration(t *testing.T) {
+	if os.Getenv("TED_BROWSER_INTEGRATION") != "1" {
+		t.Skip("set TED_BROWSER_INTEGRATION=1")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	mgr := newManager(ctx, t.TempDir())
+	defer mgr.close()
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			_, _ = w.Write([]byte(`<title>` + r.URL.Path + `</title>`))
+			return
+		}
+		_, _ = w.Write([]byte(`<title>opener</title>
+			<a id="link" href="/link-popup" target="_blank">link popup</a>
+			<button id="script" onclick="window.open('/script-popup','_blank')">script popup</button>`))
+	}))
+	defer fixture.Close()
+	project := t.TempDir()
+	ownerReq := Request{Project: project, Thread: "popup-owner", Timeout: 20 * time.Second}
+	otherReq := Request{Project: project, Thread: "popup-other", Timeout: 20 * time.Second}
+	call := func(req Request, action string, params map[string]any) any {
+		t.Helper()
+		req.Action, req.Params = action, params
+		data, err := mgr.dispatch(ctx, req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", req.Thread, action, err)
+		}
+		return data
+	}
+	call(ownerReq, "open", map[string]any{"url": fixture.URL})
+	other := call(otherReq, "open", map[string]any{"url": fixture.URL + "/other"}).(map[string]any)
+	viewer := liveTestClient(t, ctx, mgr, ownerReq)
+	initial := receiveLive(t, viewer, func(e LiveEvent) bool { return e.Type == "state" && len(e.Tabs) == 1 })
+	rootID := initial.Tabs[0].ID
+
+	call(ownerReq, "click", map[string]any{"selector": "#link"})
+	linkState := receiveLive(t, viewer, func(e LiveEvent) bool {
+		if e.Type != "state" || len(e.Tabs) != 2 {
+			return false
+		}
+		for _, tab := range e.Tabs {
+			if tab.URL == fixture.URL+"/link-popup" {
+				return true
+			}
+		}
+		return false
+	})
+	var linkID string
+	for _, tab := range linkState.Tabs {
+		if tab.URL == fixture.URL+"/link-popup" {
+			linkID = tab.ID
+		}
+	}
+
+	call(ownerReq, "click", map[string]any{"selector": "#script"})
+	scriptState := receiveLive(t, viewer, func(e LiveEvent) bool {
+		if e.Type != "state" || len(e.Tabs) != 3 {
+			return false
+		}
+		for _, tab := range e.Tabs {
+			if tab.URL == fixture.URL+"/script-popup" {
+				return true
+			}
+		}
+		return false
+	})
+	var scriptID string
+	for _, tab := range scriptState.Tabs {
+		if tab.URL == fixture.URL+"/script-popup" {
+			scriptID = tab.ID
+		}
+	}
+	if linkID == "" || scriptID == "" {
+		t.Fatalf("popup state did not identify both tabs: %+v", scriptState)
+	}
+	if err := viewer.Send(LiveCommand{Type: "watch", TabID: scriptID}); err != nil {
+		t.Fatal(err)
+	}
+	receiveLive(t, viewer, func(e LiveEvent) bool {
+		return e.Type == "state" && e.TabID == scriptID && e.Pinned == scriptID
+	})
+	frame := receiveLive(t, viewer, func(e LiveEvent) bool { return e.Type == "frame" && e.TabID == scriptID })
+	if frame.Data == "" || frame.Width <= 0 || frame.Height <= 0 {
+		t.Fatalf("popup frame is not viewable: %+v", frame)
+	}
+
+	otherTabs := call(otherReq, "tabs", nil).(map[string]any)["tabs"].([]map[string]any)
+	if len(otherTabs) != 1 || otherTabs[0]["id"] != other["id"] {
+		t.Fatalf("other thread acquired popup targets: %+v", otherTabs)
+	}
+
+	projectBrowser := mgr.project(project, projectKey(project))
+	projectBrowser.mu.Lock()
+	ownerSession := projectBrowser.sessions[ownerReq.Thread]
+	projectBrowser.mu.Unlock()
+	root, err := ownerSession.selectedTab()
+	if err != nil {
+		t.Fatal(err)
+	}
+	browser := chromedp.FromContext(root.ctx).Browser
+	closeCtx, stopClose := context.WithTimeout(ctx, 3*time.Second)
+	err = target.CloseTarget(target.ID(linkID)).Do(cdp.WithExecutor(closeCtx, browser))
+	stopClose()
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiveLive(t, viewer, func(e LiveEvent) bool {
+		if e.Type != "state" || len(e.Tabs) != 2 {
+			return false
+		}
+		for _, tab := range e.Tabs {
+			if tab.ID == linkID {
+				return false
+			}
+		}
+		return true
+	})
+
+	closed := call(ownerReq, "session-close", nil).(map[string]any)
+	if closed["closed"] != true {
+		t.Fatalf("session close: %+v", closed)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		queryCtx, stop := context.WithTimeout(ctx, 2*time.Second)
+		infos, queryErr := target.GetTargets().Do(cdp.WithExecutor(queryCtx, browser))
+		stop()
+		if queryErr != nil {
+			t.Fatal(queryErr)
+		}
+		remaining := make(map[string]bool)
+		for _, info := range infos {
+			remaining[string(info.TargetID)] = true
+		}
+		if !remaining[rootID] && !remaining[linkID] && !remaining[scriptID] {
+			if !remaining[other["id"].(string)] {
+				t.Fatal("closing popup owner also closed the other thread")
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("owner targets survived session close: root=%v link=%v script=%v", remaining[rootID], remaining[linkID], remaining[scriptID])
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }

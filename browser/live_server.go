@@ -246,8 +246,6 @@ func (l *liveSubscription) observe(ctx context.Context, states, frames, events c
 				state.Tabs = append(state.Tabs, tab)
 			}
 			offerLatest(states, state)
-			// A URL-changing state may invalidate an already-delivered frame.
-			previousFrame = LiveEvent{}
 			nextState = time.Now().Add(time.Second)
 		}
 		if viewing != nil {

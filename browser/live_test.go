@@ -357,38 +357,6 @@ func TestLiveDaemonStartupUsesChildHome(t *testing.T) {
 	}
 }
 
-func TestLiveIdleFrameRefreshAfterPeriodicState(t *testing.T) {
-	mgr := newManager(context.Background(), t.TempDir())
-	p := mgr.project("root", "key")
-	tab := &browserTab{id: "idle", ctx: context.Background(), streamUsers: 1, liveFrame: LiveEvent{Type: "frame", TabID: "idle", Data: "unchanged-jpeg", Width: 800, Height: 600}}
-	s := &session{tabs: map[target.ID]*browserTab{"idle": tab}, order: []target.ID{"idle"}, selected: "idle"}
-	p.sessions["thread"] = s
-	sub := &liveSubscription{manager: mgr, key: "key", thread: "thread"}
-	states, frames, events := make(chan LiveEvent, 1), make(chan LiveEvent, 1), make(chan LiveEvent, 16)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	done := make(chan struct{})
-	go func() { defer close(done); sub.observe(ctx, states, frames, events) }()
-	defer func() { cancel(); <-done }()
-	for i := range 2 {
-		select {
-		case state := <-states:
-			if state.TabID != "idle" {
-				t.Fatalf("state %d: %+v", i, state)
-			}
-		case <-ctx.Done():
-			t.Fatal("missing periodic state")
-		}
-		select {
-		case frame := <-frames:
-			if frame.Data != "unchanged-jpeg" || frame.TabID != "idle" {
-				t.Fatalf("frame %d: %+v", i, frame)
-			}
-		case <-ctx.Done():
-			t.Fatal("idle state invalidated the image without a replacement frame")
-		}
-	}
-}
-
 func TestLiveReleaseMissingAndClosedTabsIsIdempotent(t *testing.T) {
 	closed, cancel := context.WithCancel(context.Background())
 	cancel()
