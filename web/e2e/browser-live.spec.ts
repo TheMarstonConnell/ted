@@ -481,6 +481,13 @@ test("touch pan scrolls remotely, touch tap clicks, and mouse drag remains a dra
         ),
     )
     .toBe(true);
+  await expect
+    .poll(() =>
+      live.commands
+        .slice(beforeMouse)
+        .some((command) => command.event === "mouseReleased"),
+    )
+    .toBe(true);
   const mouseDrag = live.commands.slice(beforeMouse);
   expect(mouseDrag.some((command) => command.event === "mousePressed")).toBe(
     true,
