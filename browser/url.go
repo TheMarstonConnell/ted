@@ -97,8 +97,3 @@ func checkedURL(raw string) (string, error) {
 	}
 	return raw, nil
 }
-
-func validateURL(raw string) error {
-	_, err := normalizeURL(raw)
-	return err
-}

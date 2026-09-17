@@ -14,7 +14,10 @@ their conversation to inspect them.
   bar or shared-control notice.
 - New tabs use a 1440 × 900 desktop viewport. The live view fits the panel without
   enlarging small frames; **100%** shows native CSS size with scrollbars for reading
-  small text. **Fit to panel** restores the overview. These controls do not change
+  small text. In 100% view, wheel and touch drags pan the local preview; Tab to
+  the preview region and use arrow keys to pan with a keyboard. Clicking or
+  tapping still interacts with the page. **Fit to panel** restores the overview
+  and remote wheel/touch scrolling. These controls do not change
   page layout or an agent’s explicit CDP device emulation.
 - The viewport is always interactive. Clicking focuses it for keyboard input;
   Escape releases local focus. On touchscreens, a tap clicks the remote page and

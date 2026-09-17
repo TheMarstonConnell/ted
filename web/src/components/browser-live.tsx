@@ -419,6 +419,7 @@ function BrowserViewport({
   useEffect(() => {
     const element = input.current!;
     const nativeWheel = (event: WheelEvent) => {
+      if (actualSize) return;
       event.preventDefault();
       const frame = current.current;
       const rect = element.getBoundingClientRect();
@@ -448,7 +449,7 @@ function BrowserViewport({
     };
     element.addEventListener("wheel", nativeWheel, { passive: false });
     return () => element.removeEventListener("wheel", nativeWheel);
-  }, [queueWheel]);
+  }, [queueWheel, actualSize]);
   const pointer = (
     event: PointerEvent<HTMLTextAreaElement>,
     kind: "mouseMoved" | "mousePressed" | "mouseReleased",
@@ -489,7 +490,12 @@ function BrowserViewport({
           ) >= 8
         )
           gesture.panning = true;
-        if (gesture.panning && point) {
+        if (gesture.panning && actualSize) {
+          host.current?.scrollBy(
+            gesture.lastX - event.clientX,
+            gesture.lastY - event.clientY,
+          );
+        } else if (gesture.panning && point) {
           queueWheel({
             type: "mouse",
             tab_id: frame.tab_id,
@@ -660,7 +666,14 @@ function BrowserViewport({
     : Math.min(1, size.width / frame.width, size.height / frame.height);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={host} className="flex min-h-0 flex-1 overflow-auto bg-muted/40">
+      <div
+        ref={host}
+        role="region"
+        aria-label="Browser preview"
+        aria-describedby="browser-focus-help"
+        tabIndex={actualSize ? 0 : undefined}
+        className="flex min-h-0 flex-1 overflow-auto bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
         <div
           className="relative m-auto shrink-0 overflow-hidden focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring"
           style={{ width: frame.width * scale, height: frame.height * scale }}
@@ -741,6 +754,12 @@ function BrowserViewport({
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-4 py-2 text-xs text-muted-foreground">
         <p id="browser-focus-help">
           Click the page to type · Escape releases focus
+          {actualSize && (
+            <span className="block">
+              Scroll or swipe to pan preview · Tab to preview for arrow keys ·
+              Fit to panel to scroll page
+            </span>
+          )}
         </p>
         <div className="flex items-center gap-2">
           <span>
@@ -749,7 +768,7 @@ function BrowserViewport({
           <Button
             size="sm"
             variant="outline"
-            aria-label="Show browser at 100%"
+            aria-label={actualSize ? "Fit to panel" : "Show browser at 100%"}
             aria-pressed={actualSize}
             title={
               actualSize

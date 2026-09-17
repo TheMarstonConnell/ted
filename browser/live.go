@@ -240,14 +240,10 @@ func validateLiveCommand(c LiveCommand) error {
 		if c.TabID != "" {
 			return invalid("new does not accept tab_id")
 		}
-		if c.URL != "" {
-			return validateURL(c.URL)
-		}
 	case "navigate":
 		if c.URL == "" {
 			return invalid("navigate requires url")
 		}
-		return validateURL(c.URL)
 	case "back", "forward", "reload", "close", "release":
 		if c.TabID == "" {
 			return invalid("command requires explicit tab_id")

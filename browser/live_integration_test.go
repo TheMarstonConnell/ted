@@ -83,13 +83,25 @@ func TestLiveSharedChromeIntegration(t *testing.T) {
 	}
 	viewer := liveTestClient(t, ctx, mgr, req)
 	receiveLive(t, viewer, func(e LiveEvent) bool { return e.Type == "state" && len(e.Tabs) == 0 })
-	call("open", map[string]any{"url": fixture.URL + "/first"})
+	address := strings.TrimPrefix(fixture.URL, "http://")
+	opened := call("open", map[string]any{"url": " " + address + "/first "}).(map[string]any)
+	if opened["url"] != fixture.URL+"/first" {
+		t.Fatalf("normalized open URL = %v", opened["url"])
+	}
 	state := receiveLive(t, viewer, func(e LiveEvent) bool { return e.Type == "state" && len(e.Tabs) == 1 })
 	first := state.Selected
 	frame := receiveLive(t, viewer, func(e LiveEvent) bool { return e.Type == "frame" && e.TabID == first })
-	if frame.Data == "" || frame.Width <= 0 || frame.Height <= 0 {
+	if frame.Data == "" || frame.Width != 1440 || frame.Height != 900 {
 		t.Fatalf("invalid frame: dimensions %v x %v, bytes %d", frame.Width, frame.Height, len(frame.Data))
 	}
+	for _, action := range []string{"open", "tab-new"} {
+		r := req
+		r.Action, r.Params = action, map[string]any{"url": "javascript:document.title='unsafe'"}
+		if _, err := mgr.dispatch(ctx, r); err == nil || errorResponse(err).Error.Code != "invalid_params" {
+			t.Fatalf("%s unsafe URL error = %v", action, err)
+		}
+	}
+
 	send := func(c LiveCommand) {
 		t.Helper()
 		if err := viewer.Send(c); err != nil {
@@ -151,11 +163,15 @@ func TestLiveSharedChromeIntegration(t *testing.T) {
 	}
 	// Viewer pinning must survive agent selection changes.
 	send(LiveCommand{Type: "watch", TabID: first})
-	second := call("tab-new", map[string]any{"url": fixture.URL + "/second"}).(map[string]any)["id"].(string)
+	created := call("tab-new", map[string]any{"url": "//" + address + "/second"}).(map[string]any)
+	if created["url"] != fixture.URL+"/second" {
+		t.Fatalf("normalized tab-new URL = %v", created["url"])
+	}
+	second := created["id"].(string)
 	receiveLive(t, viewer, func(e LiveEvent) bool {
 		return e.Type == "state" && e.Selected == second && e.TabID == first && e.Pinned == first && len(e.Tabs) == 2
 	})
-	send(LiveCommand{Type: "navigate", TabID: first, URL: fixture.URL + "/navigated"})
+	send(LiveCommand{Type: "navigate", TabID: first, URL: address + "/navigated"})
 	receiveLive(t, viewer, func(e LiveEvent) bool {
 		if e.Type != "state" {
 			return false
@@ -249,6 +265,13 @@ func TestLiveSharedChromeIntegration(t *testing.T) {
 	}
 	_ = viewer.conn.SetReadDeadline(time.Time{})
 	receiveLive(t, viewer, func(e LiveEvent) bool { return e.Type == "state" && len(e.Tabs) == 1 && e.Tabs[0].ID == second })
+	send(LiveCommand{Type: "new", URL: address + "/viewer-new"})
+	createdState := receiveLive(t, viewer, func(e LiveEvent) bool {
+		return e.Type == "state" && len(e.Tabs) == 2 && e.Tabs[1].URL == fixture.URL+"/viewer-new"
+	})
+	send(LiveCommand{Type: "close", TabID: createdState.Tabs[1].ID})
+	send(LiveCommand{Type: "watch"})
+	receiveLive(t, viewer, func(e LiveEvent) bool { return e.Type == "state" && len(e.Tabs) == 1 && e.TabID == second })
 	send(LiveCommand{Type: "key", TabID: second, Event: "keyDown", Key: "Alt", Code: "AltLeft", Modifiers: 1})
 	deadline = time.Now().Add(3 * time.Second)
 	for {

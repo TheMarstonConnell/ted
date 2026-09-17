@@ -1,7 +1,6 @@
 package browser
 
 import (
-	"errors"
 	"reflect"
 	"testing"
 
@@ -36,13 +35,6 @@ func TestParameterValidation(t *testing.T) {
 	}
 	if got, err := numberParam(map[string]any{"x": 3}, "x", 0); err != nil || got != 3 {
 		t.Fatalf("numberParam = %v, %v", got, err)
-	}
-	if err := validateURL("javascript:alert(1)"); err == nil {
-		t.Fatal("accepted javascript URL")
-	}
-	var se *serviceError
-	if !errors.As(validateURL("ftp://example.test"), &se) || se.code != "invalid_params" {
-		t.Fatalf("unexpected URL error: %v", validateURL("ftp://example.test"))
 	}
 }
 

@@ -37,7 +37,7 @@ func TestLiveValidation(t *testing.T) {
 		{Type: "mouse", TabID: "a", Event: "mouseMoved", X: -1}, {Type: "mouse", TabID: "a", Event: "mouseMoved", Buttons: 8},
 		{Type: "mouse", TabID: "a", Event: "mouseMoved", Button: "back"}, {Type: "key", TabID: "a", Event: "char", Key: "a"},
 		{Type: "key", TabID: "a", Event: "keyDown", Modifiers: 16}, {Type: "release"}, {Type: "close"}, {Type: "reload"},
-		{Type: "navigate", URL: "javascript:alert(1)"}, {Type: "new", TabID: "a"}, {Type: "text", TabID: "a", Text: strings.Repeat("x", 65537)},
+		{Type: "navigate"}, {Type: "new", TabID: "a"}, {Type: "text", TabID: "a", Text: strings.Repeat("x", 65537)},
 	}
 	for _, c := range invalid {
 		if err := validateLiveCommand(c); err == nil {

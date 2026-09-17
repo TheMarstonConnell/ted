@@ -370,22 +370,6 @@ func TestBrowserStrictCommandValidation(t *testing.T) {
 	}
 }
 
-func TestBrowserAddressCommandNormalization(t *testing.T) {
-	for _, tt := range []struct{ raw, want string }{
-		{`{"type":"navigate","url":"relative"}`, "http://relative"},
-		{`{"type":"navigate","tab_id":"tab","url":" localhost:3000/path "}`, "http://localhost:3000/path"},
-		{`{"type":"new","url":"127.0.0.1:8080"}`, "http://127.0.0.1:8080"},
-		{`{"type":"new","url":"[::1]:8080"}`, "http://[::1]:8080"},
-		{`{"type":"navigate","url":"//example.test/path"}`, "http://example.test/path"},
-		{`{"type":"new","url":"https://example.test/path"}`, "https://example.test/path"},
-	} {
-		command, err := browser.ParseLiveCommand([]byte(tt.raw))
-		if err != nil || command.URL != tt.want {
-			t.Errorf("ParseLiveCommand(%s) = %+v, %v; want URL %q", tt.raw, command, err, tt.want)
-		}
-	}
-}
-
 func TestBrowserDisconnectAndShutdownCleanup(t *testing.T) {
 	for _, action := range []string{"client", "daemon", "send", "shutdown"} {
 		t.Run(action, func(t *testing.T) {
