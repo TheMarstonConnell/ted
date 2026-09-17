@@ -356,6 +356,41 @@ func TestScreencastAcksSerializeAndReplaceObsoleteSessions(t *testing.T) {
 	receive(11)
 }
 
+func TestScreencastACKSessionIDContractIntegration(t *testing.T) {
+	ctx, s, tab := liveTestSession(t)
+	frames := make(chan int64, 32)
+	chromedp.ListenTarget(tab.ctx, func(event any) {
+		if frame, ok := event.(*page.EventScreencastFrame); ok {
+			select {
+			case frames <- frame.SessionID:
+			default:
+			}
+		}
+	})
+	if err := s.runTab(ctx, tab, chromedp.Evaluate(`let hue = 0; setInterval(() => { document.body.style.background = 'hsl(' + (hue++ * 37 % 360) + ',100%,50%)' }, 50)`, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tab.acquireStream(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer tab.releaseStream(ctx)
+	var sessionID int64
+	deadline := time.After(5 * time.Second)
+	// More than Chrome's three-frame flight window proves ACKs keep flowing.
+	for i := 0; i < 12; i++ {
+		select {
+		case id := <-frames:
+			if i == 0 {
+				sessionID = id
+			} else if id != sessionID {
+				t.Fatalf("Chrome changed ID within a screencast: %d -> %d", sessionID, id)
+			}
+		case <-deadline:
+			t.Fatalf("screencast stalled after %d frames", i)
+		}
+	}
+}
+
 func TestLiveFillCoordinatesAfterFocusIntegration(t *testing.T) {
 	ctx, s, tab := liveTestSession(t)
 	if err := s.runTab(ctx, tab, page.BringToFront(), chromedp.Evaluate(`document.querySelector('#field').blur();document.querySelector('#field').onfocus=function(){this.style.top='350px'}`, nil)); err != nil {
