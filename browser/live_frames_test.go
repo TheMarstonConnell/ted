@@ -286,6 +286,59 @@ func TestLiveTargetActivityIntegration(t *testing.T) {
 	}
 }
 
+func TestLiveReleaseRetryIntegration(t *testing.T) {
+	ctx, s, tab := liveTestSession(t)
+	if err := s.runTab(ctx, tab, chromedp.Evaluate(`window.releaseEvents=[];for(const type of ['mouseup','keyup'])document.addEventListener(type,event=>releaseEvents.push(type+':'+(event.key||event.button)))`, nil)); err != nil {
+		t.Fatal(err)
+	}
+	sub := &liveSubscription{inputs: make(map[*browserTab]*liveInputState)}
+	defer sub.release(ctx, tab)
+	mouse := LiveCommand{Type: "mouse", TabID: string(tab.id), Event: "mousePressed", Button: "left", Buttons: 1, X: 10, Y: 10}
+	key := LiveCommand{Type: "key", TabID: string(tab.id), Event: "keyDown", Key: "Shift", Code: "ShiftLeft", Modifiers: 8}
+	for _, command := range []LiveCommand{mouse, key} {
+		if err := dispatchLiveInput(ctx, tab, command); err != nil {
+			t.Fatal(err)
+		}
+		sub.track(tab, command)
+	}
+
+	failed, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := sub.release(failed, tab); err == nil {
+		t.Fatal("canceled release unexpectedly succeeded")
+	}
+	state := sub.inputs[tab]
+	if state == nil || len(state.buttons) != 1 || len(state.keys) != 1 {
+		t.Fatalf("failed releases were discarded: %+v", state)
+	}
+	if err := sub.release(ctx, tab); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sub.inputs[tab]; ok {
+		t.Fatal("successful retry retained released inputs")
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var events []string
+		if err := s.runTab(ctx, tab, chromedp.Evaluate(`window.releaseEvents`, &events)); err != nil {
+			t.Fatal(err)
+		}
+		mouseUp, keyUp := false, false
+		for _, event := range events {
+			mouseUp = mouseUp || event == "mouseup:0"
+			keyUp = keyUp || event == "keyup:Shift"
+		}
+		if mouseUp && keyUp {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("retry did not deliver both releases: %v", events)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func TestLiveFramePreservesResolutionAndCSSViewportIntegration(t *testing.T) {
 	ctx, s, tab := liveTestSession(t)
 	if err := s.runTab(ctx, tab, emulation.SetDeviceMetricsOverride(2400, 1400, 2, false)); err != nil {

@@ -489,29 +489,44 @@ func (l *liveSubscription) track(t *browserTab, c LiveCommand) {
 }
 func (l *liveSubscription) release(ctx context.Context, t *browserTab) error {
 	state := l.inputs[t]
-	delete(l.inputs, t)
-	if state == nil || t.ctx.Err() != nil {
+	if state == nil {
+		return nil
+	}
+	if t.ctx.Err() != nil {
+		delete(l.inputs, t)
 		return nil
 	}
 	var first error
-	for _, c := range state.buttons {
+	for button, c := range state.buttons {
 		c.Event = "mouseReleased"
 		c.Buttons = 0
 		c.Modifiers = 0
-		if err := dispatchLiveInput(ctx, t, c); first == nil {
-			first = err
+		if err := dispatchLiveInput(ctx, t, c); err != nil {
+			if first == nil {
+				first = err
+			}
+		} else {
+			delete(state.buttons, button)
 		}
 	}
-	for _, c := range state.keys {
+	for key, c := range state.keys {
 		c.Event = "keyUp"
 		c.Text = ""
 		c.Modifiers = 0
-		if err := dispatchLiveInput(ctx, t, c); first == nil {
-			first = err
+		if err := dispatchLiveInput(ctx, t, c); err != nil {
+			if first == nil {
+				first = err
+			}
+		} else {
+			delete(state.keys, key)
 		}
 	}
 	if t.ctx.Err() != nil {
+		delete(l.inputs, t)
 		return nil
+	}
+	if len(state.buttons) == 0 && len(state.keys) == 0 {
+		delete(l.inputs, t)
 	}
 	return first
 }
