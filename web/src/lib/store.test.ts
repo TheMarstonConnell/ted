@@ -127,33 +127,37 @@ describe("event replay", () => {
   it("upserts pending bot merges without displaying a turn before it starts", () => {
     const bot = {
       ...queued,
+      id: "bot",
       kind: "bot" as const,
       sender_agent_id: "review-chat",
     };
+    const other = { ...bot, id: "other", sender_agent_id: "test-chat" };
     const merged = { ...bot, text: "Hello\n\nChecks passed" };
     const latest = {
       ...merged,
       text: "Hello\n\nChecks passed\n\nCoverage passed",
     };
-    let s = reduceEvent(state(), event(1, "message.queued", bot));
+    let s = reduceEvent(state(), event(1, "message.queued", queued));
+    s = reduceEvent(s, event(2, "message.queued", bot));
+    s = reduceEvent(s, event(3, "message.queued", other));
     const accepted = s;
-    s = reduceEvent(s, event(2, "message.updated", merged));
-    expect(s.agents.a.queue).toEqual([merged]);
+    s = reduceEvent(s, event(4, "message.updated", merged));
+    expect(s.agents.a.queue).toEqual([queued, merged, other]);
     expect(s.transcripts.a || []).toEqual([]);
-    expect(accepted.agents.a.queue).toEqual([bot]);
-    const update = event(3, "message.updated", latest);
+    expect(accepted.agents.a.queue).toEqual([queued, bot, other]);
+    const update = event(5, "message.updated", latest);
     s = reduceEvent(s, update);
-    expect(s.agents.a.queue).toEqual([latest]);
+    expect(s.agents.a.queue).toEqual([queued, latest, other]);
     expect(s.transcripts.a || []).toEqual([]);
-    expect(s.cursors.a).toBe(3);
+    expect(s.cursors.a).toBe(5);
     expect(reduceEvent(s, update)).toBe(s);
-    expect(reduceEvent(s, event(1, "message.queued", bot))).toBe(s);
+    expect(reduceEvent(s, event(2, "message.queued", bot))).toBe(s);
 
     s = reduceEvent(
       s,
-      event(4, "turn.started", { ...latest, status: "running" }),
+      event(6, "turn.started", { ...latest, status: "running" }),
     );
-    expect(s.agents.a.queue).toEqual([{ ...latest, status: "running" }]);
+    expect(s.agents.a.queue).toEqual([queued, { ...latest, status: "running" }, other]);
     expect(s.transcripts.a).toEqual([
       expect.objectContaining({
         kind: "bot",
@@ -163,7 +167,7 @@ describe("event replay", () => {
     ]);
     s = reduceEvent(
       s,
-      event(5, "conversation", [
+      event(7, "conversation", [
         {
           role: "user",
           kind: "bot",
@@ -173,27 +177,6 @@ describe("event replay", () => {
       ]),
     );
     expect(s.transcripts.a).toHaveLength(1);
-  });
-
-  it("preserves queue order and unrelated rows during bot merges and replay", () => {
-    const bot = {
-      ...queued,
-      id: "bot",
-      kind: "bot" as const,
-      sender_agent_id: "review-chat",
-    };
-    const other = { ...bot, id: "other", sender_agent_id: "test-chat" };
-    const merged = { ...bot, text: "Hello\n\nChecks passed" };
-    const events = [
-      event(1, "message.queued", queued),
-      event(2, "message.queued", bot),
-      event(3, "message.queued", other),
-      event(4, "message.updated", merged),
-    ];
-    const replayed = events.reduce(reduceEvent, state());
-    expect(replayed.agents.a.queue).toEqual([queued, merged, other]);
-    expect(replayed.transcripts.a || []).toEqual([]);
-    expect(events.reduce(reduceEvent, replayed)).toBe(replayed);
   });
 
   it("rejects gaps without advancing a processed cursor", () => {

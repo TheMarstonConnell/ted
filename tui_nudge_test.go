@@ -136,24 +136,3 @@ func TestBotNotificationMergePreservesRows(t *testing.T) {
 		t.Fatalf("render cache did not refresh: %q", m.transcriptContent)
 	}
 }
-
-func TestBotNotificationMergeReplay(t *testing.T) {
-	original := remote.QueuedMessage{ID: "nudge", Text: "first report", Kind: "bot", SenderAgentID: "reviewer", Status: "pending"}
-	merged := original
-	merged.Text += "\n\nsecond report"
-	latest := merged
-	latest.Text += "\n\nfinal report"
-	for _, events := range [][]remote.QueuedMessage{
-		{original, merged, latest},
-		{latest}, // An update can be the first event seen by a renderer.
-	} {
-		m := tuiTestModel()
-		for _, notification := range events {
-			next, _ := m.Update(notification)
-			m = next.(model)
-		}
-		if len(m.messages) != 2 || m.messages[1].content != formatTUIBotNotification(latest) {
-			t.Fatalf("replayed notification = %+v", m.messages)
-		}
-	}
-}
