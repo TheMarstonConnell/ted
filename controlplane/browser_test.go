@@ -1189,3 +1189,65 @@ func TestBrowserShutdownRetainsAgentCloseForUntrackedRuntimeInstance(t *testing.
 		t.Fatal("shutdown skipped untracked runtime instance")
 	}
 }
+
+func TestBrowserLifecycleAfterServiceRestart(t *testing.T) {
+	for _, action := range []string{"settle", "settle-again", "delete", "shutdown"} {
+		t.Run(action, func(t *testing.T) {
+			dir := t.TempDir()
+			original, err := NewService(dir, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			project, err := original.CreateProject(CreateProjectRequest{Name: "persisted", Root: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			a, err := original.CreateAgent(CreateAgentRequest{ProjectID: project.ID}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if action == "delete" || action == "settle-again" {
+				if _, err := original.SetSettled(a.ID, true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Release durable storage as a crashed process would, without session cleanup.
+			if err := original.store.close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := original.releaseLock(); err != nil {
+				t.Fatal(err)
+			}
+			restored, err := NewService(dir, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := make(chan browserCloseCall, 4)
+			restored.browserClose = func(_ context.Context, home, project, thread string) error {
+				calls <- browserCloseCall{home, project, thread}
+				return nil
+			}
+			t.Cleanup(func() { _ = restored.Close(context.Background()) })
+			switch action {
+			case "settle", "settle-again":
+				_, err = restored.SetSettled(a.ID, true)
+			case "delete":
+				err = restored.DeleteProject(project.ID)
+			case "shutdown":
+				err = restored.Close(context.Background())
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case got := <-calls:
+				want := browserCloseCall{filepath.Join(dir, "runtime"), project.Root, a.ID}
+				if got != want {
+					t.Fatalf("cleanup target %+v, want %+v", got, want)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("persisted session identity was not cleaned up after restart")
+			}
+		})
+	}
+}

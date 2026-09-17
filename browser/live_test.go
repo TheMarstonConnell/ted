@@ -593,3 +593,63 @@ func TestSessionCloseCancelsQueuedLiveNewBeforeCleanup(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestSessionCloseWaitsForOrdinaryAgentRequest(t *testing.T) {
+	mgr := newManager(context.Background(), t.TempDir())
+	defer mgr.close()
+	root, err := ProjectRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, thread := projectKey(root), "agent-close-race"
+	p := mgr.project(root, key)
+	p.started = true
+	s := &session{project: p, thread: thread, dir: t.TempDir(), tabs: make(map[target.ID]*browserTab)}
+	p.sessions[thread] = s
+	// Delay an ordinary request between lifecycle admission and session lookup.
+	p.mu.Lock()
+	operation := make(chan error, 1)
+	go func() {
+		_, err := mgr.dispatch(context.Background(), Request{Project: root, Thread: thread, Action: "tabs"})
+		operation <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		mgr.mu.Lock()
+		lifecycle := mgr.lifecycles[sessionIdentity{key, thread}]
+		mgr.mu.Unlock()
+		if lifecycle != nil {
+			if !lifecycle.gate.TryLock() {
+				break
+			}
+			lifecycle.gate.Unlock()
+		}
+		if time.Now().After(deadline) {
+			p.mu.Unlock()
+			t.Fatal("ordinary request did not enter the shared lifecycle barrier")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	closed := make(chan error, 1)
+	go func() {
+		_, err := mgr.dispatch(context.Background(), Request{Project: root, Thread: thread, Action: "session-close"})
+		closed <- err
+	}()
+	p.mu.Unlock()
+	for _, result := range []<-chan error{operation, closed} {
+		select {
+		case err := <-result:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("ordinary request/session cleanup did not finish")
+		}
+	}
+	p.mu.Lock()
+	remaining := p.sessions[thread]
+	p.mu.Unlock()
+	if remaining != nil || !s.closed {
+		t.Fatal("ordinary request left a replacement session after cleanup")
+	}
+}

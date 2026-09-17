@@ -113,10 +113,6 @@ func (s *Service) beginBrowserViewer(id string, cancel context.CancelFunc) (brow
 	s.nextBrowserClient++
 	token := s.nextBrowserClient
 	s.browserClients[id][token] = cancel
-	if s.browserSessions == nil {
-		s.browserSessions = make(map[string]bool)
-	}
-	s.browserSessions[id] = true
 	return req, changed, func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -137,9 +133,6 @@ func (s *Service) cancelBrowserViewersLocked(id string) {
 
 func (s *Service) closeBrowserSessionLocked(id, project string) error {
 	s.cancelBrowserViewersLocked(id)
-	if !s.browserSessions[id] {
-		return nil
-	}
 	closer := s.browserClose
 	if closer == nil {
 		closer = closeBrowserSession
@@ -147,11 +140,6 @@ func (s *Service) closeBrowserSessionLocked(id, project string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	err := closer(ctx, filepath.Join(s.dir, "runtime"), project, id)
 	cancel()
-	if err == nil {
-		delete(s.browserSessions, id)
-	} else {
-		s.browserSessions[id] = true
-	}
 	return err
 }
 

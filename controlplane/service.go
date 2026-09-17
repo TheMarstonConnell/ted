@@ -39,7 +39,6 @@ type Service struct {
 	running           map[string]*runningTurn
 	instances         map[string]*agent.Agent
 	browserClose      browserSessionCloser
-	browserSessions   map[string]bool
 	browserClients    map[string]map[uint64]context.CancelFunc
 	nextBrowserClient uint64
 	changed           chan struct{}
@@ -72,7 +71,7 @@ func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Se
 		unlock()
 		return nil, err
 	}
-	s := &Service{dir: dir, logger: logger, providers: append([]agent.Provider(nil), providers...), catalog: agent.NewAgent(logger, providers), state: state, running: map[string]*runningTurn{}, instances: map[string]*agent.Agent{}, browserClose: closeBrowserSession, browserSessions: map[string]bool{}, browserClients: map[string]map[uint64]context.CancelFunc{}, changed: make(chan struct{}), releaseLock: unlock, store: store, pullRequests: newPullRequestResolver()}
+	s := &Service{dir: dir, logger: logger, providers: append([]agent.Provider(nil), providers...), catalog: agent.NewAgent(logger, providers), state: state, running: map[string]*runningTurn{}, instances: map[string]*agent.Agent{}, browserClose: closeBrowserSession, browserClients: map[string]map[uint64]context.CancelFunc{}, changed: make(chan struct{}), releaseLock: unlock, store: store, pullRequests: newPullRequestResolver()}
 	// A durable "running" record is evidence of interrupted work, never a
 	// request to repeat tools. Even graceful shutdown follows this recovery rule.
 	recovery := newStateChanges()
@@ -807,44 +806,36 @@ func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 			targets = append(targets, children[targets[i].Agent.ID]...)
 		}
 	}
-	changed := targets[:0]
+	changed := make([]*storedAgent, 0, len(targets))
 	for _, target := range targets {
 		if target.Agent.Settled != settled {
 			changed = append(changed, target)
 		}
 	}
-	if len(changed) == 0 {
-		return cloneAgent(a.Agent), nil
-	}
-	before := newStateChanges()
-	for _, target := range changed {
-		before.agent(s.state, target.Agent.ID)
-		target.Agent.Settled = settled
-		target.Agent.Held = true
-		if settled && s.running[target.Agent.ID] != nil {
-			target.Agent.State = "stopping"
+	if len(changed) > 0 {
+		before := newStateChanges()
+		for _, target := range changed {
+			before.agent(s.state, target.Agent.ID)
+			target.Agent.Settled = settled
+			target.Agent.Held = true
+			if settled && s.running[target.Agent.ID] != nil {
+				target.Agent.State = "stopping"
+			}
+			s.eventLocked(target, "agent.updated", s.summaryLocked(target))
 		}
-		s.eventLocked(target, "agent.updated", s.summaryLocked(target))
-	}
-	if err = s.commitLocked(before); err != nil {
-		return Agent{}, err
+		if err = s.commitLocked(before); err != nil {
+			return Agent{}, err
+		}
 	}
 	if settled {
-		for _, target := range changed {
+		for _, target := range targets {
 			if r := s.running[target.Agent.ID]; r != nil {
 				r.stopped = true
 				r.cancel()
 			}
 			if instance := s.instances[target.Agent.ID]; instance != nil {
 				s.cancelBrowserViewersLocked(target.Agent.ID)
-				if err := instance.Close(); err == nil {
-					delete(s.browserSessions, target.Agent.ID)
-				} else {
-					if s.browserSessions == nil {
-						s.browserSessions = make(map[string]bool)
-					}
-					s.browserSessions[target.Agent.ID] = true
-				}
+				_ = instance.Close()
 			} else if project, ok := s.state.Projects[target.Agent.ProjectID]; ok {
 				_ = s.closeBrowserSessionLocked(target.Agent.ID, project.Root)
 			}
@@ -1157,8 +1148,8 @@ func (s *Service) Close(ctx context.Context) error {
 		for id, instance := range s.instances {
 			instances[id] = instance
 		}
-		viewerIdentities := make(map[string]string, len(s.browserSessions))
-		for id := range s.browserSessions {
+		viewerIdentities := make(map[string]string, len(s.state.Agents))
+		for id := range s.state.Agents {
 			if instances[id] != nil {
 				continue
 			}
@@ -1174,7 +1165,6 @@ func (s *Service) Close(ctx context.Context) error {
 		}
 		home := filepath.Join(s.dir, "runtime")
 		s.instances = map[string]*agent.Agent{}
-		s.browserSessions = map[string]bool{}
 		s.mu.Unlock()
 		var cleanup sync.WaitGroup
 		for _, instance := range instances {

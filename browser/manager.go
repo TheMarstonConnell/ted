@@ -188,6 +188,10 @@ func (m *manager) dispatch(serverCtx context.Context, req Request) (any, error) 
 		return nil, fail("unknown_action", "unknown browser action %q", req.Action)
 	}
 
+	lifecycle, release := m.retainSessionLifecycle(key, req.Thread)
+	defer release()
+	lifecycle.gate.RLock()
+	defer lifecycle.gate.RUnlock()
 	p := m.project(root, key)
 	timeout := req.Timeout
 	if timeout <= 0 {
