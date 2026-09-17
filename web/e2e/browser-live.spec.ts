@@ -14,6 +14,33 @@ async function capture(page: Page, info: TestInfo, name: string) {
   await info.attach(name, { path, contentType: "image/png" });
 }
 
+async function touchGesture(
+  page: Page,
+  points: Array<{ x: number; y: number }>,
+) {
+  const session = await page.context().newCDPSession(page);
+  await session.send("Emulation.setTouchEmulationEnabled", {
+    enabled: true,
+    maxTouchPoints: 1,
+  });
+  await session.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ ...points[0], id: 1 }],
+  });
+  for (const point of points.slice(1)) {
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ ...point, id: 1 }],
+    });
+  }
+  await session.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  await session.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await session.detach();
+}
+
 async function liveBrowser(page: Page) {
   const chat = await workspace(page);
   const commands: LiveCommand[] = [];
@@ -22,6 +49,7 @@ async function liveBrowser(page: Page) {
   let selected = "";
   let pinned = "";
   let jpeg = "";
+  let scrolledJpeg = "";
   let streamFrames = true;
   let nextId = 1;
   const send = (event: unknown) => sockets.at(-1)?.send(JSON.stringify(event));
@@ -69,6 +97,10 @@ async function liveBrowser(page: Page) {
         }
       }
       if (["back", "forward", "reload"].includes(command.type)) state();
+      if (command.event === "mouseWheel" && command.delta_y) {
+        jpeg = scrolledJpeg;
+        state();
+      }
       if (command.type === "close") {
         tabs = tabs.filter((t) => t.id !== command.tab_id);
         if (!tabs.some((t) => t.id === selected)) selected = tabs[0]?.id || "";
@@ -81,7 +113,7 @@ async function liveBrowser(page: Page) {
   await page
     .getByRole("button", { name: "harness /srv/harness", exact: true })
     .click();
-  jpeg = await page.evaluate(() => {
+  const frames = await page.evaluate(() => {
     const canvas = document.createElement("canvas");
     canvas.width = 1280;
     canvas.height = 720;
@@ -123,8 +155,31 @@ async function liveBrowser(page: Page) {
     ctx.fillStyle = "#64748b";
     ctx.font = "16px sans-serif";
     ctx.fillText("Deterministic browser preview fixture", 64, 684);
-    return canvas.toDataURL("image/jpeg").split(",")[1];
+    const top = canvas.toDataURL("image/jpeg").split(",")[1];
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillRect(0, 0, 1280, 720);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, 1280, 88);
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "600 28px sans-serif";
+    ctx.fillText("Fieldwork", 64, 54);
+    ctx.font = "600 40px sans-serif";
+    ctx.fillText("Built for the long way around", 64, 184);
+    ctx.fillStyle = "#475569";
+    ctx.font = "20px sans-serif";
+    ctx.fillText("You scrolled the shared page", 64, 232);
+    ctx.fillStyle = "#dbeafe";
+    ctx.fillRect(64, 288, 1152, 296);
+    ctx.fillStyle = "#1e3a8a";
+    ctx.font = "600 32px sans-serif";
+    ctx.fillText("More from the collection", 416, 448);
+    return {
+      top,
+      scrolled: canvas.toDataURL("image/jpeg").split(",")[1],
+    };
   });
+  jpeg = frames.top;
+  scrolledJpeg = frames.scrolled;
   const open = async () => {
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     await expect(
@@ -333,6 +388,109 @@ test("scaled hover, click, drag, double click, wheel, keys, paste, composition a
   await page.keyboard.up("Shift");
 });
 
+test("touch pan scrolls remotely, touch tap clicks, and mouse drag remains a drag", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const live = await liveBrowser(page);
+  await live.open();
+  live.newTab();
+  await expect(live.viewport).toBeVisible();
+  const demoHold = () =>
+    process.env.TED_WEB_RECORD === "1"
+      ? page.waitForTimeout(1800)
+      : Promise.resolve();
+  await demoHold();
+  const box = (await live.viewport.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const startY = box.y + box.height * 0.72;
+  const beforePan = live.commands.length;
+  const image = page.getByAltText("Live browser page");
+  const beforeSrc = await image.getAttribute("src");
+  const points = Array.from({ length: 7 }, (_, index) => ({
+    x,
+    y: startY - index * 14,
+  }));
+  await touchGesture(page, points);
+  await expect
+    .poll(
+      () =>
+        live.commands
+          .slice(beforePan)
+          .filter((command) => command.event === "mouseWheel").length,
+    )
+    .toBeGreaterThan(0);
+  const panCommands = live.commands.slice(beforePan);
+  const wheels = panCommands.filter(
+    (command) => command.event === "mouseWheel",
+  );
+  expect(wheels.length).toBeLessThan(points.length - 1);
+  expect(
+    wheels.reduce((total, command) => total + (command.delta_y || 0), 0),
+  ).toBeGreaterThan(0);
+  expect(
+    panCommands.some(
+      (command) =>
+        command.event === "mousePressed" || command.event === "mouseReleased",
+    ),
+  ).toBe(false);
+  await expect.poll(() => image.getAttribute("src")).not.toBe(beforeSrc);
+  await demoHold();
+  await capture(page, testInfo, "live-browser-touch-scroll-mobile");
+  await demoHold();
+
+  const beforeTap = live.commands.length;
+  await touchGesture(page, [{ x: box.x + 80, y: box.y + 80 }]);
+  await expect
+    .poll(
+      () =>
+        live.commands
+          .slice(beforeTap)
+          .filter(
+            (command) =>
+              command.event === "mousePressed" ||
+              command.event === "mouseReleased",
+          ).length,
+    )
+    .toBe(2);
+  expect(
+    live.commands
+      .slice(beforeTap)
+      .filter(
+        (command) =>
+          command.event === "mousePressed" || command.event === "mouseReleased",
+      )
+      .map((command) => [command.event, command.button, command.buttons]),
+  ).toEqual([
+    ["mousePressed", "left", 1],
+    ["mouseReleased", "left", 0],
+  ]);
+  await demoHold();
+
+  const beforeMouse = live.commands.length;
+  await page.mouse.move(x, startY);
+  await page.mouse.down();
+  await page.mouse.move(x + 32, startY - 24, { steps: 3 });
+  await page.mouse.up();
+  await expect
+    .poll(() =>
+      live.commands
+        .slice(beforeMouse)
+        .some(
+          (command) => command.event === "mouseMoved" && command.buttons === 1,
+        ),
+    )
+    .toBe(true);
+  const mouseDrag = live.commands.slice(beforeMouse);
+  expect(mouseDrag.some((command) => command.event === "mousePressed")).toBe(
+    true,
+  );
+  expect(mouseDrag.some((command) => command.event === "mouseReleased")).toBe(
+    true,
+  );
+  await demoHold();
+});
+
 test("agent overlay is tab-filtered, pointer-transparent, expires and clears on navigation", async ({
   page,
 }) => {
@@ -430,7 +588,10 @@ for (const width of [320, 390, 768]) {
 }
 
 test("live browser preview demo", async ({ page }, testInfo) => {
-  test.skip(process.env.TED_WEB_RECORD !== "1", "Opt-in visual evidence capture");
+  test.skip(
+    process.env.TED_WEB_RECORD !== "1",
+    "Opt-in visual evidence capture",
+  );
   const live = await liveBrowser(page);
   live.emit("a1", "output", {
     ResponseType: "agent",

@@ -72,9 +72,10 @@ export function browserWheel(
   height: number,
   scale: number,
 ) {
+  const bound = (delta: number) => Math.max(-100000, Math.min(100000, delta));
   return {
-    delta_x: deltaX * (mode === 1 ? 16 : mode === 2 ? width : scale),
-    delta_y: deltaY * (mode === 1 ? 16 : mode === 2 ? height : scale),
+    delta_x: bound(deltaX * (mode === 1 ? 16 : mode === 2 ? width : scale)),
+    delta_y: bound(deltaY * (mode === 1 ? 16 : mode === 2 ? height : scale)),
   };
 }
 
@@ -280,7 +281,11 @@ export class LiveBrowserConnection {
           this.send({ type: "release", tab_id: this.state.viewed });
         const pendingFrame =
           this.pendingFrame?.tab_id === viewed ? this.pendingFrame : null;
-        this.pendingFrame = null;
+        const pendingClosed =
+          !!this.pendingFrame &&
+          this.state.tabs.some((tab) => tab.id === this.pendingFrame?.tab_id) &&
+          !tabs.some((tab) => tab.id === this.pendingFrame?.tab_id);
+        if (pendingFrame || pendingClosed) this.pendingFrame = null;
         this.update({
           tabs,
           viewed,

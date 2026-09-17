@@ -11,8 +11,9 @@ their conversation to inspect them.
   an empty session offers an explicit **Open browser** action.
 - Watch beside chat, expand the panel, or use the full-width view on narrow screens.
 - The viewport is always interactive. Clicking focuses it for keyboard input;
-  Escape releases local focus. The address bar, tab strip and history controls
-  operate on the displayed browser tab.
+  Escape releases local focus. On touchscreens, a tap clicks the remote page and
+  a drag scrolls it. The address bar, tab strip and history controls operate on
+  the displayed browser tab.
 - There is no exclusive controller or takeover mode. Human input does not stop the
   agent. Both share Chrome's focus and page state: a simultaneous agent click can
   redirect typing, and a navigation can interrupt an interaction.

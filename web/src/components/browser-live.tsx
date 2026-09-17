@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -307,25 +308,59 @@ function BrowserViewport({
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [focused, setFocused] = useState(false);
   const composing = useRef(false);
+  const blurring = useRef(false);
   const pressed = useRef(false);
   const capturedPointer = useRef<number | null>(null);
   const move = useRef<LiveCommand | null>(null);
   const moveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
-  const flushMove = () => {
+  const wheel = useRef<LiveCommand | null>(null);
+  const wheelTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const touch = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    panning: boolean;
+  } | null>(null);
+  const click = useRef({ time: 0, x: 0, y: 0, button: -1, count: 0 });
+  const current = useRef(frame);
+  useLayoutEffect(() => {
+    current.current = frame;
+  }, [frame]);
+  const flushMove = useCallback(() => {
     clearTimeout(moveTimer.current);
     moveTimer.current = undefined;
     if (move.current) {
       send(move.current);
       move.current = null;
     }
-  };
-  const click = useRef({ time: 0, x: 0, y: 0, button: -1, count: 0 });
-  const current = useRef(frame);
-  useLayoutEffect(() => {
-    current.current = frame;
-  }, [frame]);
+  }, [send]);
+  const flushWheel = useCallback(() => {
+    clearTimeout(wheelTimer.current);
+    wheelTimer.current = undefined;
+    if (wheel.current) {
+      send(wheel.current);
+      wheel.current = null;
+    }
+  }, [send]);
+  const queueWheel = useCallback(
+    (command: LiveCommand) => {
+      const bound = (delta: number) =>
+        Math.max(-100000, Math.min(100000, delta));
+      wheel.current = {
+        ...command,
+        delta_x: bound((wheel.current?.delta_x || 0) + (command.delta_x || 0)),
+        delta_y: bound((wheel.current?.delta_y || 0) + (command.delta_y || 0)),
+      };
+      if (!wheelTimer.current) wheelTimer.current = setTimeout(flushWheel, 32);
+    },
+    [flushWheel],
+  );
   useEffect(() => {
     const element = host.current!;
     const resize = new ResizeObserver(([entry]) =>
@@ -337,56 +372,45 @@ function BrowserViewport({
     resize.observe(element);
     return () => resize.disconnect();
   }, []);
-  const release = () => {
-    clearTimeout(moveTimer.current);
-    moveTimer.current = undefined;
-    move.current = null;
-    pressed.current = false;
-    const id = capturedPointer.current;
-    capturedPointer.current = null;
-    if (id !== null && input.current?.hasPointerCapture(id))
-      input.current.releasePointerCapture(id);
-    send({ type: "release", tab_id: frame.tab_id });
-  };
-  useEffect(() => {
-    const release = () => {
+  const release = useCallback(
+    (blur = false) => {
       clearTimeout(moveTimer.current);
+      clearTimeout(wheelTimer.current);
       moveTimer.current = undefined;
+      wheelTimer.current = undefined;
       move.current = null;
+      wheel.current = null;
       pressed.current = false;
+      touch.current = null;
       const id = capturedPointer.current;
       capturedPointer.current = null;
       if (id !== null && input.current?.hasPointerCapture(id))
         input.current.releasePointerCapture(id);
       send({ type: "release", tab_id: current.current.tab_id });
-      input.current?.blur();
-    };
+      if (blur) {
+        blurring.current = true;
+        input.current?.blur();
+        blurring.current = false;
+      }
+    },
+    [send],
+  );
+  useEffect(() => {
+    const releaseAndBlur = () => release(true);
     const visibility = () => {
-      if (document.hidden) release();
+      if (document.hidden) releaseAndBlur();
     };
-    window.addEventListener("blur", release);
+    window.addEventListener("blur", releaseAndBlur);
     document.addEventListener("visibilitychange", visibility);
     return () => {
-      window.removeEventListener("blur", release);
+      window.removeEventListener("blur", releaseAndBlur);
       document.removeEventListener("visibilitychange", visibility);
-      release();
+      releaseAndBlur();
     };
-  }, [send]);
+  }, [release]);
   useEffect(() => {
     const element = input.current!;
-    let pending: LiveCommand | null = null;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const cancel = () => {
-      clearTimeout(timer);
-      timer = undefined;
-      pending = null;
-    };
-    const flush = () => {
-      if (pending) send(pending);
-      pending = null;
-      timer = undefined;
-    };
-    const wheel = (event: WheelEvent) => {
+    const nativeWheel = (event: WheelEvent) => {
       event.preventDefault();
       const frame = current.current;
       const rect = element.getBoundingClientRect();
@@ -397,58 +421,125 @@ function BrowserViewport({
         frame.width,
         frame.height,
       );
-      if (point) {
-        const command: LiveCommand = {
-          type: "mouse",
-          tab_id: frame.tab_id,
-          event: "mouseWheel",
-          ...point,
-          ...browserWheel(
-            event.deltaX,
-            event.deltaY,
-            event.deltaMode,
-            frame.width,
-            frame.height,
-            frame.width / rect.width,
-          ),
-          modifiers: browserModifiers(event),
-        };
-        pending = {
-          ...command,
-          delta_x: (pending?.delta_x || 0) + (command.delta_x || 0),
-          delta_y: (pending?.delta_y || 0) + (command.delta_y || 0),
-        };
-        if (!timer) timer = setTimeout(flush, 32);
-      }
+      if (!point) return;
+      queueWheel({
+        type: "mouse",
+        tab_id: frame.tab_id,
+        event: "mouseWheel",
+        ...point,
+        ...browserWheel(
+          event.deltaX,
+          event.deltaY,
+          event.deltaMode,
+          frame.width,
+          frame.height,
+          frame.width / rect.width,
+        ),
+        modifiers: browserModifiers(event),
+      });
     };
-    element.addEventListener("wheel", wheel, { passive: false });
-    element.addEventListener("blur", cancel);
-    window.addEventListener("blur", cancel);
-    return () => {
-      cancel();
-      element.removeEventListener("wheel", wheel);
-      element.removeEventListener("blur", cancel);
-      window.removeEventListener("blur", cancel);
-    };
-  }, [send]);
+    element.addEventListener("wheel", nativeWheel, { passive: false });
+    return () => element.removeEventListener("wheel", nativeWheel);
+  }, [queueWheel]);
   const pointer = (
     event: PointerEvent<HTMLTextAreaElement>,
     kind: "mouseMoved" | "mousePressed" | "mouseReleased",
   ) => {
     if (!event.isPrimary || event.button > 2) return;
-    if (kind === "mouseReleased" && !pressed.current) return;
+    const element = event.currentTarget;
+    const rect = element.getBoundingClientRect();
     const point = browserPoint(
       event.clientX,
       event.clientY,
-      event.currentTarget.getBoundingClientRect(),
+      rect,
       frame.width,
       frame.height,
     );
+    if (event.pointerType === "touch") {
+      event.preventDefault();
+      if (kind === "mousePressed") {
+        element.setPointerCapture(event.pointerId);
+        capturedPointer.current = event.pointerId;
+        touch.current = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          lastX: event.clientX,
+          lastY: event.clientY,
+          panning: false,
+        };
+        return;
+      }
+      const gesture = touch.current;
+      if (!gesture || gesture.pointerId !== event.pointerId) return;
+      if (kind === "mouseMoved") {
+        if (
+          !gesture.panning &&
+          Math.hypot(
+            event.clientX - gesture.startX,
+            event.clientY - gesture.startY,
+          ) >= 8
+        )
+          gesture.panning = true;
+        if (gesture.panning && point) {
+          queueWheel({
+            type: "mouse",
+            tab_id: frame.tab_id,
+            event: "mouseWheel",
+            ...point,
+            ...browserWheel(
+              gesture.lastX - event.clientX,
+              gesture.lastY - event.clientY,
+              0,
+              frame.width,
+              frame.height,
+              frame.width / rect.width,
+            ),
+            modifiers: browserModifiers(event),
+          });
+        }
+        gesture.lastX = event.clientX;
+        gesture.lastY = event.clientY;
+        return;
+      }
+      if (gesture.panning) {
+        flushWheel();
+      } else if (point) {
+        element.focus({ preventScroll: true });
+        send({
+          type: "mouse",
+          tab_id: frame.tab_id,
+          event: "mousePressed",
+          ...point,
+          button: "left",
+          buttons: 1,
+          click_count: 1,
+          modifiers: browserModifiers(event),
+        });
+        send({
+          type: "mouse",
+          tab_id: frame.tab_id,
+          event: "mouseReleased",
+          ...point,
+          button: "left",
+          buttons: 0,
+          click_count: 1,
+          modifiers: browserModifiers(event),
+        });
+      }
+      touch.current = null;
+      capturedPointer.current = null;
+      if (element.hasPointerCapture(event.pointerId))
+        element.releasePointerCapture(event.pointerId);
+      send({ type: "release", tab_id: frame.tab_id });
+      return;
+    }
+    if (kind === "mouseReleased" && !pressed.current) return;
     if (!point) return;
     if (kind === "mousePressed") {
       event.preventDefault();
-      event.currentTarget.focus({ preventScroll: true });
-      event.currentTarget.setPointerCapture(event.pointerId);
+      element.focus({ preventScroll: true });
+      element.setPointerCapture(event.pointerId);
       capturedPointer.current = event.pointerId;
       pressed.current = true;
       const last = click.current;
@@ -488,8 +579,6 @@ function BrowserViewport({
         ? { click_count: click.current.count || 1 }
         : {}),
     };
-    // Bound hover/drag traffic independently of display refresh rate. Never drop
-    // the last movement before a press/release or replay it after blur.
     if (kind === "mouseMoved") {
       move.current = command;
       if (!moveTimer.current) moveTimer.current = setTimeout(flushMove, 32);
@@ -500,8 +589,8 @@ function BrowserViewport({
     if (kind === "mouseReleased") {
       pressed.current = false;
       capturedPointer.current = null;
-      if (event.currentTarget.hasPointerCapture(event.pointerId))
-        event.currentTarget.releasePointerCapture(event.pointerId);
+      if (element.hasPointerCapture(event.pointerId))
+        element.releasePointerCapture(event.pointerId);
     }
   };
   const keyboard = (
@@ -511,8 +600,7 @@ function BrowserViewport({
     event.stopPropagation();
     if (event.key === "Escape") {
       event.preventDefault();
-      release();
-      event.currentTarget.blur();
+      release(true);
       onEscape();
       return;
     }
@@ -581,14 +669,14 @@ function BrowserViewport({
             onFocus={() => setFocused(true)}
             onBlur={() => {
               setFocused(false);
-              release();
+              if (!blurring.current) release();
             }}
             onPointerMove={(event) => pointer(event, "mouseMoved")}
             onPointerDown={(event) => pointer(event, "mousePressed")}
             onPointerUp={(event) => pointer(event, "mouseReleased")}
-            onPointerCancel={release}
+            onPointerCancel={() => release()}
             onLostPointerCapture={() => {
-              if (pressed.current) release();
+              if (pressed.current || touch.current) release();
             }}
             onContextMenu={(event) => event.preventDefault()}
             onKeyDown={(event) => keyboard(event, "keyDown")}

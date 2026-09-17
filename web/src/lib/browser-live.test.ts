@@ -210,6 +210,31 @@ it("maps CSS frame coordinates, scaled wheel deltas and CDP modifiers without de
     delta_x: 1280,
     delta_y: 720,
   });
+  expect(browserWheel(1e6, -1e6, 0, 1280, 720, 2)).toEqual({
+    delta_x: 100000,
+    delta_y: -100000,
+  });
+});
+
+it("keeps an early frame through an unrelated periodic state until its matching state", () => {
+  const { connection, socket } = setup();
+  socket.event({ ...state(), tabs: tabs.slice(0, 1) });
+  socket.event(frame("two"));
+  socket.event({ ...state(), tabs: tabs.slice(0, 1) });
+  expect(connection.snapshot().frame).toBeNull();
+  socket.event(state("two", "one", "two"));
+  expect(connection.snapshot().frame?.tab_id).toBe("two");
+  connection.disconnect();
+});
+
+it("drops a pending frame once a previously known tab is confirmed closed", () => {
+  const { connection, socket } = setup();
+  socket.event(state());
+  socket.event(frame("two"));
+  socket.event({ ...state(), tabs: tabs.slice(0, 1) });
+  socket.event(state("two", "one", "two"));
+  expect(connection.snapshot().frame).toBeNull();
+  connection.disconnect();
 });
 
 it("new tabs pin only the viewer and a frame arriving before its state is not lost", () => {
