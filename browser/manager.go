@@ -491,6 +491,13 @@ func (s *session) newTab(ctx context.Context, url string) (*browserTab, error) {
 func (s *session) createTab(ctx context.Context, url string, selectTab bool) (*browserTab, error) {
 	s.targetMu.Lock()
 	defer s.targetMu.Unlock()
+	// Failed cleanup sessions stay registered until retry succeeds.
+	s.structureMu.Lock()
+	closed := s.closed
+	s.structureMu.Unlock()
+	if closed {
+		return nil, fail("not_found", "session is closed")
+	}
 	var tabCtx context.Context
 	var cancel context.CancelFunc
 	if s.isolated {
