@@ -37,7 +37,7 @@ func serveLive(parent context.Context, mgr *manager, conn net.Conn, req Request,
 	err := validateThread(req.Thread)
 	var root string
 	if err == nil {
-		root, err = ProjectRoot(req.Project)
+		root, err = mgr.resolveProject(req.Project, false)
 		if err != nil {
 			err = fail("invalid_project", "%v", err)
 		}

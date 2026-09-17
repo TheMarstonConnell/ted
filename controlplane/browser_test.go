@@ -180,7 +180,7 @@ func TestBrowserTrustedCanonicalIdentityAndNoInitialCommand(t *testing.T) {
 	a := f.agent(p)
 	c := dialBrowser(t, f, a.ID)
 	req, live := <-requests, <-fakes
-	if req.Project != root || req.Thread != a.ID || req.Home != filepath.Join(f.s.dir, "runtime") || req.Action != "" || req.Params != nil {
+	if req.Project != sub || req.Thread != a.ID || req.Home != filepath.Join(f.s.dir, "runtime") || req.Action != "" || req.Params != nil {
 		t.Fatalf("untrusted identity: %+v", req)
 	}
 	select {
@@ -1334,4 +1334,92 @@ func TestBrowserStorageFailureCancelsViewer(t *testing.T) {
 	s.mu.Unlock()
 	assertStatus(t, err, 503)
 	awaitBrowserClosed(t, live)
+}
+
+func TestSettleReportsBrowserCleanupFailureAndRetries(t *testing.T) {
+	s, _, project, a := serviceFixture(t)
+	calls := 0
+	s.browserClose = func(_ context.Context, home, root, id string) error {
+		calls++
+		if home != filepath.Join(s.dir, "runtime") || root != project.Root || id != a.ID {
+			t.Fatalf("wrong cleanup identity: %s %s %s", home, root, id)
+		}
+		if calls == 1 {
+			return errors.New("daemon unavailable")
+		}
+		return nil
+	}
+	_, err := s.SetSettled(a.ID, true)
+	assertStatus(t, err, 503)
+	settled, err := s.GetAgent(a.ID)
+	if err != nil || !settled.Settled || !settled.Held {
+		t.Fatalf("failed cleanup lost settled/held state: %+v %v", settled, err)
+	}
+	retried, err := s.SetSettled(a.ID, true)
+	if err != nil || calls != 2 || retried.Cursor != settled.Cursor {
+		t.Fatalf("retry did not clean up without new events: calls=%d agent=%+v err=%v", calls, retried, err)
+	}
+}
+
+func TestDeleteProjectWithMissingRootAndRunningDaemon(t *testing.T) {
+	dir, err := os.MkdirTemp("", "ted-delete-missing-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	s, err := NewService(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	runtimeHome := filepath.Join(dir, "runtime")
+	t.Setenv("TED_HOME", runtimeHome)
+	ctx, cancel := context.WithCancel(context.Background())
+	daemonDone := make(chan error, 1)
+	go func() { daemonDone <- browser.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-daemonDone; err != nil {
+			t.Error(err)
+		}
+	})
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		conn, err := net.Dial("unix", filepath.Join(runtimeHome, "browser", "daemon.sock"))
+		if err == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("daemon did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	root := filepath.Join(dir, "project")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	project, err := s.CreateProject(CreateProjectRequest{Name: "missing", Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.CreateAgent(CreateAgentRequest{ProjectID: project.ID}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSettled(a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteProject(project.ID); err != nil {
+		t.Fatalf("missing directory blocked metadata deletion: %v", err)
+	}
+	if _, err := s.GetProject(project.ID); err == nil {
+		t.Fatal("project survived deletion")
+	}
+	if _, err := os.Stat(filepath.Join(runtimeHome, "browser", "projects")); !os.IsNotExist(err) {
+		t.Fatalf("cleanup started Chrome or created project storage: %v", err)
+	}
 }

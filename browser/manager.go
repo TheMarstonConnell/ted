@@ -17,13 +17,14 @@ import (
 )
 
 type manager struct {
-	ctx        context.Context
-	home       string
-	mu         sync.Mutex
-	projects   map[string]*projectBrowser
-	lifecycles map[sessionIdentity]*sessionLifecycle
-	nextLive   uint64
-	traceMu    sync.Mutex
+	ctx            context.Context
+	home           string
+	mu             sync.Mutex
+	projects       map[string]*projectBrowser
+	projectAliases map[string]string
+	lifecycles     map[sessionIdentity]*sessionLifecycle
+	nextLive       uint64
+	traceMu        sync.Mutex
 }
 
 type sessionIdentity struct {
@@ -100,7 +101,7 @@ type browserTab struct {
 }
 
 func newManager(ctx context.Context, home string) *manager {
-	return &manager{ctx: ctx, home: home, projects: make(map[string]*projectBrowser), lifecycles: make(map[sessionIdentity]*sessionLifecycle)}
+	return &manager{ctx: ctx, home: home, projects: make(map[string]*projectBrowser), projectAliases: make(map[string]string), lifecycles: make(map[sessionIdentity]*sessionLifecycle)}
 }
 
 func (m *manager) retainSessionLifecycle(project, thread string) (*sessionLifecycle, func()) {
@@ -163,6 +164,31 @@ func (m *manager) close() {
 	}
 }
 
+// Cleanup keeps the original browser identity even after a project is moved.
+func (m *manager) resolveProject(dir string, closing bool) (string, error) {
+	alias, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	root, err := ProjectRoot(dir)
+	if err != nil {
+		if !closing {
+			return "", err
+		}
+		m.mu.Lock()
+		cached := m.projectAliases[alias]
+		m.mu.Unlock()
+		if cached != "" {
+			return cached, nil
+		}
+		return alias, nil
+	}
+	m.mu.Lock()
+	m.projectAliases[alias] = root
+	m.mu.Unlock()
+	return root, nil
+}
+
 func (m *manager) dispatch(serverCtx context.Context, req Request) (any, error) {
 	action := normalizeAction(req.Action)
 	if action == "" {
@@ -177,7 +203,7 @@ func (m *manager) dispatch(serverCtx context.Context, req Request) (any, error) 
 	if err := validateThread(req.Thread); err != nil {
 		return nil, err
 	}
-	root, err := ProjectRoot(req.Project)
+	root, err := m.resolveProject(req.Project, action == "session-close")
 	if err != nil {
 		return nil, fail("invalid_project", "%v", err)
 	}

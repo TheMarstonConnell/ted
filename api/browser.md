@@ -5,8 +5,9 @@ independent of `/v1/ws` and carries ephemeral browser state, not agent event-log
 cursors. The operation, command/event models, and HTTP route are generated from
 [`openapi.yaml`](openapi.yaml).
 
-The server resolves the durable agent's ID and project. Browser identity uses
-`browser.ProjectRoot(project.Root)`, matching runtime `SetIdentity` →
+The server resolves the durable agent's ID and project. The daemon resolves
+`browser.ProjectRoot(project.Root)`, retaining the trusted directory alias for
+cleanup even if that directory is later moved or removed, matching runtime `SetIdentity` →
 `TED_PROJECT_ROOT` → `ted browser`, **not the workspace working directory**.
 A managed-worktree agent and a child sharing that worktree still use their
 project's browser profile with distinct thread IDs. The connector uses the

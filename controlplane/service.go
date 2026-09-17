@@ -831,6 +831,7 @@ func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 		}
 	}
 	if settled {
+		cleanupFailed := false
 		for _, target := range targets {
 			if r := s.running[target.Agent.ID]; r != nil {
 				r.stopped = true
@@ -838,10 +839,17 @@ func (s *Service) SetSettled(id string, settled bool) (Agent, error) {
 			}
 			if instance := s.instances[target.Agent.ID]; instance != nil {
 				s.cancelBrowserViewersLocked(target.Agent.ID)
-				_ = instance.Close()
+				if err := instance.Close(); err != nil {
+					cleanupFailed = true
+				}
 			} else if project, ok := s.state.Projects[target.Agent.ProjectID]; ok {
-				_ = s.closeBrowserSessionLocked(target.Agent.ID, project.Root)
+				if err := s.closeBrowserSessionLocked(target.Agent.ID, project.Root); err != nil {
+					cleanupFailed = true
+				}
 			}
+		}
+		if cleanupFailed {
+			return Agent{}, problem(503, "browser_unavailable", "agent settled but browser cleanup failed; retry settling")
 		}
 	}
 	return cloneAgent(a.Agent), nil

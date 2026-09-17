@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -224,5 +225,22 @@ func TestBrowserEmptyListPagination(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"console":[]`) || !strings.Contains(out.String(), `"total":0`) {
 		t.Fatal(out.String())
+	}
+}
+
+func TestBrowserCloseDispatchesMissingProjectIdentity(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "removed")
+	called := false
+	cmd := newBrowserCommand(func(_ context.Context, req browser.Request) (browser.Response, error) {
+		called = true
+		if req.Project != dir || req.Thread != "cleanup" || req.Action != "session-close" {
+			t.Fatalf("cleanup identity changed: %+v", req)
+		}
+		return browser.Response{OK: true}, nil
+	})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"close", "--project", dir, "--thread", "cleanup"})
+	if err := cmd.Execute(); err != nil || !called {
+		t.Fatalf("missing root blocked cleanup: called=%v err=%v", called, err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -598,5 +599,48 @@ func TestSessionCloseWaitsForOrdinaryAgentRequest(t *testing.T) {
 	p.mu.Unlock()
 	if remaining != nil || !s.closed {
 		t.Fatal("ordinary request left a replacement session after cleanup")
+	}
+}
+
+func TestCloseSessionUsesOriginalAliasAfterProjectMove(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "project")
+	sub := filepath.Join(root, "nested")
+	if err := os.MkdirAll(sub, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s %v", out, err)
+	}
+	mgr := newManager(context.Background(), t.TempDir())
+	defer mgr.close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	viewer := liveTestClient(t, ctx, mgr, Request{Project: sub, Thread: "shared-name"})
+	defer viewer.Close()
+	receiveLive(t, viewer, func(event LiveEvent) bool { return event.Type == "state" })
+	p := mgr.project(root, projectKey(root))
+	s := &session{project: p, thread: "shared-name", dir: t.TempDir(), tabs: make(map[target.ID]*browserTab)}
+	p.mu.Lock()
+	p.sessions[s.thread] = s
+	p.mu.Unlock()
+	foreignRoot := t.TempDir()
+	foreign := mgr.project(foreignRoot, projectKey(foreignRoot))
+	other := &session{project: foreign, thread: s.thread, dir: t.TempDir(), tabs: make(map[target.ID]*browserTab)}
+	foreign.sessions[s.thread] = other
+	if err := os.Rename(root, filepath.Join(base, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.dispatch(ctx, Request{Project: sub, Thread: s.thread, Action: "session-close"}); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	remaining := p.sessions[s.thread]
+	p.mu.Unlock()
+	if remaining != nil || !s.closed {
+		t.Fatal("moved nested project session survived cleanup")
+	}
+	if other.closed || foreign.sessions[s.thread] != other {
+		t.Fatal("cleanup crossed project ownership")
 	}
 }

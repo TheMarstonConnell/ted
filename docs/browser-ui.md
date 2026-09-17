@@ -27,7 +27,9 @@ their conversation to inspect them.
   reconnects to existing tabs. Browser lifetime remains managed by the daemon and
   the existing agent/session cleanup paths. Settling, project deletion and server
   shutdown also clean up viewer-created sessions in the service’s runtime home;
-  they do not depend on an agent having run a model turn.
+  they do not depend on an agent having run a model turn. If daemon cleanup fails,
+  settling returns `browser_unavailable` after persisting the settled/held state;
+  retrying settlement retries cleanup without running another turn.
 
 ## Architecture and boundaries
 

@@ -130,7 +130,7 @@ func (h *httpAPI) AgentBrowser(w http.ResponseWriter, r *http.Request, id string
 	defer release()
 	root, err := canonicalWorkspaceDirectory(req.Project)
 	if err == nil {
-		root, err = browser.ProjectRoot(root)
+		_, err = browser.ProjectRoot(root)
 	}
 	if err != nil {
 		cancel()
