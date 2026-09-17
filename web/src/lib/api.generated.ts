@@ -773,7 +773,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -874,7 +874,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -979,7 +979,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1082,7 +1082,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1185,7 +1185,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1286,7 +1286,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1393,7 +1393,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1496,7 +1496,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1604,7 +1604,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1711,7 +1711,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1814,7 +1814,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -1921,7 +1921,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -2024,7 +2024,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -2131,7 +2131,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -2238,7 +2238,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -2341,7 +2341,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -2450,7 +2450,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 30 MiB, or merged bot text exceeds 1048576 characters. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -2552,7 +2552,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -2659,7 +2659,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -2762,7 +2762,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -2868,7 +2868,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -2974,7 +2974,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -3078,7 +3078,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -3179,7 +3179,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -3287,7 +3287,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters. */
+            /** @description Request body exceeds 2 MiB. */
             413: {
                 headers: {
                     [name: string]: unknown;

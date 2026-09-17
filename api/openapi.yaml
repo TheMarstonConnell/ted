@@ -51,7 +51,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '413': &id006
-          description: Request body exceeds the operation limit (2 MiB, or 30 MiB for message submission), or merged bot text exceeds 1048576 characters.
+          description: Request body exceeds 2 MiB.
           content:
             application/json:
               schema:
@@ -547,7 +547,12 @@ paths:
         '405': *id003
         '409': *id004
         '410': *id005
-        '413': *id006
+        '413':
+          description: Request body exceeds 30 MiB, or merged bot text exceeds 1048576 characters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '415': *id007
         '500': *id008
         '503': *id009
