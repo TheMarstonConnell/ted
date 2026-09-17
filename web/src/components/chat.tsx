@@ -84,6 +84,7 @@ import {
 import {
   IMAGE_ACCEPT,
   readImage,
+  sameAttachments,
   validateImageFiles,
   type Attachment,
 } from "@/lib/attachments";
@@ -378,6 +379,7 @@ const DraftImages = memo(function DraftImages({
   if (!images.length) return null;
   return (
     <div
+      role="group"
       aria-label="Attached images"
       className="flex max-h-48 w-full flex-wrap gap-2 overflow-y-auto px-4 pt-4 md:px-inset"
     >
@@ -705,7 +707,7 @@ function ChatWorkspace() {
         if (
           !receipt ||
           receipt.text !== text ||
-          receipt.attachments !== attachments
+          !sameAttachments(receipt.attachments, attachments)
         ) {
           receipt = { text, attachments, key: requestKey() };
           receipts.set(agentId, receipt);

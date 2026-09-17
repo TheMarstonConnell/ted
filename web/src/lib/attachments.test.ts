@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { MAX_IMAGE_BYTES, validateImageFiles } from "./attachments";
+import {
+  MAX_IMAGE_BYTES,
+  validateImageFiles,
+  sameAttachments,
+} from "./attachments";
 
 const image = (size = 16, type = "image/png", name = "screen.png") =>
   new File([new Uint8Array(size)], name, { type });
@@ -41,4 +45,15 @@ describe("screenshot selection", () => {
       validateImageFiles([image(16, "image/png", "📸".repeat(257))], 0),
     ).toThrow("256 characters");
   });
+});
+
+it("matches attachment retry identity by contents, including order and filenames", () => {
+  const a = { name: "a.png", url: "data:image/png;base64,AA==" };
+  const b = { name: "b.png", url: "data:image/png;base64,AQ==" };
+  expect(sameAttachments([], [])).toBe(true);
+  expect(sameAttachments([a, b], [{ ...a }, { ...b }])).toBe(true);
+  expect(sameAttachments([a, b], [b, a])).toBe(false);
+  expect(sameAttachments([a], [{ ...a, name: "renamed.png" }])).toBe(false);
+  expect(sameAttachments([a], [{ ...a, url: b.url }])).toBe(false);
+  expect(sameAttachments([a], [])).toBe(false);
 });

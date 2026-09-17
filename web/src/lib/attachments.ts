@@ -35,3 +35,12 @@ export function readImage(file: File): Promise<Attachment> {
     reader.readAsDataURL(file);
   });
 }
+
+export function sameAttachments(left: Attachment[], right: Attachment[]) {
+  return (
+    left.length === right.length &&
+    left.every(
+      (image, i) => image.name === right[i].name && image.url === right[i].url,
+    )
+  );
+}
