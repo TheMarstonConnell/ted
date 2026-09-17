@@ -173,8 +173,14 @@ test("changing a new project's directory clears its base and ignores stale branc
   await directory.fill("/srv/slow");
   await expect.poll(() => !!releaseOld).toBe(true);
   await expect(branch).toBeDisabled();
+  await expect(
+    dialog.getByRole("button", { name: "Create project", exact: true }),
+  ).toBeDisabled();
   await directory.fill("/srv/other");
   await expect(branch).toHaveText("upstream/next");
+  await expect(
+    dialog.getByRole("button", { name: "Create project", exact: true }),
+  ).toBeEnabled();
   await releaseOld!();
   await branch.click();
   await expect(

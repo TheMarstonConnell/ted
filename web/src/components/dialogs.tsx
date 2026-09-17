@@ -127,6 +127,7 @@ function ProjectForm() {
     );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [workspaceValid, setWorkspaceValid] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const name = projectName(root);
   async function save(event: FormEvent) {
@@ -203,8 +204,11 @@ function ProjectForm() {
             onChange={(event) => {
               const nextRoot = event.target.value;
               setRoot(nextRoot);
-              if (nextRoot.trim() !== root.trim())
+              if (nextRoot.trim() !== root.trim()) {
                 setWorkspaceDefaults({ mode: workspaceDefaults.mode });
+                if (workspaceDefaults.mode === "worktree")
+                  setWorkspaceValid(false);
+              }
             }}
           />
           <p className="text-xs text-muted-foreground">
@@ -244,11 +248,15 @@ function ProjectForm() {
             root={root}
             value={workspaceDefaults}
             onChange={setWorkspaceDefaults}
+            onValidityChange={!project ? setWorkspaceValid : undefined}
             disabled={busy}
           />
         </div>
         <div className="flex justify-end gap-2">
-          <Button type="submit" disabled={busy || !model || !name}>
+          <Button
+            type="submit"
+            disabled={busy || !model || !name || !workspaceValid}
+          >
             {busy ? "Saving…" : project ? "Save defaults" : "Create project"}
           </Button>
         </div>

@@ -450,8 +450,8 @@ func TestHTTPWorkspaceContract(t *testing.T) {
 	}
 }
 
-func TestHTTPProjectBranchesContract(t *testing.T) {
-	f := newHTTPFixture(t, nil)
+func branchInventoryRoot(t *testing.T) string {
+	t.Helper()
 	root := t.TempDir()
 	git := func(args ...string) string {
 		t.Helper()
@@ -478,6 +478,12 @@ func TestHTTPProjectBranchesContract(t *testing.T) {
 	git("update-ref", "refs/remotes/origin/main", commit)
 	git("update-ref", "refs/remotes/origin/release", commit)
 	git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	return root
+}
+
+func TestHTTPProjectBranchesContract(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	root := branchInventoryRoot(t)
 
 	body, _ := json.Marshal(map[string]any{"name": "git", "root": root, "defaults": Settings{Model: "http-test/one", Effort: "low"}})
 	p := decodeHTTP[Project](t, f.request("POST", "/v1/projects", string(body), "", 201))
@@ -496,32 +502,7 @@ func TestHTTPProjectBranchesContract(t *testing.T) {
 
 func TestHTTPDirectoryBranchesContract(t *testing.T) {
 	f := newHTTPFixture(t, nil)
-	gitRoot := t.TempDir()
-	git := func(args ...string) string {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = gitRoot
-		cmd.Env = append(cmd.Environ(), "GIT_CONFIG_NOSYSTEM=1")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	git("init", "-b", "local-only")
-	git("config", "user.name", "HTTP Test")
-	git("config", "user.email", "http@example.invalid")
-	if err := os.WriteFile(filepath.Join(gitRoot, "README"), []byte("test\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git("add", "README")
-	git("commit", "-m", "initial")
-	commit := git("rev-parse", "HEAD")
-	// The preview must inspect existing refs only; this remote cannot be fetched.
-	git("remote", "add", "origin", "https://example.invalid/never-fetch.git")
-	git("update-ref", "refs/remotes/origin/main", commit)
-	git("update-ref", "refs/remotes/origin/release", commit)
-	git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	gitRoot := branchInventoryRoot(t)
 
 	branches := decodeHTTP[api.ProjectBranches](t, f.request("GET", "/v1/projects/branches?root="+url.QueryEscape(gitRoot), "", "", 200))
 	if !branches.IsGit || branches.DefaultBranch != "origin/main" || len(branches.Branches) != 2 || branches.Branches[0] != "origin/main" || branches.Branches[1] != "origin/release" {
