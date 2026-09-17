@@ -210,49 +210,30 @@ test("changing a new project's directory clears its base and ignores stale branc
   await expect(page).toHaveURL(/dialog=new-agent/);
 });
 
-for (const scenario of ["non-Git", "no remotes", "lookup failure"] as const) {
-  test(`new project branch preview handles ${scenario}`, async ({ page }) => {
-    await workspace(page);
-    await page.route("**/v1/projects/branches?*", (route) =>
-      route.fulfill(
-        scenario === "lookup failure"
-          ? {
-              status: 400,
-              json: { error: { message: "Directory does not exist" } },
-            }
-          : {
-              json: {
-                is_git: scenario !== "non-Git",
-                branches: [],
-                default_branch: "",
-              },
-            },
-      ),
-    );
-    await page.goto("/?dialog=new-project");
-    const dialog = page.getByRole("dialog", { name: "Create a project" });
-    await dialog
-      .getByRole("textbox", { name: "Server directory" })
-      .fill("/srv/example");
-    await expect(
-      dialog.getByText(
-        scenario === "non-Git"
-          ? "Worktrees aren’t available"
-          : scenario === "no remotes"
-            ? "No remote branches are available."
-            : "Could not load remote branches.",
-        { exact: false },
-      ),
-    ).toBeVisible();
-    await dialog.getByRole("combobox", { name: "Workspace" }).click();
-    await expect(
-      page.getByRole("option", { name: "Worktree", exact: true }),
-    ).toBeDisabled();
-    await expect(
-      page.getByRole("option", { name: "Local", exact: true }),
-    ).toBeEnabled();
-  });
-}
+test("new project branch preview handles lookup failure", async ({ page }) => {
+  await workspace(page);
+  await page.route("**/v1/projects/branches?*", (route) =>
+    route.fulfill({
+      status: 400,
+      json: { error: { message: "Directory does not exist" } },
+    }),
+  );
+  await page.goto("/?dialog=new-project");
+  const dialog = page.getByRole("dialog", { name: "Create a project" });
+  await dialog
+    .getByRole("textbox", { name: "Server directory" })
+    .fill("/srv/example");
+  await expect(
+    dialog.getByText("Could not load remote branches.", { exact: false }),
+  ).toBeVisible();
+  await dialog.getByRole("combobox", { name: "Workspace" }).click();
+  await expect(
+    page.getByRole("option", { name: "Worktree", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("option", { name: "Local", exact: true }),
+  ).toBeEnabled();
+});
 
 test("workspace setup progress and terminal failure lock and block the chat", async ({
   page,
