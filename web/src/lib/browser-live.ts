@@ -4,12 +4,15 @@ import type { Schema } from "./api";
 export type LiveTab = Schema["BrowserLiveTab"];
 export type LiveCommand = Schema["BrowserLiveCommand"];
 type LiveEvent = Schema["BrowserLiveEvent"];
-export type LiveFrame = Required<
-  Pick<LiveEvent, "tab_id" | "data" | "width" | "height">
->;
-export type LiveActivity = Required<
-  Pick<LiveEvent, "tab_id" | "x" | "y" | "kind">
-> & { sequence?: number };
+export type LiveFrame = Omit<Extract<LiveEvent, { type: "frame" }>, "type">;
+export type LiveActivity = Omit<
+  Extract<LiveEvent, { type: "activity" }>,
+  "type"
+> & {
+  x: number;
+  y: number;
+  sequence?: number;
+};
 export type LiveSnapshot = {
   status: "connecting" | "live" | "reconnecting";
   tabs: LiveTab[];
@@ -307,10 +310,10 @@ export class LiveBrowserConnection {
       }
       case "frame":
         if (event.tab_id !== this.state.viewed || !this.state.viewed) {
-          this.pendingFrame = event as LiveFrame;
+          this.pendingFrame = event;
           return;
         }
-        this.update({ frame: event as LiveFrame });
+        this.update({ frame: event });
         break;
       case "activity":
         if (event.tab_id !== this.state.viewed) return;
@@ -325,13 +328,13 @@ export class LiveBrowserConnection {
             y: 0,
             ...event,
             sequence: ++this.activitySequence,
-          } as LiveActivity,
+          },
         });
         this.fade = setTimeout(() => this.update({ activity: null }), 1500);
         break;
       case "error":
         this.update({
-          error: event.message ?? "Browser request failed.",
+          error: event.message,
         });
         break;
       default:
