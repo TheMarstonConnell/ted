@@ -744,3 +744,48 @@ test("an unchanged restored image-only draft retries successfully with the origi
   expect(requests[0].key).toBeTruthy();
   expect(requests[1]).toEqual(requests[0]);
 });
+
+test("keyboard removal of draft images restores focus to the composer", async ({
+  page,
+}, info) => {
+  await start(page);
+  await hold(page);
+  const requests = submissions(page);
+  await composer(page).fill("Keep this draft while removing screenshots.");
+  await hold(page);
+  await input(page).setInputFiles([
+    image("first.png"),
+    image("middle.png"),
+    image("last.png"),
+    image("final.png"),
+  ]);
+  await expect(previews(page).getByRole("img")).toHaveCount(4);
+  await hold(page);
+  for (const [index, name] of [
+    "middle.png",
+    "first.png",
+    "final.png",
+    "last.png",
+  ].entries()) {
+    const remove = page.getByRole("button", {
+      name: `Remove ${name}`,
+      exact: true,
+    });
+    await remove.focus();
+    await expect(remove).toBeFocused();
+    await hold(page);
+    await remove.press(index % 2 ? "Space" : "Enter");
+    await expect(composer(page)).toBeFocused();
+    await expect(previews(page).getByRole("img")).toHaveCount(3 - index);
+    await expect(composer(page)).toHaveValue(
+      "Keep this draft while removing screenshots.",
+    );
+    await hold(page);
+    if (index === 0)
+      await capture(page, info, "attachment-remove-keyboard-focus");
+  }
+  await expect(previews(page)).toHaveCount(0);
+  expect(requests).toEqual([]);
+  await capture(page, info, "attachment-remove-last-keyboard-focus");
+  await hold(page, 2000);
+});

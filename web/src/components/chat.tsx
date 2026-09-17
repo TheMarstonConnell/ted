@@ -368,9 +368,11 @@ const Transcript = memo(function Transcript({
 const DraftImages = memo(function DraftImages({
   agentId,
   disabled,
+  inputRef,
 }: {
   agentId: string;
   disabled: boolean;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
   const images = useSyncExternalStore(
     subscribeComposer,
@@ -405,12 +407,13 @@ const DraftImages = memo(function DraftImages({
             size="icon"
             aria-label={`Remove ${image.name}`}
             disabled={disabled}
-            onClick={() =>
+            onClick={() => {
               writeAttachments(
                 agentId,
                 images.filter((_, i) => i !== index),
-              )
-            }
+              );
+              inputRef.current?.focus();
+            }}
           >
             <X />
           </Button>
@@ -1000,6 +1003,7 @@ function ChatWorkspace() {
                 <DraftImages
                   agentId={agentId}
                   disabled={editingDraft || reading}
+                  inputRef={composerRef}
                 />
                 <ComposerInput
                   agentId={agentId}
