@@ -3,7 +3,6 @@ package browser
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -97,8 +96,8 @@ func TestSessionClosePropagatesCDPFailuresAndRetainsRetryIdentity(t *testing.T) 
 				t.Fatal("failed cleanup discarded its retry identity")
 			}
 			_, openErr := s.createTab(context.Background(), "about:blank", false)
-			var commandErr *Error
-			if !errors.As(openErr, &commandErr) || commandErr.Code != "not_found" {
+			response := errorResponse(openErr)
+			if response.Error == nil || response.Error.Code != "not_found" {
 				t.Fatalf("failed-cleanup session attempted to allocate another target: %v", openErr)
 			}
 			mu.Lock()
