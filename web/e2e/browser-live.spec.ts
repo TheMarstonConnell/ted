@@ -381,6 +381,38 @@ test("scaled hover, click, drag, double click, wheel, keys, paste, composition a
   await page.keyboard.up("Shift");
 });
 
+test("chorded mouse buttons release independently", async ({ page }) => {
+  const live = await liveBrowser(page);
+  await live.open();
+  live.newTab();
+  await expect(live.viewport).toBeVisible();
+  const box = (await live.viewport.boundingBox())!;
+  for (const first of ["left", "right"] as const) {
+    const second = first === "left" ? "right" : "left";
+    const before = live.commands.length;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down({ button: first });
+    await page.mouse.down({ button: second });
+    await page.mouse.up({ button: first });
+    await page.mouse.up({ button: second });
+    await expect
+      .poll(() =>
+        live.commands
+          .slice(before)
+          .filter(
+            (c) => c.event === "mousePressed" || c.event === "mouseReleased",
+          )
+          .map((c) => [c.event, c.button, c.buttons]),
+      )
+      .toEqual([
+        ["mousePressed", first, first === "left" ? 1 : 2],
+        ["mousePressed", second, 3],
+        ["mouseReleased", first, second === "left" ? 1 : 2],
+        ["mouseReleased", second, 0],
+      ]);
+  }
+});
+
 test("touch pan scrolls remotely, touch tap clicks, and mouse drag remains a drag", async ({
   page,
 }) => {

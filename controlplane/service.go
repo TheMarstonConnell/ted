@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/TheMarstonConnell/ted/agent"
+	"github.com/TheMarstonConnell/ted/browser"
 	"go.uber.org/zap"
 )
 
@@ -71,7 +72,7 @@ func NewService(dir string, logger *zap.Logger, providers []agent.Provider) (*Se
 		unlock()
 		return nil, err
 	}
-	s := &Service{dir: dir, logger: logger, providers: append([]agent.Provider(nil), providers...), catalog: agent.NewAgent(logger, providers), state: state, running: map[string]*runningTurn{}, instances: map[string]*agent.Agent{}, browserClose: closeBrowserSession, browserClients: map[string]map[uint64]context.CancelFunc{}, changed: make(chan struct{}), releaseLock: unlock, store: store, pullRequests: newPullRequestResolver()}
+	s := &Service{dir: dir, logger: logger, providers: append([]agent.Provider(nil), providers...), catalog: agent.NewAgent(logger, providers), state: state, running: map[string]*runningTurn{}, instances: map[string]*agent.Agent{}, browserClose: browser.CloseSessionIfRunning, browserClients: map[string]map[uint64]context.CancelFunc{}, changed: make(chan struct{}), releaseLock: unlock, store: store, pullRequests: newPullRequestResolver()}
 	// A durable "running" record is evidence of interrupted work, never a
 	// request to repeat tools. Even graceful shutdown follows this recovery rule.
 	recovery := newStateChanges()
@@ -1207,9 +1208,6 @@ func (s *Service) Close(ctx context.Context) error {
 			}
 		}
 		closer := s.browserClose
-		if closer == nil {
-			closer = closeBrowserSession
-		}
 		home := filepath.Join(s.dir, "runtime")
 		s.instances = map[string]*agent.Agent{}
 		s.mu.Unlock()

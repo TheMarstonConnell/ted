@@ -529,6 +529,11 @@ function BrowserViewport({
       send({ type: "release", tab_id: frame.tab_id });
       return;
     }
+    // Chorded button changes arrive as pointermove, not pointerdown/up.
+    if (kind === "mouseMoved" && pressed.current && event.button >= 0) {
+      const mask = [1, 4, 2][event.button];
+      kind = event.buttons & mask ? "mousePressed" : "mouseReleased";
+    }
     if (kind === "mouseReleased" && !pressed.current) return;
     if (!point) return;
     if (kind === "mousePressed") {
@@ -581,7 +586,7 @@ function BrowserViewport({
       flushMove();
       send(command);
     }
-    if (kind === "mouseReleased") {
+    if (kind === "mouseReleased" && event.buttons === 0) {
       pressed.current = false;
       capturedPointer.current = null;
       if (element.hasPointerCapture(event.pointerId))

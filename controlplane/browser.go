@@ -36,10 +36,6 @@ func openBrowserLive(ctx context.Context, req browser.Request) (browserLiveConne
 
 type browserSessionCloser func(context.Context, string, string, string) error
 
-func closeBrowserSession(ctx context.Context, home, project, thread string) error {
-	return browser.CloseSessionIfRunning(ctx, home, project, thread)
-}
-
 func (s *Service) beginBrowserViewer(id string, cancel context.CancelFunc) (browser.Request, func(), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -61,9 +57,6 @@ func (s *Service) beginBrowserViewer(id string, cancel context.CancelFunc) (brow
 	}
 	if total >= maxBrowserViewers || len(s.browserClients[id]) >= maxAgentBrowserViewers {
 		return browser.Request{}, nil, problem(503, "browser_limit", "too many browser viewers")
-	}
-	if s.browserClients == nil {
-		s.browserClients = make(map[string]map[uint64]context.CancelFunc)
 	}
 	if s.browserClients[id] == nil {
 		s.browserClients[id] = make(map[uint64]context.CancelFunc)
@@ -90,12 +83,8 @@ func (s *Service) cancelBrowserViewersLocked(id string) {
 
 func (s *Service) closeBrowserSessionLocked(id, project string) error {
 	s.cancelBrowserViewersLocked(id)
-	closer := s.browserClose
-	if closer == nil {
-		closer = closeBrowserSession
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	err := closer(ctx, filepath.Join(s.dir, "runtime"), project, id)
+	err := s.browserClose(ctx, filepath.Join(s.dir, "runtime"), project, id)
 	cancel()
 	return err
 }
