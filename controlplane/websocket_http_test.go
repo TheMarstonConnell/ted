@@ -219,6 +219,8 @@ func TestHTTPWebSocketExplicitUnionAndInvalidCursors(t *testing.T) {
 		{map[string]any{"type": "unknown", "request_id": "bad"}, "invalid"},
 		{map[string]any{"type": "submit", "request_id": "bad", "agent_id": a.ID, "text": "missing key"}, "invalid"},
 		{map[string]any{"type": "submit", "request_id": "bad", "agent_id": a.ID, "idempotency_key": "x", "text": ""}, "invalid"},
+		{map[string]any{"type": "submit", "request_id": "bad", "agent_id": a.ID, "idempotency_key": "x", "text": "bad", "kind": "system"}, "invalid"},
+		{map[string]any{"type": "submit", "request_id": "bad", "agent_id": a.ID, "idempotency_key": "x", "text": "bad", "kind": "user", "sender_agent_id": "source"}, "invalid_message"},
 	}
 	for _, tc := range cases {
 		sendHTTPWS(t, c, tc.command)
@@ -243,14 +245,14 @@ func TestHTTPWebSocketSubmissionSharesHTTPIdempotency(t *testing.T) {
 	f := newHTTPFixture(t, p)
 	a := f.agent(f.project())
 	c := dialHTTPWS(t, f.server)
-	command := map[string]any{"type": "submit", "request_id": "send-1", "agent_id": a.ID, "idempotency_key": "shared-key", "text": "hello"}
+	command := map[string]any{"type": "submit", "request_id": "send-1", "agent_id": a.ID, "idempotency_key": "shared-key", "text": "hello", "kind": "bot", "sender_agent_id": "unknown-ws-source"}
 	sendHTTPWS(t, c, command)
 	ack := readHTTPWS(t, c)
 	if ack.Type != "ack" || ack.RequestID != "send-1" || ack.MessageID == "" {
 		t.Fatal(ack)
 	}
-	m := decodeHTTP[QueuedMessage](t, f.request("POST", "/v1/agents/"+a.ID+"/messages", `{"text":"hello"}`, "shared-key", 202))
-	if m.ID != ack.MessageID {
+	m := decodeHTTP[QueuedMessage](t, f.request("POST", "/v1/agents/"+a.ID+"/messages", `{"text":"hello","kind":"bot","sender_agent_id":"unknown-ws-source"}`, "shared-key", 202))
+	if m.ID != ack.MessageID || m.Kind != "bot" || m.SenderAgentID != "unknown-ws-source" {
 		t.Fatal("HTTP and WS have separate idempotency namespaces")
 	}
 	command["request_id"] = "send-2"
@@ -259,11 +261,21 @@ func TestHTTPWebSocketSubmissionSharesHTTPIdempotency(t *testing.T) {
 	if again.Type != "ack" || again.MessageID != ack.MessageID || again.RequestID != "send-2" {
 		t.Fatal(again)
 	}
-	command["text"] = "changed"
+	for field, changed := range map[string]any{"text": "changed", "sender_agent_id": "other-source"} {
+		original := command[field]
+		command[field] = changed
+		sendHTTPWS(t, c, command)
+		conflict := readHTTPWS(t, c)
+		if conflict.Type != "error" || conflict.Code != "idempotency_conflict" {
+			t.Fatalf("%s: %+v", field, conflict)
+		}
+		command[field] = original
+	}
+	command["kind"] = "user"
+	delete(command, "sender_agent_id")
 	sendHTTPWS(t, c, command)
-	conflict := readHTTPWS(t, c)
-	if conflict.Type != "error" || conflict.Code != "idempotency_conflict" {
-		t.Fatal(conflict)
+	if conflict := readHTTPWS(t, c); conflict.Type != "error" || conflict.Code != "idempotency_conflict" {
+		t.Fatalf("kind: %+v", conflict)
 	}
 	a, _ = f.s.GetAgent(a.ID)
 	if len(a.Queue) != 1 {

@@ -146,6 +146,15 @@ func TestCloneSnapshotPreservesJSONSemantics(t *testing.T) {
 	}
 }
 
+func TestCloneMessagesPreservesBotAttribution(t *testing.T) {
+	input := []agent.Message{{Role: "user", Kind: "bot", SenderAgentID: "external-source", Content: agent.TextContent("untrusted report")}}
+	assertJSONCloneEquivalent(t, cloneMessages(input), input)
+	snapshot := cloneMessages(input)
+	if snapshot[0].Kind != "bot" || snapshot[0].SenderAgentID != "external-source" {
+		t.Fatalf("lost bot attribution: %+v", snapshot)
+	}
+}
+
 func TestCloneSnapshotOmitsPrivateMessageProvenance(t *testing.T) {
 	runtime := agent.NewAgent(nil, nil)
 	if err := runtime.RestoreConversation([]agent.Message{{

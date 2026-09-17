@@ -149,7 +149,7 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			case "submit":
-				m, err := h.service.Submit(command.agentID, command.text, command.idempotencyKey)
+				m, err := h.service.SubmitMessage(command.agentID, command.message, command.idempotencyKey)
 				if err != nil {
 					if writeWSError(c, requestID, err) != nil {
 						return
@@ -170,7 +170,7 @@ type wsCommand struct {
 	requestID      string
 	subscription   *wsSubscription
 	agentID        string
-	text           string
+	message        SubmitMessageRequest
 	idempotencyKey string
 }
 
@@ -207,7 +207,9 @@ func (h *httpAPI) validateWS(data []byte) (command wsCommand, err error) {
 		command.subscription, err = wsSubscriptionFromJSON(raw)
 	} else {
 		command.agentID = raw["agent_id"].(string)
-		command.text = raw["text"].(string)
+		command.message.Text = raw["text"].(string)
+		command.message.Kind, _ = raw["kind"].(string)
+		command.message.SenderAgentID, _ = raw["sender_agent_id"].(string)
 		command.idempotencyKey = raw["idempotency_key"].(string)
 	}
 	return command, err

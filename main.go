@@ -23,6 +23,6 @@ func newRootCommand() *cobra.Command {
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
 	}
-	root.AddCommand(newServeCommand(), newSessionsCommand(), newBrowserCommand(browser.Call), newTUICommand(), newModelsCommand(loadCatalogAgent), newEffortsCommand(loadCatalogAgent), newProvidersCommand(loadCatalogAgent))
+	root.AddCommand(newServeCommand(), newSessionsCommand(), newNudgeCommand(), newBrowserCommand(browser.Call), newTUICommand(), newModelsCommand(loadCatalogAgent), newEffortsCommand(loadCatalogAgent), newProvidersCommand(loadCatalogAgent))
 	return root
 }

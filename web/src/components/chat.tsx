@@ -16,6 +16,7 @@ import remarkGfm from "remark-gfm";
 import {
   Archive,
   ArrowUp,
+  Bot,
   ChevronRight,
   LoaderCircle,
   Menu,
@@ -132,14 +133,31 @@ const markdownComponents: Components = {
   ),
 };
 
+const botSourceLabel = (senderAgentId: string) =>
+  `chat ${senderAgentId} (caller-supplied)`;
+
 const Message = memo(function Message({ item }: { item: TranscriptItem }) {
-  if (item.kind === "tool" || item.kind === "tool_result") {
-    // An empty result is still a result. Do not infer success/failure from text.
+  const source = item.senderAgentId
+    ? botSourceLabel(item.senderAgentId)
+    : undefined;
+  if (
+    item.kind === "bot" ||
+    item.kind === "tool" ||
+    item.kind === "tool_result"
+  ) {
+    const bot = item.kind === "bot";
     const waiting = item.kind === "tool" && item.output === undefined;
+    const summary = item.text.replace(/\s+/g, " ").trim();
+    const label = `Bot notification${source ? ` from ${source}` : ""}`;
     return (
-      <Collapsible disabled={waiting} className="min-w-0 rounded-lg border">
+      <Collapsible
+        disabled={waiting}
+        className="min-w-0 rounded-lg border"
+        data-bot-notification={bot ? "" : undefined}
+      >
         <CollapsibleTrigger
           aria-busy={waiting}
+          aria-label={bot ? `${label}: ${summary}` : undefined}
           title={waiting ? "Waiting for tool output" : undefined}
           render={
             <Button
@@ -156,28 +174,54 @@ const Message = memo(function Message({ item }: { item: TranscriptItem }) {
             />
           ) : (
             <ChevronRight
-              data-slot="tool-expand"
+              data-slot={bot ? "bot-expand" : "tool-expand"}
               className="size-4 group-data-panel-open:rotate-90"
               aria-hidden="true"
             />
           )}
-          <span
-            className="min-w-0 truncate font-mono text-xs font-normal"
-            title={item.kind === "tool" ? toolCommand(item.text) : undefined}
-          >
-            {item.kind === "tool"
-              ? toolCommand(item.text).replace(/\s+/g, " ").trim() ||
-                item.toolName ||
-                "Tool"
-              : `${item.toolName || "Tool"} output`}
-          </span>
+          {bot ? (
+            <>
+              <Bot className="size-4" aria-hidden="true" />
+              <span
+                className="min-w-0 truncate text-xs font-medium"
+                title={label}
+              >
+                {label}
+              </span>
+              <span className="min-w-0 truncate text-left text-xs text-muted-foreground">
+                {summary}
+              </span>
+            </>
+          ) : (
+            <span
+              className="min-w-0 truncate font-mono text-xs font-normal"
+              title={item.kind === "tool" ? toolCommand(item.text) : undefined}
+            >
+              {item.kind === "tool"
+                ? toolCommand(item.text).replace(/\s+/g, " ").trim() ||
+                  item.toolName ||
+                  "Tool"
+                : `${item.toolName || "Tool"} output`}
+            </span>
+          )}
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <pre className="overflow-x-auto whitespace-pre-wrap break-words border-t p-4 font-mono text-xs leading-5">
-            {item.kind === "tool"
-              ? item.output || "No output returned."
-              : item.text || "No output returned."}
-          </pre>
+          {bot ? (
+            <div className="border-t p-4 text-sm leading-6 whitespace-pre-wrap [overflow-wrap:anywhere]">
+              {source && (
+                <div className="mb-2 text-xs text-muted-foreground">
+                  From {source}
+                </div>
+              )}
+              <div>{item.text}</div>
+            </div>
+          ) : (
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words border-t p-4 font-mono text-xs leading-5">
+              {item.kind === "tool"
+                ? item.output || "No output returned."
+                : item.text || "No output returned."}
+            </pre>
+          )}
         </CollapsibleContent>
       </Collapsible>
     );
@@ -261,7 +305,11 @@ const Transcript = memo(function Transcript({
             <MessageScrollerItem
               key={item.id}
               messageId={item.id}
-              data-tool={item.kind === "tool" || item.kind === "tool_result"}
+              data-tool={
+                item.kind === "tool" ||
+                item.kind === "tool_result" ||
+                item.kind === "bot"
+              }
             >
               <Message item={item} />
             </MessageScrollerItem>
@@ -694,21 +742,37 @@ function ChatWorkspace() {
                         className="mt-2 flex items-center gap-2 border-t border-border pt-2 text-xs first:mt-0"
                       >
                         <span
-                          className="min-w-0 flex-1 truncate"
+                          className="flex min-w-0 flex-1 items-center gap-2"
                           title={m.text}
                         >
-                          {m.text}
+                          {m.kind === "bot" && (
+                            <Bot
+                              className="size-4 shrink-0"
+                              aria-hidden="true"
+                            />
+                          )}
+                          <span className="min-w-0 truncate">
+                            {m.kind === "bot"
+                              ? `Bot notification${
+                                  m.sender_agent_id
+                                    ? ` from ${botSourceLabel(m.sender_agent_id)}`
+                                    : ""
+                                }: ${m.text}`
+                              : m.text}
+                          </span>
                         </span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="xs"
-                          title="Move this message back to the composer"
-                          disabled={busy || !ready || status !== "live"}
-                          onClick={() => requestEdit(m)}
-                        >
-                          Edit
-                        </Button>
+                        {m.kind !== "bot" && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
+                            title="Move this message back to the composer"
+                            disabled={busy || !ready || status !== "live"}
+                            onClick={() => requestEdit(m)}
+                          >
+                            Edit
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="xs"

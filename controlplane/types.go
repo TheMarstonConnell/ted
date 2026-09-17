@@ -58,14 +58,18 @@ type CreateAgentRequest struct {
 	Settings         *Settings           `json:"settings,omitempty"`
 }
 type SubmitMessageRequest struct {
-	Text string `json:"text"`
+	Text          string `json:"text"`
+	Kind          string `json:"kind,omitempty"`
+	SenderAgentID string `json:"sender_agent_id,omitempty"`
 }
 type QueuedMessage struct {
-	ID        string    `json:"id"`
-	Text      string    `json:"text"`
-	Status    string    `json:"status"`
-	Error     string    `json:"error,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	Text          string    `json:"text"`
+	Kind          string    `json:"kind,omitempty"`
+	SenderAgentID string    `json:"sender_agent_id,omitempty"`
+	Status        string    `json:"status"`
+	Error         string    `json:"error,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 type Agent struct {
 	ParentAgentID      string             `json:"parent_agent_id,omitempty"`

@@ -503,7 +503,8 @@ paths:
     post:
       operationId: SubmitMessage
       description: Queue a message. Optional Idempotency-Key deduplicates submissions
-        across HTTP and WebSocket; different text with the same key returns 409.
+        across HTTP and WebSocket; different text, kind, or sender with the same key
+        returns 409. Omitted kind and explicit user kind are equivalent.
       responses:
         '202':
           description: Success
@@ -949,11 +950,23 @@ components:
           minimum: 0
       minProperties: 1
       maxProperties: 1
+    MessageKind:
+      description: Omitted kind is user. Bot notifications use the same queue and
+        wake-up behavior, but retain distinct attribution and tool-style presentation.
+      type: string
+      enum:
+      - user
+      - bot
     SubmitMessageRequest:
+      description: sender_agent_id is optional bot-only caller-supplied provenance,
+        not authenticated identity. Destinations are not restricted to parent chats.
       type: object
       additionalProperties: false
       properties:
         text: *id015
+        kind:
+          $ref: '#/components/schemas/MessageKind'
+        sender_agent_id: *id010
       required:
       - text
     StopRequest:
@@ -970,6 +983,9 @@ components:
         id: *id010
         text:
           type: string
+        kind:
+          $ref: '#/components/schemas/MessageKind'
+        sender_agent_id: *id010
         status:
           type: string
           enum:
@@ -1105,6 +1121,9 @@ components:
           type: string
           description: Origin model for opaque reasoning replay; not forwarded as
             a provider message field.
+        kind:
+          $ref: '#/components/schemas/MessageKind'
+        sender_agent_id: *id010
       required:
       - role
       - content
@@ -1528,6 +1547,9 @@ components:
           minLength: 1
           maxLength: 256
         text: *id015
+        kind:
+          $ref: '#/components/schemas/MessageKind'
+        sender_agent_id: *id010
       required:
       - type
       - request_id

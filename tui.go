@@ -16,6 +16,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/TheMarstonConnell/ted/agent"
 	"github.com/TheMarstonConnell/ted/commands"
+	"github.com/TheMarstonConnell/ted/remote"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -153,12 +154,19 @@ type tuiAgent interface {
 	Turn(string) error
 }
 
+func formatTUIBotNotification(notification remote.QueuedMessage) string {
+	if notification.SenderAgentID == "" {
+		return "Bot notification: " + notification.Text
+	}
+	return "Bot notification from chat " + notification.SenderAgentID + ": " + notification.Text
+}
+
 func (m model) acceptsQueuedInput() bool {
 	client, ok := m.agent.(interface{ AcceptsQueuedInput() bool })
 	return ok && client.AcceptsQueuedInput()
 }
 
-func initialModel(agent tuiAgent) model {
+func initialModel(client tuiAgent) model {
 	ta := textarea.New()
 	ta.Placeholder = "Send a message..."
 	ta.SetVirtualCursor(false)
@@ -195,18 +203,22 @@ func initialModel(agent tuiAgent) model {
 
 	markdown, err := newMarkdownRenderer(vp.Width())
 
-	directory := agent.WorkingDir()
+	directory := client.WorkingDir()
 	entries := []transcriptEntry{{kind: bannerMessage, content: "Ted Coding Agent"}}
-	for _, message := range agent.Messages() {
+	for _, message := range client.Messages() {
 		switch message.Role {
 		case "user":
 			text := message.Content.Text()
 			if text == "" {
 				text = "[Image attachment]"
 			}
-			entries = append(entries, transcriptEntry{kind: userMessage, content: text})
+			kind := userMessage
+			if message.Kind == "bot" {
+				kind = toolCallMessage
+				text = formatTUIBotNotification(remote.QueuedMessage{Text: text, SenderAgentID: message.SenderAgentID})
+			}
+			entries = append(entries, transcriptEntry{kind: kind, content: text})
 		case "tool":
-			// Results stay in server history, not the visible transcript.
 			continue
 		case "assistant":
 			if text := message.Content.Text(); text != "" {
@@ -240,8 +252,8 @@ func initialModel(agent tuiAgent) model {
 		agentStyle:    lipgloss.NewStyle(),
 		toolCallStyle: lipgloss.NewStyle().Faint(true),
 		err:           err,
-		agent:         agent,
-		commands:      commands.New(agent),
+		agent:         client,
+		commands:      commands.New(client),
 	}
 }
 
@@ -383,7 +395,7 @@ func (m model) styleFor(kind messageKind) lipgloss.Style {
 // the raw text is shown instead.
 func (m *model) renderEntry(entry transcriptEntry, width int) string {
 	if entry.kind == toolCallMessage {
-		// Keep the raw entry intact so resizing can reveal more of the command.
+		// Keep the raw entry intact so resizing can reveal more of the content.
 		// Strip terminal escapes and collapse whitespace before measuring cells,
 		// not bytes, so wide Unicode characters cannot cause wrapping.
 		line := strings.Join(strings.Fields(ansi.Strip(entry.content)), " ")
@@ -392,7 +404,7 @@ func (m *model) renderEntry(entry transcriptEntry, width int) string {
 			return ""
 		}
 		tail := "…"
-		if strings.HasSuffix(line, `"`) && limit >= 2 {
+		if strings.HasPrefix(line, "Ran shell command - ") && strings.HasSuffix(line, `"`) && limit >= 2 {
 			tail += `"`
 		}
 		return m.toolCallStyle.Render(ansi.Truncate(line, limit, tail))
@@ -521,18 +533,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.renderTranscript()
 		}
 		m.viewport.GotoBottom()
+	case remote.QueuedMessage:
+		m.appendMessage(toolCallMessage, formatTUIBotNotification(msg))
+		return m, nil
 	case agent.AgentResponse:
-		if msg.ResponseType == "user" {
+		switch msg.ResponseType {
+		case "user":
 			m.appendMessage(userMessage, msg.Content)
-		} else if msg.ResponseType == "usage" {
-			return m, nil // Usage changed; redraw the toolbar without transcript noise.
-		} else if msg.ResponseType == "status" {
+		case "usage", "tool_result":
+			return m, nil
+		case "status":
 			m.appendMessage(commandMessage, msg.Content)
-		} else if msg.ResponseType == "tool_result" {
-			return m, nil // Keep results in the session without displaying them.
-		} else if msg.ResponseType == "tool" {
+		case "tool":
 			m.appendMessage(toolCallMessage, msg.Content)
-		} else {
+		default:
 			m.appendMessage(agentMessage, msg.Content)
 		}
 		return m, nil

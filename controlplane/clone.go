@@ -60,11 +60,13 @@ func cloneMessage(value agent.Message) agent.Message {
 	}
 	// Private runtime provenance is excluded; SourceModel is durable.
 	cloned := agent.Message{
-		SourceModel: value.SourceModel,
-		Role:        value.Role,
-		Content:     content,
-		Reasoning:   value.Reasoning,
-		ToolCallId:  value.ToolCallId,
+		SourceModel:   value.SourceModel,
+		Kind:          value.Kind,
+		SenderAgentID: value.SenderAgentID,
+		Role:          value.Role,
+		Content:       content,
+		Reasoning:     value.Reasoning,
+		ToolCallId:    value.ToolCallId,
 	}
 	// Preserve omitempty normalization.
 	if len(value.ReasoningDetails) != 0 {

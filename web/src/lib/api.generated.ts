@@ -172,7 +172,7 @@ export interface paths {
         /** @description Inspect the queue, including terminal entries. */
         get: operations["ListMessages"];
         put?: never;
-        /** @description Queue a message. Optional Idempotency-Key deduplicates submissions across HTTP and WebSocket; different text with the same key returns 409. */
+        /** @description Queue a message. Optional Idempotency-Key deduplicates submissions across HTTP and WebSocket; different text, kind, or sender with the same key returns 409. Omitted kind and explicit user kind are equivalent. */
         post: operations["SubmitMessage"];
         delete?: never;
         options?: never;
@@ -388,8 +388,16 @@ export interface components {
             /** Format: int64 */
             read_cursor?: number;
         };
+        /**
+         * @description Omitted kind is user. Bot notifications use the same queue and wake-up behavior, but retain distinct attribution and tool-style presentation.
+         * @enum {string}
+         */
+        MessageKind: "user" | "bot";
+        /** @description sender_agent_id is optional bot-only caller-supplied provenance, not authenticated identity. Destinations are not restricted to parent chats. */
         SubmitMessageRequest: {
             text: string;
+            kind?: components["schemas"]["MessageKind"];
+            sender_agent_id?: string;
         };
         StopRequest: {
             turn_id: string;
@@ -397,6 +405,8 @@ export interface components {
         QueuedMessage: {
             id: string;
             text: string;
+            kind?: components["schemas"]["MessageKind"];
+            sender_agent_id?: string;
             /** @enum {string} */
             status: "pending" | "running" | "completed" | "failed" | "interrupted" | "cancelled";
             error?: string;
@@ -454,6 +464,8 @@ export interface components {
             tool_call_id?: string;
             /** @description Origin model for opaque reasoning replay; not forwarded as a provider message field. */
             source_model?: string;
+            kind?: components["schemas"]["MessageKind"];
+            sender_agent_id?: string;
         } & {
             [key: string]: unknown;
         };
@@ -621,6 +633,8 @@ export interface components {
             agent_id: string;
             idempotency_key: string;
             text: string;
+            kind?: components["schemas"]["MessageKind"];
+            sender_agent_id?: string;
         };
         WSError: {
             /** @enum {string} */

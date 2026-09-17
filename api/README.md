@@ -32,7 +32,7 @@ generated. Edit the YAML, then regenerate; never edit `generated.go` manually.
 | GET, PATCH | `/v1/agents/{agent_id}` | Read an agent, update `settled`, or advance `read_cursor` |
 | GET | `/v1/agents/{agent_id}/pull-request` | Resolve the GitHub pull request for the agent's branch |
 | PATCH | `/v1/agents/{agent_id}/settings` | Patch model and/or effort for future turns |
-| GET, POST | `/v1/agents/{agent_id}/messages` | Inspect queue (including terminal entries) or submit text |
+| GET, POST | `/v1/agents/{agent_id}/messages` | Inspect queue (including terminal entries) or submit user/bot text |
 | DELETE | `/v1/agents/{agent_id}/messages/{message_id}` | Cancel a pending entry only |
 | POST | `/v1/agents/{agent_id}/stop` | Stop required `turn_id`; advance pending FIFO, safe to retry |
 | POST | `/v1/agents/{agent_id}/continue` | Release failure/interruption hold; no body |
@@ -68,6 +68,16 @@ project workspace defaults apply. `workspace.shared` is server-owned response
 metadata, never a provisioning request. Parentage is included in agent resources,
 WS inventory, and update events and cannot be patched. See
 [workspace precedence](../docs/workspaces.md#child-agents-and-existing-directories).
+
+Message submissions accept `{ "text": "...", "kind": "bot", "sender_agent_id": "..." }`
+for bot notifications. `kind` is optional and defaults to `user`; `sender_agent_id`
+is optional bot-only provenance, not authenticated identity. Both HTTP and WS
+submit support these fields. Queue records and conversation messages preserve
+the metadata; bot conversation messages use `role: "user"` with `kind: "bot"`
+in stored history, with explicit bot attribution added when sent to a provider.
+Notifications follow the normal FIFO, hold-release, and settled-agent rules.
+Idempotency distinguishes text, kind, and sender; omitted and explicit `user`
+kind are equivalent. `ted nudge` is the CLI client for this submission mode.
 
 Agent lists default to unsettled only; set `include_settled=true` to inspect all,
 and optionally filter by `project_id`. With either positive `page` or `page_size`,

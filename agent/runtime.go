@@ -114,6 +114,12 @@ func validateConversation(messages []Message) error {
 	}
 	pending := make(map[string]bool)
 	for i, m := range messages {
+		if err := validateMessageMetadata(m.Kind, m.SenderAgentID); err != nil {
+			return fmt.Errorf("message %d: %w", i, err)
+		}
+		if m.Kind != "" && m.Role != "user" {
+			return fmt.Errorf("message %d: kind is only valid for user-role messages", i)
+		}
 		if len(pending) > 0 && m.Role != "tool" {
 			return fmt.Errorf("message %d interrupts unanswered tool calls", i)
 		}

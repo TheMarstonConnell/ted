@@ -129,6 +129,43 @@ do not undo those effects. Full completed tool output is retained in replay even
 while model-facing context retains its existing output size cap. This greenfield
 control plane does not migrate standalone embedded-agent session snapshots.
 
+### Bot notifications and async subagents
+
+```sh
+ted nudge <chat-id> "I just finished my work; all review comments are complete."
+ted nudge --server http://localhost:8281 --idempotency-key review-job-42 <chat-id> "Done."
+```
+
+`nudge` sends a bot notification to any existing chat on the selected server,
+not only a parent. It returns `Nudge accepted: <message-id>` after durable
+acceptance, without waiting for the receiving agent's response. Delivery errors
+return a nonzero exit status. Like `sessions`, it connects to an existing server
+(default `http://localhost:8281`) and never starts a fallback server.
+
+Each notification gets its own turn in the same FIFO queue as user input. It
+wakes an idle chat, waits behind active/earlier work, and releases held work just
+like new user input. It does not interrupt an active turn. Settled chats must be
+restored before receiving notifications. The target UI need not be open, but the
+server must remain running; use `ted serve` for work that must outlive a TUI.
+
+Both interfaces show a tool-style **Bot notification**, not a user bubble. The
+originating `TED_THREAD_ID` is included when available; scripts without it send
+an anonymous bot notification. This attribution is caller-supplied provenance,
+not authenticated identity. The model receives an explicitly attributed bot
+report rather than a higher-priority instruction or a synthetic tool result.
+
+When delegating asynchronous work, give the child the parent's chat ID (the
+parent's `$TED_THREAD_ID`) and ask it to run `ted nudge` when finished or blocked.
+The child has its **own** `$TED_THREAD_ID`, so pass the destination explicitly in
+its instructions. The parent can finish its turn instead of sleeping and polling;
+the child's notification will start another turn. Completion notifications are
+explicit, not automatic. There is no read/completion guarantee or special priority.
+
+Use a stable `--idempotency-key` when retrying the same notification after an
+uncertain connection failure. Reusing that key with different text, kind, or
+sender is a conflict; a successful retry returns the original receipt without
+queueing another turn. Omitting the key makes each invocation a new notification.
+
 ### Context usage
 
 The TUI starts at `ctx 100% left` until usage metrics arrive, then shows the

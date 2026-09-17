@@ -184,6 +184,8 @@ type Message struct {
 	// removed from provider requests by messagesForModel.
 	SourceModel      string `json:"source_model,omitempty"`
 	sourceModel      string
+	Kind             string           `json:"kind,omitempty"`
+	SenderAgentID    string           `json:"sender_agent_id,omitempty"`
 	Role             string           `json:"role"`
 	Content          Content          `json:"content"`
 	Reasoning        string           `json:"reasoning,omitempty"`
