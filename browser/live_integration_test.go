@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -425,5 +426,26 @@ func TestLivePageCreatedTabsIntegration(t *testing.T) {
 			t.Fatalf("owner targets survived session close: root=%v link=%v script=%v", remaining[rootID], remaining[linkID], remaining[scriptID])
 		}
 		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func TestSessionCleanupAfterProjectDirectoryMoveIntegration(t *testing.T) {
+	ctx, s, tab := liveTestSession(t)
+	root := s.project.root
+	moved := filepath.Join(t.TempDir(), "moved")
+	if err := os.Rename(root, moved); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.project.manager.dispatch(ctx, Request{Project: root, Thread: s.thread, Action: "session-close"}); err != nil {
+		t.Fatalf("moved root prevented browser cleanup: %v", err)
+	}
+	infos, err := target.GetTargets().Do(cdp.WithExecutor(ctx, chromedp.FromContext(s.project.browserCtx).Browser))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, info := range infos {
+		if info.TargetID == tab.id {
+			t.Fatal("Chrome target survived cleanup after directory move")
+		}
 	}
 }
