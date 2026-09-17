@@ -8,54 +8,43 @@ import (
 	"github.com/TheMarstonConnell/ted/agent"
 )
 
-func TestBotQueuedEventRendering(t *testing.T) {
+func TestBotQueuedAndUpdatedEventRendering(t *testing.T) {
 	a := NewAgent(context.Background(), nil, Snapshot{ID: "target"}, "", nil)
-	data, err := json.Marshal(QueuedMessage{
-		ID:            "nudge",
-		Text:          "checks passed",
-		Kind:          "bot",
-		SenderAgentID: "reviewer",
-		Status:        "pending",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	original := QueuedMessage{ID: "nudge", Text: "checks passed", Kind: "bot", SenderAgentID: "reviewer", Status: "pending"}
+	merged := original
+	merged.Text += "\n\ncoverage passed"
 	var updates []Update
-	if err := a.consume(Event{
-		AgentID: "target",
-		Cursor:  1,
-		Type:    "message.queued",
-		Data:    data,
-	}, func(update Update) { updates = append(updates, update) }); err != nil {
-		t.Fatal(err)
+	consume := func(cursor uint64, eventType string, data any) {
+		t.Helper()
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.consume(Event{AgentID: "target", Cursor: cursor, Type: eventType, Data: encoded}, func(update Update) {
+			updates = append(updates, update)
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if len(updates) != 1 || updates[0].Bot == nil || updates[0].Output != nil {
-		t.Fatalf("updates: %+v", updates)
+	consume(1, "message.queued", original)
+	consume(2, "message.updated", merged)
+	consume(2, "message.updated", merged)
+	consume(1, "message.queued", original)
+	if len(updates) != 2 {
+		t.Fatalf("updates = %+v, want acceptance and one merge", updates)
 	}
-	if *updates[0].Bot != (QueuedMessage{ID: "nudge", Text: "checks passed", Kind: "bot", SenderAgentID: "reviewer", Status: "pending"}) {
-		t.Fatalf("bot notification: %+v", updates[0].Bot)
+	for i, want := range []QueuedMessage{original, merged} {
+		if updates[i].Bot == nil || *updates[i].Bot != want || updates[i].Output != nil || updates[i].Busy != nil {
+			t.Fatalf("update %d = %+v, want bot %+v", i, updates[i], want)
+		}
 	}
-
-	// Conversation checkpoints retain history but do not produce a second row.
-	history, err := json.Marshal([]agent.Message{{
-		Role:          "user",
-		Kind:          "bot",
-		SenderAgentID: "reviewer",
-		Content:       agent.TextContent("checks passed"),
-	}})
-	if err != nil {
-		t.Fatal(err)
+	if len(a.Messages()) != 0 {
+		t.Fatalf("pending notification added to history: %+v", a.Messages())
 	}
-	if err := a.consume(Event{
-		AgentID: "target",
-		Cursor:  2,
-		Type:    "conversation",
-		Data:    history,
-	}, func(update Update) { updates = append(updates, update) }); err != nil {
-		t.Fatal(err)
-	}
-	if len(updates) != 1 || len(a.Messages()) != 1 || a.Messages()[0].Kind != "bot" {
-		t.Fatalf("notification duplicated or history lost: updates=%+v messages=%+v", updates, a.Messages())
+	consume(3, "turn.started", merged)
+	consume(4, "conversation", []agent.Message{{Role: "user", Kind: "bot", SenderAgentID: "reviewer", Content: agent.TextContent(merged.Text)}})
+	if len(updates) != 2 || len(a.Messages()) != 1 || a.Messages()[0].Kind != "bot" || a.Messages()[0].Content.Text() != merged.Text {
+		t.Fatalf("merged history lost or duplicated: updates=%+v messages=%+v", updates, a.Messages())
 	}
 }
 
@@ -113,45 +102,5 @@ func TestFullEventReplayRendersEveryAcceptedBotOnce(t *testing.T) {
 	}
 	if got := a.Messages(); len(got) != 2 {
 		t.Fatalf("replayed history = %+v", got)
-	}
-}
-
-func TestBotUpdatedEventRendering(t *testing.T) {
-	a := NewAgent(context.Background(), nil, Snapshot{ID: "target"}, "", nil)
-	original := QueuedMessage{ID: "nudge", Text: "checks passed", Kind: "bot", SenderAgentID: "reviewer", Status: "pending"}
-	merged := original
-	merged.Text += "\n\ncoverage passed"
-	var updates []Update
-	consume := func(cursor uint64, eventType string, data any) {
-		t.Helper()
-		encoded, err := json.Marshal(data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := a.consume(Event{AgentID: "target", Cursor: cursor, Type: eventType, Data: encoded}, func(update Update) {
-			updates = append(updates, update)
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	consume(1, "message.queued", original)
-	consume(2, "message.updated", merged)
-	consume(2, "message.updated", merged)
-	consume(1, "message.queued", original)
-	if len(updates) != 2 {
-		t.Fatalf("updates = %+v, want acceptance and one merge", updates)
-	}
-	for i, want := range []QueuedMessage{original, merged} {
-		if updates[i].Bot == nil || *updates[i].Bot != want || updates[i].Output != nil || updates[i].Busy != nil {
-			t.Fatalf("update %d = %+v, want bot %+v", i, updates[i], want)
-		}
-	}
-	if len(a.Messages()) != 0 {
-		t.Fatalf("pending notification added to history: %+v", a.Messages())
-	}
-	consume(3, "turn.started", merged)
-	consume(4, "conversation", []agent.Message{{Role: "user", Kind: "bot", SenderAgentID: "reviewer", Content: agent.TextContent(merged.Text)}})
-	if len(updates) != 2 || len(a.Messages()) != 1 || a.Messages()[0].Content.Text() != merged.Text {
-		t.Fatalf("merged history lost or duplicated: updates=%+v messages=%+v", updates, a.Messages())
 	}
 }
