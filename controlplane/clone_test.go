@@ -86,6 +86,7 @@ func cloningFixture(t testing.TB) diskState {
 					State:          "running",
 					Queue: []QueuedMessage{{
 						ID: "queued", Text: "do work", Status: "running", CreatedAt: now,
+						Attachments: []Attachment{{Name: "screen.png", URL: "data:image/png;base64,fixture"}},
 					}},
 					Messages: []agent.Message{message},
 					// This field is intentionally populated to verify json:"-" behavior.
@@ -187,6 +188,7 @@ func TestCloneSnapshotIsolation(t *testing.T) {
 	stored.ManifestOffset = 99
 	stored.Agent.ActiveSettings.Model = "changed-model"
 	stored.Agent.Queue[0].Text = "changed queue"
+	stored.Agent.Queue[0].Attachments[0].Name = "changed attachment"
 	stored.Agent.Messages[0].ToolCalls[0].Function.Arguments = "changed arguments"
 	stored.Agent.Messages[0].ReasoningDetails[0][0] = '['
 	stored.Events[0].Data[0] = '['
@@ -205,6 +207,9 @@ func TestCloneSnapshotIsolation(t *testing.T) {
 	}
 	if _, ok := original.Agents["nil"]; !ok {
 		t.Fatal("clone aliases the agents map")
+	}
+	if source.Agent.Queue[0].Attachments[0].Name != "screen.png" {
+		t.Fatal("clone aliases queue attachments")
 	}
 	if source.ManifestOffset != 42 || source.Agent.ActiveSettings.Model != "active/model" || source.Agent.Queue[0].Text != "do work" {
 		t.Fatal("clone aliases stored agent fields")

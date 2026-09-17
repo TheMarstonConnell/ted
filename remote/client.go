@@ -54,12 +54,13 @@ type Project struct {
 	Defaults          Settings           `json:"defaults"`
 }
 type QueuedMessage struct {
-	Kind          string `json:"kind,omitempty"`
-	SenderAgentID string `json:"sender_agent_id,omitempty"`
-	ID            string `json:"id"`
-	Text          string `json:"text"`
-	Status        string `json:"status"`
-	Error         string `json:"error,omitempty"`
+	Attachments   []agent.Attachment `json:"attachments,omitempty"`
+	Kind          string             `json:"kind,omitempty"`
+	SenderAgentID string             `json:"sender_agent_id,omitempty"`
+	ID            string             `json:"id"`
+	Text          string             `json:"text"`
+	Status        string             `json:"status"`
+	Error         string             `json:"error,omitempty"`
 }
 type Snapshot struct {
 	ParentAgentID string             `json:"parent_agent_id,omitempty"`

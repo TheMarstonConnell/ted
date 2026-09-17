@@ -148,6 +148,17 @@ func (a *Agent) TurnContext(ctx context.Context, userInput string) error {
 
 // TurnMessageContext runs a turn while retaining the input's transport metadata.
 func (a *Agent) TurnMessageContext(ctx context.Context, userInput, kind, senderAgentID string) (err error) {
+	return a.TurnMessageAttachmentsContext(ctx, userInput, kind, senderAgentID, nil)
+}
+
+// TurnMessageAttachmentsContext submits validated inline images as multimodal input.
+func (a *Agent) TurnMessageAttachmentsContext(ctx context.Context, userInput, kind, senderAgentID string, attachments []Attachment) (err error) {
+	if kind == "bot" && len(attachments) != 0 {
+		return errors.New("bot messages cannot include attachments")
+	}
+	if err := ValidateAttachments(attachments); err != nil {
+		return err
+	}
 	if err := validateMessageMetadata(kind, senderAgentID); err != nil {
 		return err
 	}
@@ -193,7 +204,7 @@ func (a *Agent) TurnMessageContext(ctx context.Context, userInput, kind, senderA
 		a.busy = false
 		a.mu.Unlock()
 	}()
-	messages = append(messages, Message{Role: "user", Kind: kind, SenderAgentID: senderAgentID, Content: TextContent(userInput)})
+	messages = append(messages, Message{Role: "user", Kind: kind, SenderAgentID: senderAgentID, Content: attachmentContent(userInput, attachments)})
 
 	for {
 		if err := ctx.Err(); err != nil {
