@@ -285,8 +285,19 @@ func (h *httpAPI) ListProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, nonnil(h.service.Projects()))
 }
 func (h *httpAPI) ListDirectoryBranches(w http.ResponseWriter, r *http.Request, p api.ListDirectoryBranchesParams) {
-	branches, err := h.service.DirectoryBranches(p.Root)
-	if err == nil {
+	if strings.TrimSpace(p.Root) == "" {
+		respond(w, 200, ProjectBranches{}, problem(400, "invalid_project", "root is required"))
+		return
+	}
+	root, err := validateProjectRoot(p.Root)
+	if err != nil {
+		respond(w, 200, ProjectBranches{}, err)
+		return
+	}
+	branches, err := projectBranches(root)
+	if err != nil {
+		err = problem(400, "invalid_workspace", err.Error())
+	} else {
 		branches.Branches = nonnil(branches.Branches)
 	}
 	respond(w, 200, branches, err)

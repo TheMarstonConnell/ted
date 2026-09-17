@@ -66,7 +66,6 @@ export function WorkspaceFields({
   root,
   value,
   onChange,
-  onValidityChange,
   disabled = false,
   compact = false,
   gitBranch,
@@ -76,7 +75,6 @@ export function WorkspaceFields({
   root?: string;
   value: WorkspaceSelection;
   onChange: (value: WorkspaceSelection) => void;
-  onValidityChange?: (valid: boolean) => void;
   disabled?: boolean;
   compact?: boolean;
   gitBranch?: string;
@@ -101,14 +99,6 @@ export function WorkspaceFields({
       onChange({ mode: "worktree", base_branch: defaultBranch });
   }, [projectId, value.mode, value.base_branch, defaultBranch, onChange]);
   const noRemoteBranches = !!branches?.is_git && !availableBranches.length;
-  const valid =
-    value.mode !== "worktree" ||
-    (!!root?.trim() &&
-      !loading &&
-      !error &&
-      branches?.is_git === true &&
-      availableBranches.includes(value.base_branch || ""));
-  useEffect(() => onValidityChange?.(valid), [onValidityChange, valid]);
   const branchValue = value.base_branch || REPOSITORY_DEFAULT;
   const branchOptions = [...(branches?.branches || [])];
   if (value.base_branch && !branchOptions.includes(value.base_branch))

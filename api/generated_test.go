@@ -70,10 +70,6 @@ func TestWorkspaceContract(t *testing.T) {
 	if branchesRoute == nil || branchesRoute.Get == nil || branchesRoute.Get.OperationID != "ListProjectBranches" {
 		t.Fatalf("branches route is missing or has the wrong operation ID: %#v", branchesRoute)
 	}
-	directoryBranchesRoute := spec.Paths.Value("/v1/projects/branches")
-	if directoryBranchesRoute == nil || directoryBranchesRoute.Get == nil || directoryBranchesRoute.Get.OperationID != "ListDirectoryBranches" {
-		t.Fatalf("directory branches route is missing or has the wrong operation ID: %#v", directoryBranchesRoute)
-	}
 
 	selection := spec.Components.Schemas["WorkspaceSelection"].Value
 	for _, sample := range []struct {

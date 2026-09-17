@@ -105,21 +105,6 @@ func projectBranches(root string) (ProjectBranches, error) {
 	return result, nil
 }
 
-func (s *Service) DirectoryBranches(root string) (ProjectBranches, error) {
-	if strings.TrimSpace(root) == "" {
-		return ProjectBranches{}, problem(400, "invalid_project", "root is required")
-	}
-	root, err := validateProjectRoot(root)
-	if err != nil {
-		return ProjectBranches{}, err
-	}
-	result, err := projectBranches(root)
-	if err != nil {
-		return result, problem(400, "invalid_workspace", err.Error())
-	}
-	return result, nil
-}
-
 func (s *Service) ProjectBranches(id string) (ProjectBranches, error) {
 	p, err := s.GetProject(id)
 	if err != nil {
