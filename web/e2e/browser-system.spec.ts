@@ -8,16 +8,9 @@ import { createServer } from "node:http";
 
 const exec = promisify(execFile);
 const binary = process.env.TED_BROWSER_SYSTEM_BINARY;
-test.use({
-  video: {
-    mode: process.env.TED_WEB_RECORD ? "on" : "retain-on-failure",
-    size: { width: 1440, height: 960 },
-  },
-});
-
 test("real browser shares human input, agent clicks and recording", async ({
   page,
-}, testInfo) => {
+}) => {
   test.skip(
     !binary,
     "set TED_BROWSER_SYSTEM_BINARY to a freshly built ted executable",
@@ -62,7 +55,13 @@ test("real browser shares human input, agent clicks and recording", async ({
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  const fixture = createServer((_req, res) => {
+  let waitingStarted = false;
+  const fixture = createServer((req, res) => {
+    if (req.url === "/agent-wait") {
+      waitingStarted = true;
+      res.writeHead(204).end();
+      return;
+    }
     res.setHeader("Content-Type", "text/html");
     res.end(`<!doctype html><html><head><title>Shared browser playground</title><style>
       body{margin:0;background:#f6f7fb;color:#172033;font:18px system-ui}main{padding:48px;max-width:700px}
@@ -73,7 +72,17 @@ test("real browser shares human input, agent clicks and recording", async ({
       <label for="name">Your name</label><input id="name" autocomplete="off">
       <br><button id="greet" onclick="document.querySelector('#result').textContent='Hello, '+document.querySelector('#name').value+'!';document.querySelector('#result').dataset.ready='true'">Say hello</button>
       <div id="result" aria-live="polite">Ready for shared interaction</div><div style="height:1000px"></div>
-    </main></body></html>`);
+    </main><script>
+      const queryAll = document.querySelectorAll.bind(document);
+      let signalled = false;
+      document.querySelectorAll = (selector) => {
+        if (selector === '#result[data-ready]' && !signalled) {
+          signalled = true;
+          fetch('/agent-wait');
+        }
+        return queryAll(selector);
+      };
+    </script></body></html>`);
   });
   await new Promise<void>((done) => fixture.listen(0, "127.0.0.1", done));
   const address = fixture.address();
@@ -129,17 +138,14 @@ test("real browser shares human input, agent clicks and recording", async ({
       page.getByRole("button", { name: "Open browser", exact: true }),
     ).toBeVisible();
     expect((await browser("status")).projects).toEqual([]);
-    await page.waitForTimeout(1000);
     await page
       .getByRole("button", { name: "Open browser", exact: true })
       .click();
     await expect(
       page.getByRole("textbox", { name: "Interactive browser viewport" }),
     ).toBeVisible({ timeout: 15_000 });
-    await page.waitForTimeout(1000);
     const addressBar = page.getByRole("textbox", { name: "Browser address" });
     await addressBar.fill(fixtureURL);
-    await page.waitForTimeout(1000);
     await addressBar.press("Enter");
     await expect
       .poll(async () => JSON.stringify(await browser("snapshot")))
@@ -148,7 +154,6 @@ test("real browser shares human input, agent clicks and recording", async ({
       name: "Interactive browser viewport",
     });
     await expect(viewport).toBeVisible({ timeout: 15_000 });
-    await page.waitForTimeout(1200);
     const position = async (selector: string) => {
       const result = await browser(
         "cdp",
@@ -176,46 +181,34 @@ test("real browser shares human input, agent clicks and recording", async ({
       );
     };
     await clickRemote("#name");
-    await page.waitForTimeout(1000);
-    await page.keyboard.type("Taylor", { delay: 100 });
+    await page.keyboard.type("Taylor");
     await expect
       .poll(async () => JSON.stringify(await browser("snapshot")))
       .toContain("Taylor");
-    await page.waitForTimeout(1000);
     // A waiting agent must not hold up a human click.
     const greet = await position("#greet");
     const viewportBox = await viewport.boundingBox();
     if (!viewportBox) throw new Error("viewport missing");
     const wait = browser("wait", "--selector", "#result[data-ready]");
-    await page.waitForTimeout(1000);
+    await expect.poll(() => waitingStarted).toBe(true);
     await page.mouse.click(
       viewportBox.x + (greet.x * viewportBox.width) / greet.width,
       viewportBox.y + (greet.y * viewportBox.height) / greet.height,
     );
     await wait;
     await expect(page.getByTestId("ted-browser-cursor")).toHaveCount(0);
-    await page.waitForTimeout(1000);
     await browser("record", "start");
-    await page.waitForTimeout(1200);
     await browser("click", "--selector", "#greet");
     await expect(page.getByTestId("ted-browser-cursor")).toBeVisible({
       timeout: 1000,
     });
-    await page.waitForTimeout(300);
-    await page.screenshot({
-      path: testInfo.outputPath("shared-browser-agent-click.png"),
-    });
-    await page.waitForTimeout(1200);
     const recording = await browser("record", "stop");
     expect(recording.path).toBeTruthy();
+    expect(recording.frames).toBeGreaterThan(0);
+    expect((await stat(recording.path)).size).toBeGreaterThan(0);
     await expect
       .poll(async () => JSON.stringify(await browser("snapshot")))
       .toContain("Hello, Taylor!");
-    await page.waitForTimeout(2000);
-    await testInfo.attach("Real interactive browser", {
-      path: testInfo.outputPath("shared-browser-agent-click.png"),
-      contentType: "image/png",
-    });
   } finally {
     if (agentID) await browser("close").catch(() => undefined);
     try {
