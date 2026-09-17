@@ -1036,7 +1036,8 @@ test("user bubbles wrap long messages and contain scrollable Markdown on mobile 
   const text = `Please review **this change**.\n\n${"unbroken-text".repeat(40)}\n\n\`\`\`ts\nconst value = "${"long code ".repeat(40)}"\n\`\`\``;
   await page.getByRole("textbox", { name: "Message", exact: true }).fill(text);
   await page.getByRole("button", { name: "Send message", exact: true }).click();
-  const bubble = page.getByRole("article", {
+  const messages = page.getByRole("region", { name: "Messages", exact: true });
+  const bubble = messages.getByRole("article", {
     name: "Your message",
     exact: true,
   });
@@ -1044,10 +1045,6 @@ test("user bubbles wrap long messages and contain scrollable Markdown on mobile 
   await expect(bubble.locator("pre")).toContainText("const value");
   for (const width of [320, 1440]) {
     await page.setViewportSize({ width, height: 960 });
-    const messages = page.getByRole("region", {
-      name: "Messages",
-      exact: true,
-    });
     const box = (await bubble.boundingBox())!;
     const viewport = (await messages.boundingBox())!;
     expect(box.x).toBeGreaterThan(viewport.x);
