@@ -136,6 +136,10 @@ async function liveBrowser(page: Page) {
     setStreaming: (enabled: boolean) => {
       streamFrames = enabled;
     },
+    navigate: (id: string, url: string) => {
+      tabs = tabs.map((tab) => (tab.id === id ? { ...tab, url } : tab));
+      state();
+    },
     select: (id: string) => {
       selected = id;
       state();
@@ -290,6 +294,41 @@ test("tabs follow agent or pin independently, navigation and tab lifecycle use e
   await expect(
     page.getByRole("button", { name: "Close tab Research", exact: true }),
   ).toHaveCount(0);
+});
+
+test("address editing preserves drafts and resyncs remote navigation when focus leaves", async ({
+  page,
+}) => {
+  const live = await liveBrowser(page);
+  await live.open();
+  const tab = live.newTab("https://initial.test");
+  const address = page.getByRole("textbox", { name: "Browser address" });
+  await expect(address).toHaveValue("https://initial.test");
+  await address.fill("https://draft.test");
+  live.navigate(tab, "https://redirected.test");
+  await expect(address).toHaveValue("https://draft.test");
+  await page
+    .getByRole("button", { name: "Reload browser page", exact: true })
+    .click();
+  await expect(address).toHaveValue("https://redirected.test");
+  for (const viaKeyboard of [false, true]) {
+    const url = `https://submit.test/${viaKeyboard ? "keyboard" : "mouse"}`;
+    await address.fill(url);
+    if (viaKeyboard) {
+      await address.press("Tab");
+      await expect(
+        page.getByRole("button", { name: "Go", exact: true }),
+      ).toBeFocused();
+      await page.keyboard.press("Enter");
+    } else {
+      await page.getByRole("button", { name: "Go", exact: true }).click();
+    }
+    await expect
+      .poll(() =>
+        live.commands.filter((command) => command.type === "navigate").at(-1),
+      )
+      .toMatchObject({ tab_id: tab, url });
+  }
 });
 
 test("scaled hover, click, drag, double click, wheel, keys, paste, composition and scoped release", async ({

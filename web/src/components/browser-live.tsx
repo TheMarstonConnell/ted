@@ -140,6 +140,7 @@ export function BrowserPanel({
         className="flex shrink-0 flex-wrap items-center gap-2 border-b p-2"
         onSubmit={(event) => {
           event.preventDefault();
+          addressEditing.current = false;
           if (address.trim())
             connection.command({
               type: "navigate",
@@ -181,28 +182,37 @@ export function BrowserPanel({
           </Button>
         </div>
         <div className="flex min-w-0 flex-[1_1_20rem] items-center gap-2">
-          <Input
-            aria-label="Browser address"
-            className="min-w-0 flex-1"
-            placeholder="Enter a URL"
-            value={address}
-            disabled={!connected}
-            onFocus={() => {
-              addressEditing.current = true;
-            }}
-            onBlur={() => {
+          <div
+            className="contents"
+            onBlur={(event) => {
+              if (event.currentTarget.contains(event.relatedTarget)) return;
               addressEditing.current = false;
+              setAddress(tab?.url || "");
             }}
-            onChange={(event) => setAddress(event.target.value)}
-          />
-          <Button
-            type="submit"
-            variant="outline"
-            size="sm"
-            disabled={!connected || !address.trim()}
           >
-            Go
-          </Button>
+            <Input
+              aria-label="Browser address"
+              className="min-w-0 flex-1"
+              placeholder="Enter a URL"
+              value={address}
+              disabled={!connected}
+              onFocus={() => {
+                addressEditing.current = true;
+              }}
+              onChange={(event) => {
+                addressEditing.current = true;
+                setAddress(event.target.value);
+              }}
+            />
+            <Button
+              type="submit"
+              variant="outline"
+              size="sm"
+              disabled={!connected || !address.trim()}
+            >
+              Go
+            </Button>
+          </div>
           <Button
             type="button"
             variant="ghost"
