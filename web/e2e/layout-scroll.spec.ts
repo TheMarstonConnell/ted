@@ -12,6 +12,7 @@ for (const width of [390, 1440]) {
       await page
         .getByRole("button", { name: "harness /srv/harness", exact: true })
         .click();
+      await expect(page).toHaveURL(/\/agents\/a1$/);
       for (let i = 0; i < 30; i++) {
         emit("a1", "output", {
           ResponseType: "agent",
@@ -42,9 +43,8 @@ for (const width of [390, 1440]) {
       await expect(page.locator("#root")).toHaveCSS("overflow-y", "hidden");
       await page.evaluate(() => window.scrollTo(0, 100000));
       expect(await page.evaluate(() => window.scrollY)).toBe(0);
-      await messages.evaluate((n) => {
-        n.scrollTop = 0;
-      });
+      await messages.hover();
+      await page.mouse.wheel(0, -100000);
       await expect.poll(() => messages.evaluate((n) => n.scrollTop)).toBe(0);
       const screenshot = testInfo.outputPath("viewport-scroll.png");
       await page.screenshot({ path: screenshot });

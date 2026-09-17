@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { workspace } from "./fixtures";
 
-test("bot notifications are distinct while queued, live, and replayed", async ({
+test("bot notifications merge while pending and remain distinct live and replayed", async ({
   page,
 }, testInfo) => {
   const { agents, events, emit } = await workspace(page);
@@ -33,10 +33,10 @@ test("bot notifications are distinct while queued, live, and replayed", async ({
   events.source = [];
   events.target = [];
   await page.goto("/agents/target");
+  await expect(page.getByText("Queue held · 0 pending")).toBeVisible();
+  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(1000);
 
-  const text =
-    "Review is complete. " +
-    "The implementation and regression coverage are ready to merge. ".repeat(8);
+  const text = "Review is complete.";
   const notification = {
     id: "nudge-1",
     text,
@@ -65,8 +65,47 @@ test("bot notifications are distinct while queued, live, and replayed", async ({
     contentType: "image/png",
   });
 
+  const mergedText =
+    text +
+    "\n\nRegression checks passed. Ready to merge. " +
+    "The implementation and regression coverage are ready to merge. ".repeat(8);
+  const merged = { ...notification, text: mergedText };
+  emit("target", "message.updated", merged);
+  const pendingQueue = page.getByRole("region", { name: "Pending messages" });
+  await expect(pendingQueue.locator("[data-pending-message-id]")).toHaveCount(
+    1,
+  );
+  await expect(
+    pendingQueue.locator('[data-pending-message-id="nudge-1"]'),
+  ).toContainText(mergedText);
+  await expect(pendingQueue.getByText("Queue held · 1 pending")).toBeVisible();
+  await expect(page.locator("[data-bot-notification]")).toHaveCount(0);
+  await expect(page.getByRole("article", { name: "Your message" })).toHaveCount(
+    0,
+  );
+  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(2000);
+  const mergedPath = testInfo.outputPath("nudge-merged-pending.png");
+  await page.screenshot({ path: mergedPath });
+  await testInfo.attach("merged pending bot notification", {
+    path: mergedPath,
+    contentType: "image/png",
+  });
+
+  await page.reload();
+  await expect(pendingQueue.locator("[data-pending-message-id]")).toHaveCount(
+    1,
+  );
+  await expect(
+    pendingQueue.locator('[data-pending-message-id="nudge-1"]'),
+  ).toContainText(mergedText);
+  await expect(page.locator("[data-bot-notification]")).toHaveCount(0);
+  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(1500);
+
   agents.target.held = false;
-  emit("target", "turn.started", { ...notification, status: "running" });
+  emit("target", "turn.started", { ...merged, status: "running" });
+  await expect(pendingQueue.locator("[data-pending-message-id]")).toHaveCount(
+    0,
+  );
   const card = page.locator("[data-bot-notification]");
   await expect(card).toHaveCount(1);
   const toggle = card.getByRole("button", {
@@ -82,7 +121,7 @@ test("bot notifications are distinct while queued, live, and replayed", async ({
   await expect(
     card
       .locator('[data-slot="collapsible-content"]')
-      .getByText(text, { exact: true }),
+      .getByText(mergedText, { exact: true }),
   ).toBeVisible();
   await expect(
     card.getByText("From chat source (caller-supplied)", { exact: true }),
@@ -100,7 +139,7 @@ test("bot notifications are distinct while queued, live, and replayed", async ({
       role: "user",
       kind: "bot",
       sender_agent_id: "source",
-      content: text,
+      content: mergedText,
     },
   ]);
   await expect(card).toHaveCount(1);
@@ -111,6 +150,13 @@ test("bot notifications are distinct while queued, live, and replayed", async ({
     page.getByRole("button", {
       name: /Bot notification from chat source \(caller-supplied\): Review is complete\./,
     }),
+  ).toBeVisible();
+  if (process.env.TED_WEB_RECORD) await page.waitForTimeout(1000);
+  await toggle.click();
+  await expect(
+    card
+      .locator('[data-slot="collapsible-content"]')
+      .getByText(mergedText, { exact: true }),
   ).toBeVisible();
   if (process.env.TED_WEB_RECORD) await page.waitForTimeout(2000);
 });

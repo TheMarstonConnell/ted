@@ -124,6 +124,61 @@ describe("event replay", () => {
     expect(s.transcripts.a).toHaveLength(1);
   });
 
+  it("upserts pending bot merges without displaying a turn before it starts", () => {
+    const bot = {
+      ...queued,
+      id: "bot",
+      kind: "bot" as const,
+      sender_agent_id: "review-chat",
+    };
+    const other = { ...bot, id: "other", sender_agent_id: "test-chat" };
+    const merged = { ...bot, text: "Hello\n\nChecks passed" };
+    const latest = {
+      ...merged,
+      text: "Hello\n\nChecks passed\n\nCoverage passed",
+    };
+    let s = reduceEvent(state(), event(1, "message.queued", queued));
+    s = reduceEvent(s, event(2, "message.queued", bot));
+    s = reduceEvent(s, event(3, "message.queued", other));
+    const accepted = s;
+    s = reduceEvent(s, event(4, "message.updated", merged));
+    expect(s.agents.a.queue).toEqual([queued, merged, other]);
+    expect(s.transcripts.a || []).toEqual([]);
+    expect(accepted.agents.a.queue).toEqual([queued, bot, other]);
+    const update = event(5, "message.updated", latest);
+    s = reduceEvent(s, update);
+    expect(s.agents.a.queue).toEqual([queued, latest, other]);
+    expect(s.transcripts.a || []).toEqual([]);
+    expect(s.cursors.a).toBe(5);
+    expect(reduceEvent(s, update)).toBe(s);
+    expect(reduceEvent(s, event(2, "message.queued", bot))).toBe(s);
+
+    s = reduceEvent(
+      s,
+      event(6, "turn.started", { ...latest, status: "running" }),
+    );
+    expect(s.agents.a.queue).toEqual([queued, { ...latest, status: "running" }, other]);
+    expect(s.transcripts.a).toEqual([
+      expect.objectContaining({
+        kind: "bot",
+        text: "Hello\n\nChecks passed\n\nCoverage passed",
+        senderAgentId: "review-chat",
+      }),
+    ]);
+    s = reduceEvent(
+      s,
+      event(7, "conversation", [
+        {
+          role: "user",
+          kind: "bot",
+          sender_agent_id: "review-chat",
+          content: latest.text,
+        },
+      ]),
+    );
+    expect(s.transcripts.a).toHaveLength(1);
+  });
+
   it("rejects gaps without advancing a processed cursor", () => {
     const s = state();
     expect(() => reduceEvent(s, event(2, "output", output))).toThrow(
