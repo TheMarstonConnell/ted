@@ -2,13 +2,17 @@ package browser
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net"
+	"slices"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // LiveCommand is a typed, tab-scoped human browser operation.
@@ -29,6 +33,19 @@ type LiveCommand struct {
 	Text       string  `json:"text,omitempty"`
 	Modifiers  int64   `json:"modifiers,omitempty"`
 	KeyCode    int64   `json:"key_code,omitempty"`
+}
+
+// Mouse coordinates are required on the wire, including at the viewport origin.
+func (c LiveCommand) MarshalJSON() ([]byte, error) {
+	type commandJSON LiveCommand
+	if c.Type == "mouse" {
+		return json.Marshal(struct {
+			commandJSON
+			X float64 `json:"x"`
+			Y float64 `json:"y"`
+		}{commandJSON(c), c.X, c.Y})
+	}
+	return json.Marshal(commandJSON(c))
 }
 
 type LiveTab struct {
@@ -67,28 +84,12 @@ func OpenLive(ctx context.Context, req Request) (*LiveClient, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 	if err := validateThread(req.Thread); err != nil {
 		return nil, err
 	}
-	path, err := socketPathForHome(req.Home)
+	conn, err := connectDaemon(ctx, req.Home)
 	if err != nil {
 		return nil, err
-	}
-	conn, err := dialDaemon(ctx, path)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if err = startDaemonInHome(path, req.Home); err != nil {
-			return nil, err
-		}
-		conn, err = waitForDaemon(ctx, path)
-		if err != nil {
-			return nil, err
-		}
 	}
 	c := &LiveClient{conn: conn, dec: json.NewDecoder(bufio.NewReader(conn))}
 	c.stop = context.AfterFunc(ctx, func() { _ = conn.Close() })
@@ -134,6 +135,78 @@ func (c *LiveClient) Close() error {
 		err = c.conn.Close()
 	})
 	return err
+}
+
+var liveCommandFields = map[string][]string{
+	"watch":    {"tab_id"},
+	"new":      {"url"},
+	"navigate": {"tab_id", "url"},
+	"back":     {"tab_id"}, "forward": {"tab_id"}, "reload": {"tab_id"}, "close": {"tab_id"}, "release": {"tab_id"},
+	"mouse": {"tab_id", "event", "x", "y", "delta_x", "delta_y", "button", "buttons", "click_count", "modifiers"},
+	"key":   {"tab_id", "event", "key", "code", "text", "modifiers", "key_code"},
+	"text":  {"tab_id", "text"},
+}
+
+// ParseLiveCommand is shared by the HTTP and local-daemon boundaries.
+func ParseLiveCommand(data []byte) (LiveCommand, error) {
+	var command LiveCommand
+	invalid := func(message string) (LiveCommand, error) {
+		return command, fail("invalid_params", "%s", message)
+	}
+	if !utf8.Valid(data) {
+		return invalid("invalid UTF-8 command")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return invalid("expected a JSON object")
+	}
+	raw := map[string]any{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return invalid("invalid JSON command")
+		}
+		key, ok := token.(string)
+		if !ok {
+			return invalid("invalid JSON command")
+		}
+		if _, exists := raw[key]; exists {
+			return invalid("duplicate command field")
+		}
+		var value any
+		if err := decoder.Decode(&value); err != nil || value == nil {
+			return invalid("invalid command value")
+		}
+		raw[key] = value
+	}
+	if _, err := decoder.Token(); err != nil {
+		return invalid("invalid JSON command")
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return invalid("expected exactly one JSON object")
+	}
+	if err := json.Unmarshal(data, &command); err != nil {
+		return invalid("invalid typed browser command")
+	}
+	allowed, ok := liveCommandFields[command.Type]
+	if !ok {
+		return invalid("unsupported live command")
+	}
+	for key := range raw {
+		if key != "type" && !slices.Contains(allowed, key) {
+			return invalid("field is not allowed for this command")
+		}
+	}
+	if command.Type == "mouse" && (raw["x"] == nil || raw["y"] == nil) {
+		return invalid("mouse coordinates are required")
+	}
+	if raw["url"] == "" {
+		return invalid("url must not be empty")
+	}
+	if err := validateLiveCommand(command); err != nil {
+		return command, err
+	}
+	return command, nil
 }
 
 func validateLiveCommand(c LiveCommand) error {
@@ -201,6 +274,9 @@ func validateLiveCommand(c LiveCommand) error {
 			return invalid("key or code is required")
 		}
 	case "text":
+		if c.Text == "" {
+			return invalid("text is required")
+		}
 		if c.TabID == "" {
 			return invalid("text requires explicit tab_id")
 		}

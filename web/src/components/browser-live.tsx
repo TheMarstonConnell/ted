@@ -306,7 +306,6 @@ function BrowserViewport({
   const host = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const [focused, setFocused] = useState(false);
   const composing = useRef(false);
   const blurring = useRef(false);
   const pressed = useRef(false);
@@ -666,9 +665,7 @@ function BrowserViewport({
             autoComplete="off"
             spellCheck={false}
             className="absolute inset-0 size-full resize-none cursor-default touch-none text-base md:text-sm opacity-0"
-            onFocus={() => setFocused(true)}
             onBlur={() => {
-              setFocused(false);
               if (!blurring.current) release();
             }}
             onPointerMove={(event) => pointer(event, "mouseMoved")}
@@ -731,9 +728,7 @@ function BrowserViewport({
         id="browser-focus-help"
         className="shrink-0 border-t px-4 py-2 text-xs text-muted-foreground"
       >
-        {focused
-          ? "Keyboard goes to the browser. Press Escape to release focus."
-          : "Click the page to type · Escape releases focus"}
+        Click the page to type · Escape releases focus
       </p>
     </div>
   );

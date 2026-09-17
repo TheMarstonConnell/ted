@@ -675,3 +675,52 @@ func TestCloseSessionDoesNotRetargetReplacedDirectory(t *testing.T) {
 		t.Fatal("cleanup used replacement file's parent instead of original session identity")
 	}
 }
+
+func TestLiveWireValidationAndZeroCoordinateDispatch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := newManager(ctx, t.TempDir())
+	defer mgr.close()
+	viewer := liveTestClient(t, ctx, mgr, Request{Project: t.TempDir(), Thread: "strict-wire"})
+	defer viewer.Close()
+	receiveLive(t, viewer, func(event LiveEvent) bool { return event.Type == "state" })
+	readError := func() LiveEvent {
+		t.Helper()
+		_ = viewer.conn.SetReadDeadline(time.Now().Add(time.Second))
+		for {
+			event, err := viewer.Receive()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if event.Type == "error" {
+				return event
+			}
+		}
+	}
+	for _, wire := range []string{
+		`{"type":"watch","type":"new"}`,
+		`{"type":"watch","tab_id":null}`,
+		`{"type":"watch","url":"https://example.test"}`,
+		`{"type":"mouse","tab_id":"absent","event":"mouseMoved","x":0}`,
+		`{"type":"key","tab_id":"absent","event":"keyDown","key":"a","x":0}`,
+		`{"type":"text","tab_id":"absent","text":""}`,
+	} {
+		if _, err := viewer.conn.Write([]byte(wire + "\n")); err != nil {
+			t.Fatal(err)
+		}
+		event := readError()
+		if event.Code != "invalid_params" {
+			t.Fatalf("wire bypassed strict validation: %s -> %+v", wire, event)
+		}
+	}
+	if err := viewer.Send(LiveCommand{Type: "mouse", TabID: "absent", Event: "mousePressed", Button: "left", X: 0, Y: 0}); err != nil {
+		t.Fatal(err)
+	}
+	event := readError()
+	if event.Code != "not_found" {
+		t.Fatalf("zero-coordinate input did not reach tab ownership check: %+v", event)
+	}
+	if projects := mgr.status()["projects"].([]map[string]any); len(projects) != 0 {
+		t.Fatal("invalid command started a browser project")
+	}
+}

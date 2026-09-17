@@ -21,25 +21,9 @@ func Call(ctx context.Context, req Request) (Response, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := ctx.Err(); err != nil {
-		return Response{}, err
-	}
-	path, err := socketPathForHome(req.Home)
+	conn, err := connectDaemon(ctx, req.Home)
 	if err != nil {
 		return Response{}, err
-	}
-	conn, err := dialDaemon(ctx, path)
-	if err != nil {
-		if err := ctx.Err(); err != nil {
-			return Response{}, err
-		}
-		if err := startDaemonInHome(path, req.Home); err != nil {
-			return Response{}, err
-		}
-		conn, err = waitForDaemon(ctx, path)
-		if err != nil {
-			return Response{}, fmt.Errorf("connect to browser daemon: %w", err)
-		}
 	}
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
@@ -62,6 +46,31 @@ func Call(ctx context.Context, req Request) (Response, error) {
 		return Response{}, fmt.Errorf("read browser response: %w", err)
 	}
 	return resp, nil
+}
+
+func connectDaemon(ctx context.Context, home string) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path, err := socketPathForHome(home)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := dialDaemon(ctx, path)
+	if err == nil {
+		return conn, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := startDaemonInHome(path, home); err != nil {
+		return nil, err
+	}
+	conn, err = waitForDaemon(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("connect to browser daemon: %w", err)
+	}
+	return conn, nil
 }
 
 func dialDaemon(ctx context.Context, path string) (net.Conn, error) {

@@ -829,6 +829,10 @@ paths:
 components:
   schemas:
     BrowserLiveCommand:
+      x-go-type: browser.LiveCommand
+      x-go-type-import:
+        name: browser
+        path: github.com/TheMarstonConnell/ted/browser
       type: object
       additionalProperties: false
       required: [type]
@@ -897,6 +901,10 @@ components:
           minimum: 0
           maximum: 65535
     BrowserLiveTab:
+      x-go-type: browser.LiveTab
+      x-go-type-import:
+        name: browser
+        path: github.com/TheMarstonConnell/ted/browser
       type: object
       additionalProperties: false
       required: [id, url, title]
@@ -908,6 +916,10 @@ components:
         title:
           type: string
     BrowserLiveEvent:
+      x-go-type: browser.LiveEvent
+      x-go-type-import:
+        name: browser
+        path: github.com/TheMarstonConnell/ted/browser
       type: object
       additionalProperties: false
       required: [type]

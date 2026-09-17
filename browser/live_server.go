@@ -100,22 +100,7 @@ func serveLive(parent context.Context, mgr *manager, conn net.Conn, req Request,
 		if len(line) == 0 {
 			continue
 		}
-		var command LiveCommand
-		dec := json.NewDecoder(bytes.NewReader(line))
-		dec.DisallowUnknownFields()
-		err := dec.Decode(&command)
-		if err != nil {
-			err = fail("invalid_params", "decode live command: %v", err)
-		}
-		if err == nil {
-			var extra any
-			if dec.Decode(&extra) != io.EOF {
-				err = fail("invalid_params", "one command is required per line")
-			}
-		}
-		if err == nil {
-			err = validateLiveCommand(command)
-		}
+		command, err := ParseLiveCommand(line)
 		if err == nil {
 			opCtx, stop := context.WithTimeout(ctx, 10*time.Second)
 			err = sub.execute(opCtx, command)

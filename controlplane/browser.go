@@ -1,20 +1,14 @@
 package controlplane
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/TheMarstonConnell/ted/browser"
 	"github.com/gorilla/websocket"
@@ -338,116 +332,16 @@ func (h *httpAPI) bridgeBrowser(parent context.Context, c *websocket.Conn, live 
 }
 
 func (h *httpAPI) validateBrowserCommand(data []byte) (browser.LiveCommand, error) {
-	var command browser.LiveCommand
-	if !utf8.Valid(data) {
-		return command, fmt.Errorf("invalid UTF-8 command")
+	command, err := browser.ParseLiveCommand(data)
+	if err != nil {
+		return command, err
 	}
-	invalid := func(message string) (browser.LiveCommand, error) { return command, fmt.Errorf("%s", message) }
-	// Reject duplicate keys rather than silently selecting the last value.
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	token, err := decoder.Token()
-	if err != nil || token != json.Delim('{') {
-		return invalid("expected a JSON object")
-	}
-	raw := map[string]any{}
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
-			return invalid("invalid JSON command")
-		}
-		key, ok := token.(string)
-		if !ok {
-			return invalid("invalid JSON command")
-		}
-		if _, exists := raw[key]; exists {
-			return invalid("duplicate command field")
-		}
-		var value any
-		if err := decoder.Decode(&value); err != nil {
-			return invalid("invalid JSON command")
-		}
-		raw[key] = value
-	}
-	if _, err := decoder.Token(); err != nil {
-		return invalid("invalid JSON command")
-	}
-	if _, err := decoder.Token(); err != io.EOF {
-		return invalid("expected exactly one JSON object")
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return command, err
 	}
 	if err := h.spec.Components.Schemas["BrowserLiveCommand"].Value.VisitJSON(raw); err != nil {
-		return invalid("invalid browser command fields")
-	}
-	for _, field := range []struct {
-		name  string
-		limit int
-	}{{"tab_id", 256}, {"key", 128}, {"code", 128}} {
-		if text, ok := raw[field.name].(string); ok && len(text) > field.limit {
-			return invalid("browser command string exceeds byte limit")
-		}
-	}
-	kind := raw["type"].(string)
-	allowed := map[string]bool{"type": true, "tab_id": true}
-	require := []string{}
-	switch kind {
-	case "watch":
-	case "new":
-		delete(allowed, "tab_id")
-		allowed["url"] = true
-	case "navigate":
-		allowed["url"] = true
-		require = append(require, "url")
-	case "back", "forward", "reload", "close", "release":
-		require = append(require, "tab_id")
-	case "mouse":
-		for _, key := range []string{"event", "x", "y", "delta_x", "delta_y", "button", "buttons", "click_count", "modifiers"} {
-			allowed[key] = true
-		}
-		require = append(require, "tab_id", "event", "x", "y")
-		if event, _ := raw["event"].(string); event != "mouseMoved" && event != "mousePressed" && event != "mouseReleased" && event != "mouseWheel" {
-			return invalid("invalid mouse event")
-		}
-	case "key":
-		for _, key := range []string{"event", "key", "code", "text", "modifiers", "key_code"} {
-			allowed[key] = true
-		}
-		require = append(require, "tab_id", "event")
-		if (raw["key"] == nil || raw["key"] == "") && (raw["code"] == nil || raw["code"] == "") {
-			return invalid("key or code is required")
-		}
-		if event, _ := raw["event"].(string); event != "keyDown" && event != "keyUp" {
-			return invalid("invalid key event")
-		}
-	case "text":
-		allowed["text"] = true
-		require = append(require, "tab_id", "text")
-	}
-	if rawURL, ok := raw["url"].(string); ok {
-		parsed, err := url.Parse(rawURL)
-		if err != nil {
-			return invalid("invalid URL")
-		}
-		switch strings.ToLower(parsed.Scheme) {
-		case "http", "https", "file", "about", "data":
-		default:
-			return invalid("unsupported URL scheme")
-		}
-	}
-	if kind == "mouse" && (raw["event"] == "mousePressed" || raw["event"] == "mouseReleased") && (raw["button"] == nil || raw["button"] == "none") {
-		return invalid("mouse button is required")
-	}
-	for key := range raw {
-		if !allowed[key] {
-			return invalid("field is not allowed for this command")
-		}
-	}
-	for _, key := range require {
-		value, present := raw[key]
-		if !present || value == "" {
-			return invalid("missing required command field: " + key)
-		}
-	}
-	if err := json.Unmarshal(data, &command); err != nil {
-		return invalid("invalid typed browser command")
+		return command, errors.New("invalid browser command fields")
 	}
 	return command, nil
 }
