@@ -211,7 +211,6 @@ export class LiveBrowserConnection {
     this.stopped = true;
     clearTimeout(this.retry);
     clearTimeout(this.fade);
-    this.send({ type: "release", tab_id: this.state.viewed });
     const socket = this.socket;
     this.socket = null;
     socket?.close();
