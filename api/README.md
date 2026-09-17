@@ -33,7 +33,7 @@ generated. Edit the YAML, then regenerate; never edit `generated.go` manually.
 | GET, PATCH | `/v1/agents/{agent_id}` | Read an agent, update `settled`, or advance `read_cursor` |
 | GET | `/v1/agents/{agent_id}/pull-request` | Resolve the GitHub pull request for the agent's branch |
 | PATCH | `/v1/agents/{agent_id}/settings` | Patch model and/or effort for future turns |
-| GET, POST | `/v1/agents/{agent_id}/messages` | Inspect queue (including terminal entries) or submit user/bot text |
+| GET, POST | `/v1/agents/{agent_id}/messages` | Inspect queue (including terminal entries) or submit user text/images or bot text |
 | DELETE | `/v1/agents/{agent_id}/messages/{message_id}` | Cancel a pending entry only |
 | POST | `/v1/agents/{agent_id}/stop` | Stop required `turn_id`; advance pending FIFO, safe to retry |
 | POST | `/v1/agents/{agent_id}/continue` | Release failure/interruption hold; no body |
@@ -47,7 +47,8 @@ JSON request objects reject unknown properties, null where not allowed, and
 missing required fields. Empty patches are rejected. Unknown/repeated query
 parameters, malformed escapes, trailing JSON, and bodies on bodyless operations
 are rejected. JSON operations require `Content-Type: application/json`; entire
-request bodies are limited to **2 MiB**, and text to **1,048,576 characters**.
+request bodies are limited to **2 MiB**, except message submission which allows
+**30 MiB**. Text is limited to **1,048,576 characters**.
 Names are limited to 256 characters, roots to 4096, model identifiers to 256,
 effort strings to 64, and idempotency keys to 256. Root paths must be existing
 absolute server-local directories. Model/effort availability is checked against
@@ -70,6 +71,31 @@ metadata, never a provisioning request. Parentage is included in agent resources
 WS inventory, and update events and cannot be patched. See
 [workspace precedence](../docs/workspaces.md#child-agents-and-existing-directories).
 
+User submissions accept an optional `attachments` array, for example:
+
+```json
+{"text":"What is wrong with this screen?","attachments":[{"name":"screen.png","url":"data:image/png;base64,..."}]}
+```
+
+Each attachment requires `name` (at most 256 Unicode characters) and `url`.
+Only inline base64 data URLs for PNG, JPEG, WebP and GIF are accepted; remote
+URLs, file URLs, other media types, invalid bytes, and MIME mismatches are rejected.
+There are at most four attachments, each at most **5 MiB decoded**, at most
+**20 MiB decoded total**. Dimensions must be positive, no side may exceed
+**16,384 pixels**, and an image may contain at most **16,777,216 pixels**.
+The server checks dimensions before allocating decoded pixels and validates the
+image decoder's result. Animated GIF validation decodes the first frame only;
+animated WebP is not supported by the decoder. Names are display metadata, not
+paths. `text` remains required but may be `""` for user image-only submissions.
+Bots cannot include attachments. HTTP and WebSocket submit share this contract.
+
+Attachments persist in queue records and `message.queued` events. Committed
+conversation content uses real `text` and `image_url` parts; providers receive
+multimodal content (Codex translates to `input_text` and `input_image`), not
+stringified image metadata. The local provider request budget is **32 MiB**,
+including conversation history. Older text-only requests retain string content
+and their existing idempotency receipts.
+
 Message submissions accept `{ "text": "...", "kind": "bot", "sender_agent_id": "..." }`
 for bot notifications. `kind` is optional and defaults to `user`; `sender_agent_id`
 is optional bot-only provenance, not authenticated identity. Both HTTP and WS
@@ -83,7 +109,8 @@ time, and queue position are preserved. Anonymous, running, and terminal entries
 are never merged. `message.updated` events contain the full merged record; clients
 replace the queue entry by ID. Combined text cannot exceed 1,048,576 Unicode
 characters; overflow returns `413 too_large` without modifying the entry.
-Idempotency distinguishes submitted text, kind, and sender; omitted and explicit
+Idempotency distinguishes submitted text, kind, sender, and attachment names/URLs
+in array order; omitted and explicit
 `user` kind are equivalent. Each key retains its own input fingerprint but can
 reference the same merged queue ID. A retry returns the entry's current contents
 and status without duplicating text. Cancelling that ID cancels all its reports.
@@ -175,7 +202,7 @@ All HTTP errors use the generated `Error` envelope:
 | 405 | `method_not_allowed` | Method unsupported for route; `Allow` lists methods |
 | 409 | `conflict`, `project_exists`, `project_not_empty`, `idempotency_conflict`, `not_pending`, `not_running`, `settled` | Runtime state/precondition conflict |
 | 410 | `cursor_invalid` | Invalid cursor; do not silently reset |
-| 413 | `too_large` | HTTP request body exceeds 2 MiB or merged bot text exceeds 1,048,576 characters |
+| 413 | `too_large` | HTTP request body exceeds its limit (30 MiB for submit, 2 MiB elsewhere), subscribe exceeds 64 KiB, or merged bot text exceeds 1,048,576 characters |
 | 415 | `unsupported_media_type` | Expected JSON Content-Type |
 | 500 | `internal` | Unexpected failure; internal details are not exposed |
 | 503 | `shutting_down`, `storage_failed` | Runtime unavailable; failed mutations are not acknowledged as successful |

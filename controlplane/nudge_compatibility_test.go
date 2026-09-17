@@ -18,7 +18,7 @@ func TestUserSubmissionKindPreservesLegacyReceipts(t *testing.T) {
 		t.Error("user receipt format changed")
 	}
 	s.mu.Unlock()
-	same, err := s.SubmitMessage(a.ID, SubmitMessageRequest{Text: "ordinary input", Kind: "user"}, "legacy-key")
+	same, err := s.SubmitMessage(a.ID, SubmitMessageRequest{Text: "ordinary input", Kind: "user", Attachments: []Attachment{}}, "legacy-key")
 	if err != nil || same.ID != first.ID {
 		t.Fatalf("explicit user kind must reuse old receipt: %+v %v", same, err)
 	}

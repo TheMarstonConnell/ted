@@ -451,7 +451,7 @@ func (s *Service) QueuedMessages(id string) ([]QueuedMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return slices.Clone(a.Agent.Queue), nil
+	return cloneQueue(a.Agent.Queue), nil
 }
 
 // History copies only the requested page while holding the snapshot lock.
@@ -625,6 +625,8 @@ func (s *Service) Submit(id, text, key string) (QueuedMessage, error) {
 }
 
 func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string) (QueuedMessage, error) {
+	// Image decoding must not block unrelated chats.
+	validationErr := validateSubmitMessage(req)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.writableLocked(); err != nil {
@@ -634,7 +636,7 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 	if err != nil {
 		return QueuedMessage{}, err
 	}
-	if err = validateSubmitMessage(req); err != nil {
+	if err = validationErr; err != nil {
 		return QueuedMessage{}, err
 	}
 	if req.Kind == "user" {
@@ -643,7 +645,7 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 	scope := "message:" + id + ":" + key
 	var hash string
 	if key != "" {
-		if req.Kind == "" {
+		if req.Kind == "" && len(req.Attachments) == 0 {
 			hash = fingerprint(req.Text)
 		} else {
 			hash = fingerprint(req)
@@ -657,7 +659,7 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 				return QueuedMessage{}, s.failStorageLocked(err)
 			}
 			if found {
-				return a.Agent.Queue[index], nil
+				return cloneQueuedMessage(a.Agent.Queue[index]), nil
 			}
 			return QueuedMessage{}, s.failStorageLocked(errors.New("durable receipt references a missing message"))
 		}
@@ -701,7 +703,7 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 		m = a.Agent.Queue[mergeIndex]
 		eventType = "message.updated"
 	} else {
-		m = QueuedMessage{ID: newID(), Text: req.Text, Kind: req.Kind, SenderAgentID: req.SenderAgentID, Status: "pending", CreatedAt: time.Now().UTC()}
+		m = QueuedMessage{ID: newID(), Attachments: slices.Clone(req.Attachments), Text: req.Text, Kind: req.Kind, SenderAgentID: req.SenderAgentID, Status: "pending", CreatedAt: time.Now().UTC()}
 		a.Agent.Queue = append(a.Agent.Queue, m)
 	}
 	a.Agent.Held = false
@@ -717,11 +719,20 @@ func (s *Service) SubmitMessage(id string, req SubmitMessageRequest, key string)
 	if err = s.writableLocked(); err != nil {
 		return QueuedMessage{}, err
 	}
-	return m, nil
+	return cloneQueuedMessage(m), nil
 }
 
 func validateSubmitMessage(req SubmitMessageRequest) error {
-	if strings.TrimSpace(req.Text) == "" {
+	if utf8.RuneCountInString(req.Text) > 1<<20 {
+		return problem(413, "too_large", "text must not exceed 1048576 characters")
+	}
+	if req.Kind == "bot" && len(req.Attachments) != 0 {
+		return problem(400, "invalid_message", "bot messages cannot include attachments")
+	}
+	if err := agent.ValidateAttachments(req.Attachments); err != nil {
+		return problem(400, "invalid_message", err.Error())
+	}
+	if strings.TrimSpace(req.Text) == "" && len(req.Attachments) == 0 {
 		return problem(400, "invalid_message", "text cannot be empty")
 	}
 	if utf8.RuneCountInString(req.SenderAgentID) > 256 {
@@ -984,7 +995,7 @@ func (s *Service) run(ctx context.Context, id string, r *runningTurn, project Pr
 				s.logger.Error("could not save agent event", zap.Error(err))
 			}
 		})
-		err = instance.TurnMessageContext(ctx, message.Text, message.Kind, message.SenderAgentID)
+		err = instance.TurnMessageAttachmentsContext(ctx, message.Text, message.Kind, message.SenderAgentID, message.Attachments)
 	}
 	s.mu.Lock()
 	delete(s.running, id)

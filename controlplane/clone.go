@@ -35,7 +35,7 @@ func cloneAgent(value Agent) Agent {
 		settings := *value.ActiveSettings
 		cloned.ActiveSettings = &settings
 	}
-	cloned.Queue = slices.Clone(value.Queue)
+	cloned.Queue = cloneQueue(value.Queue)
 	cloned.Messages = cloneMessages(value.Messages)
 	// Preserve the former JSON snapshot omission.
 	cloned.Events = nil
@@ -100,4 +100,16 @@ func cloneRawJSON(value json.RawMessage) json.RawMessage {
 		panic(err)
 	}
 	return json.RawMessage(cloned)
+}
+
+func cloneQueuedMessage(value QueuedMessage) QueuedMessage {
+	value.Attachments = slices.Clone(value.Attachments)
+	return value
+}
+func cloneQueue(values []QueuedMessage) []QueuedMessage {
+	cloned := slices.Clone(values)
+	for i := range cloned {
+		cloned[i] = cloneQueuedMessage(cloned[i])
+	}
+	return cloned
 }

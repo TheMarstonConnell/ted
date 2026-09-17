@@ -218,7 +218,7 @@ func TestHTTPWebSocketExplicitUnionAndInvalidCursors(t *testing.T) {
 		{map[string]any{"type": "subscribe"}, "invalid"},
 		{map[string]any{"type": "unknown", "request_id": "bad"}, "invalid"},
 		{map[string]any{"type": "submit", "request_id": "bad", "agent_id": a.ID, "text": "missing key"}, "invalid"},
-		{map[string]any{"type": "submit", "request_id": "bad", "agent_id": a.ID, "idempotency_key": "x", "text": ""}, "invalid"},
+		{map[string]any{"type": "submit", "request_id": "bad", "agent_id": a.ID, "idempotency_key": "x", "text": ""}, "invalid_message"},
 		{map[string]any{"type": "submit", "request_id": "bad", "agent_id": a.ID, "idempotency_key": "x", "text": "bad", "kind": "system"}, "invalid"},
 		{map[string]any{"type": "submit", "request_id": "bad", "agent_id": a.ID, "idempotency_key": "x", "text": "bad", "kind": "user", "sender_agent_id": "source"}, "invalid_message"},
 	}
@@ -389,7 +389,7 @@ func TestHTTPWebSocketOriginAndFrameLimit(t *testing.T) {
 	}
 	c.Close()
 	c = dialHTTPWS(t, f.server)
-	if err = c.WriteMessage(websocket.TextMessage, []byte(strings.Repeat("x", maxWSFrame+1))); err != nil {
+	if err = c.WriteMessage(websocket.TextMessage, []byte(strings.Repeat("x", maxSubmitBody+1))); err != nil {
 		t.Fatal(err)
 	}
 	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))

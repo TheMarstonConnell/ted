@@ -98,8 +98,7 @@ func (c Content) Text() string {
 	return c.text
 }
 
-// imageURLs returns image URLs from an array-form body. It is intentionally
-// private: callers should compose images from bytes via imageContent.
+// imageURLs returns image URLs from an array-form body.
 func (c Content) imageURLs() []string {
 	if len(c.raw) == 0 {
 		return nil

@@ -593,7 +593,7 @@ selected sections with `head`, `tail`, or `grep`.
 Screenshot attachments are limited to **1 MiB each**, with up to four per tool-call
 batch. Invalid or oversized screenshots are skipped with a status message and a
 log warning; the original artifact is not deleted. Capture a smaller image if
-needed. Both model providers reject serialized requests larger than **8 MiB**
+needed. Both model providers reject serialized requests larger than **32 MiB**
 locally, with guidance to reduce content or start a fresh conversation. This is
 a harness safety budget, not a guarantee of a provider's limit; history is not
 automatically compacted.

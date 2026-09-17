@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/TheMarstonConnell/ted/agent"
@@ -34,7 +35,7 @@ func TestBotQueuedAndUpdatedEventRendering(t *testing.T) {
 		t.Fatalf("updates = %+v, want acceptance and one merge", updates)
 	}
 	for i, want := range []QueuedMessage{original, merged} {
-		if updates[i].Bot == nil || *updates[i].Bot != want || updates[i].Output != nil || updates[i].Busy != nil {
+		if updates[i].Bot == nil || !reflect.DeepEqual(*updates[i].Bot, want) || updates[i].Output != nil || updates[i].Busy != nil {
 			t.Fatalf("update %d = %+v, want bot %+v", i, updates[i], want)
 		}
 	}

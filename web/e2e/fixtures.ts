@@ -184,6 +184,9 @@ export async function workspace(page: Page) {
         const queued = {
           id: `m${events[id].length}`,
           text: body.text,
+          ...(body.attachments?.length
+            ? { attachments: body.attachments }
+            : {}),
           status: "pending",
           created_at: new Date().toISOString(),
         };

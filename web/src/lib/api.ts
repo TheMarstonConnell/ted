@@ -157,6 +157,7 @@ export function agentTitle(agent: Agent) {
   return (
     agent.title ||
     agent.queue?.[0]?.text.replace(/\s+/g, " ").trim().slice(0, 80) ||
+    agent.queue?.[0]?.attachments?.[0]?.name ||
     "New chat"
   );
 }

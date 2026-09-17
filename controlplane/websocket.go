@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/TheMarstonConnell/ted/api"
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/gorilla/websocket"
 )
 
@@ -73,9 +74,9 @@ func (h *httpAPI) WebSocket(w http.ResponseWriter, r *http.Request) {
 	defer c.Close()
 	done := make(chan struct{})
 	defer close(done)
-	inputs := make(chan wsInput, 8)
+	inputs := make(chan wsInput, 1)
 	_ = c.SetReadDeadline(time.Now().Add(wsPongTimeout))
-	c.SetReadLimit(maxWSFrame)
+	c.SetReadLimit(maxSubmitBody)
 	c.SetPongHandler(func(string) error { return c.SetReadDeadline(time.Now().Add(wsPongTimeout)) })
 	go func() {
 		for {
@@ -194,13 +195,16 @@ func (h *httpAPI) validateWS(data []byte) (command wsCommand, err error) {
 	name := ""
 	switch command.kind {
 	case "subscribe":
+		if len(data) > 64<<10 {
+			return command, problem(413, "too_large", "subscribe frame exceeds 64 KiB")
+		}
 		name = "WSSubscribe"
 	case "submit":
 		name = "WSSubmit"
 	default:
 		return command, problem(400, "invalid", "unknown WebSocket command type")
 	}
-	if e := h.spec.Components.Schemas[name].Value.VisitJSON(raw); e != nil {
+	if e := h.spec.Components.Schemas[name].Value.VisitJSON(raw, openapi3.SetSchemaErrorMessageCustomizer(schemaErrorMessage)); e != nil {
 		return command, problem(400, "invalid", e.Error())
 	}
 	if command.kind == "subscribe" {
@@ -208,6 +212,12 @@ func (h *httpAPI) validateWS(data []byte) (command wsCommand, err error) {
 	} else {
 		command.agentID = raw["agent_id"].(string)
 		command.message.Text = raw["text"].(string)
+		if attachments, ok := raw["attachments"].([]any); ok {
+			for _, item := range attachments {
+				a := item.(map[string]any)
+				command.message.Attachments = append(command.message.Attachments, Attachment{Name: a["name"].(string), URL: a["url"].(string)})
+			}
+		}
 		command.message.Kind, _ = raw["kind"].(string)
 		command.message.SenderAgentID, _ = raw["sender_agent_id"].(string)
 		command.idempotencyKey = raw["idempotency_key"].(string)

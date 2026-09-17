@@ -189,7 +189,7 @@ export interface paths {
         /** @description Inspect the queue, including terminal entries. */
         get: operations["ListMessages"];
         put?: never;
-        /** @description Queue a message. Optional Idempotency-Key deduplicates submissions across HTTP and WebSocket; different text, kind, or sender with the same key returns 409. Omitted kind and explicit user kind are equivalent. */
+        /** @description Queue a message. Optional Idempotency-Key deduplicates submissions across HTTP and WebSocket; different text, kind, sender, or attachment names/URLs in array order with the same key returns 409. Omitted kind and explicit user kind are equivalent. Empty text is allowed only with user attachments; bots cannot include attachments. Request bodies are limited to 30 MiB. */
         post: operations["SubmitMessage"];
         delete?: never;
         options?: never;
@@ -410,8 +410,15 @@ export interface components {
          * @enum {string}
          */
         MessageKind: "user" | "bot";
-        /** @description sender_agent_id is optional bot-only caller-supplied provenance, not authenticated identity. Destinations are not restricted to parent chats. Named bot submissions append to the latest pending bot message from that sender unless a pending user message intervenes. The existing ID and queue position are retained; message.updated carries the full merged record. Anonymous, running, and terminal messages are never merged. Merged text is limited to 1048576 characters; overflow is rejected with 413 too_large. */
+        /** @description Inline image only. Decoded bytes must match the declared MIME and decode successfully. At most 5 MiB per image, 20 MiB total, 16384 pixels per side and 16777216 pixels per image. No remote URLs or local files. */
+        Attachment: {
+            name: string;
+            url: string;
+        };
+        Attachments: components["schemas"]["Attachment"][];
+        /** @description User messages may include inline image attachments and may have empty text only when attachments are present. Bots cannot include attachments. sender_agent_id is optional bot-only caller-supplied provenance, not authenticated identity. Destinations are not restricted to parent chats. Named bot submissions append to the latest pending bot message from that sender unless a pending user message intervenes. The existing ID and queue position are retained; message.updated carries the full merged record. Anonymous, running, and terminal messages are never merged. Merged text is limited to 1048576 characters; overflow is rejected with 413 too_large. */
         SubmitMessageRequest: {
+            attachments?: components["schemas"]["Attachments"];
             text: string;
             kind?: components["schemas"]["MessageKind"];
             sender_agent_id?: string;
@@ -420,6 +427,7 @@ export interface components {
             turn_id: string;
         };
         QueuedMessage: {
+            attachments?: components["schemas"]["Attachments"];
             id: string;
             text: string;
             kind?: components["schemas"]["MessageKind"];
@@ -643,7 +651,9 @@ export interface components {
                 [key: string]: number;
             };
         };
+        /** @description Same text and attachment contract as SubmitMessageRequest. Submit frames are limited to 30 MiB. */
         WSSubmit: {
+            attachments?: components["schemas"]["Attachments"];
             /** @enum {string} */
             type: "submit";
             request_id: string;
@@ -2440,7 +2450,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Request body exceeds 2 MiB. */
+            /** @description Request body exceeds 30 MiB, or merged bot text exceeds 1048576 characters. */
             413: {
                 headers: {
                     [name: string]: unknown;

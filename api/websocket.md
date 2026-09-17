@@ -91,8 +91,9 @@ exists, rather than retrying forever; start or select another agent.
 
 The fields above are required. `request_id` correlates the response only; it is not an
 idempotency key. `idempotency_key` (1–256 characters) deduplicates durably in the
-same per-agent namespace as HTTP `Idempotency-Key`. Retry the **same text, kind, sender, and
-key**, with any request ID, after a disconnect. A different payload with that key
+same per-agent namespace as HTTP `Idempotency-Key`. Retry the **same text, kind,
+sender, attachment names/URLs in the same array order, and key**, with any request
+ID, after a disconnect. Changing any of these payload fields with the same key
 returns `idempotency_conflict` (HTTP 409). Submission needs no subscription.
 
 ```json
@@ -132,10 +133,12 @@ after processing the event (or its reference). Resume using a fresh subscribe
 command. Duplicate processing across a disconnect is possible; deduplicate by
 `(agent_id, cursor)`. HTTP `/events?after=42&limit=100` exposes the same log.
 
-Client messages and server messages are bounded to **65,536 bytes (64 KiB)**,
-including the JSON envelope. Oversized incoming messages disconnect (1009).
-To submit longer text, use HTTP (text up to 1,048,576 Unicode characters, entire
-request up to 2 MiB). A retained event whose serialized WS envelope exceeds
+Client submit messages allow **30 MiB**, including the JSON envelope, with
+the same optional inline image `attachments` and validation as [HTTP submit](README.md).
+Text remains limited to 1,048,576 Unicode characters. Incoming frames above
+30 MiB disconnect (1009); subscribe commands above **64 KiB** return an error.
+Server messages remain bounded to **65,536 bytes (64 KiB)**. A retained event
+(including an image attachment) whose serialized WS envelope exceeds
 64 KiB is delivered as a reference, never truncated:
 
 ```json

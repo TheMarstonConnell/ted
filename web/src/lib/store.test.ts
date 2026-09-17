@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlPlane, isUnread, reduceEvent, type State } from "./store";
 import {
   groupAgents,
+  agentTitle,
   branchPullRequest,
   projectName,
   type Agent,
@@ -157,7 +158,11 @@ describe("event replay", () => {
       s,
       event(6, "turn.started", { ...latest, status: "running" }),
     );
-    expect(s.agents.a.queue).toEqual([queued, { ...latest, status: "running" }, other]);
+    expect(s.agents.a.queue).toEqual([
+      queued,
+      { ...latest, status: "running" },
+      other,
+    ]);
     expect(s.transcripts.a).toEqual([
       expect.objectContaining({
         kind: "bot",
@@ -1425,6 +1430,84 @@ describe("read receipts", () => {
     await client.markRead("a", 2);
     expect(isUnread(client.state.agents.a, client.state.readPending.a)).toBe(
       false,
+    );
+  });
+});
+
+describe("screenshot messages", () => {
+  it("labels an image-only chat from its first attachment", () => {
+    expect(
+      agentTitle(
+        agent("a", {
+          queue: [
+            {
+              ...queued,
+              text: "",
+              attachments: [
+                { name: "screen.png", url: "data:image/png;base64,AA==" },
+              ],
+            },
+          ],
+        }),
+      ),
+    ).toBe("screen.png");
+  });
+  const attachments = [
+    { name: "screen.png", url: "data:image/png;base64,aGVsbG8=" },
+  ];
+  it("retains images through optimistic delivery, HTTP, queue and transcript replay", async () => {
+    let acknowledge!: (response: Response) => void;
+    const fetcher = vi.fn(
+      (_path: string, _options: RequestInit) =>
+        new Promise<Response>((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const client = new ControlPlane();
+    client.state = state();
+    const sending = client.send("a", "", "image-key", attachments);
+    expect(client.state.outgoing.a).toEqual([
+      { key: "image-key", text: "", attachments },
+    ]);
+    expect(JSON.parse(String(fetcher.mock.calls[0][1].body))).toEqual({
+      text: "",
+      attachments,
+    });
+    const message = { ...queued, text: "", attachments };
+    acknowledge(Response.json(message));
+    await sending;
+    expect(client.state.outgoing.a[0].attachments).toEqual(attachments);
+    const next = reduceEvent(
+      client.state,
+      event(1, "turn.started", { ...message, status: "running" }),
+    );
+    expect(next.outgoing.a).toEqual([]);
+    expect(next.transcripts.a[0]).toMatchObject({
+      kind: "user",
+      text: "",
+      attachments,
+    });
+    expect(next.agents.a.queue?.[0].attachments).toEqual(attachments);
+  });
+  it("resubmits the same images and key when a settled race requires restoration", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: "settled", message: "Restore first" } },
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(Response.json(agent()))
+      .mockResolvedValueOnce(Response.json({ ...queued, attachments }));
+    vi.stubGlobal("fetch", fetcher);
+    const client = new ControlPlane();
+    client.state = state();
+    await client.send("a", "Review this", "same-key", attachments);
+    expect(fetcher.mock.calls[0][1]).toEqual(fetcher.mock.calls[2][1]);
+    expect(JSON.parse(fetcher.mock.calls[2][1].body).attachments).toEqual(
+      attachments,
     );
   });
 });

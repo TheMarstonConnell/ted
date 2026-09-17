@@ -219,7 +219,7 @@ func TestHTTPStrictValidationBeforeMutation(t *testing.T) {
 		{"POST", base + "/messages", `null`, 400},
 		{"POST", base + "/messages", `{"text":"x"} {}`, 400},
 		{"POST", base + "/messages", `{"text":"` + strings.Repeat("x", 1048577) + `"}`, 400},
-		{"POST", base + "/messages", `{"text":"` + strings.Repeat("x", maxHTTPBody) + `"}`, 413},
+		{"POST", base + "/messages", `{"text":"` + strings.Repeat("x", maxSubmitBody) + `"}`, 413},
 		{"PATCH", base, `{}`, 400},
 		{"PATCH", base, `{"settled":null}`, 400},
 		{"PATCH", base, `{"settled":"false"}`, 400},
