@@ -1,0 +1,16 @@
+goos: linux
+goarch: amd64
+pkg: github.com/TheMarstonConnell/ted/web
+cpu: AMD Ryzen 7 5700G with Radeon Graphics         
+BenchmarkSPA/GET-2         	  209240	       962.9 ns/op	    1936 B/op	      12 allocs/op
+BenchmarkSPA/GET-2         	  247324	       969.6 ns/op	    1936 B/op	      12 allocs/op
+BenchmarkSPA/GET-2         	  235960	      1027 ns/op	    1936 B/op	      12 allocs/op
+BenchmarkSPA/GET-2         	  230072	      1057 ns/op	    1936 B/op	      12 allocs/op
+BenchmarkSPA/GET-2         	  244218	      1080 ns/op	    1936 B/op	      12 allocs/op
+BenchmarkSPA/HEAD-2        	  547986	       427.8 ns/op	     576 B/op	       8 allocs/op
+BenchmarkSPA/HEAD-2        	  680864	       411.1 ns/op	     576 B/op	       8 allocs/op
+BenchmarkSPA/HEAD-2        	  658702	       406.5 ns/op	     576 B/op	       8 allocs/op
+BenchmarkSPA/HEAD-2        	  583042	       402.3 ns/op	     576 B/op	       8 allocs/op
+BenchmarkSPA/HEAD-2        	  529575	       415.6 ns/op	     576 B/op	       8 allocs/op
+PASS
+ok  	github.com/TheMarstonConnell/ted/web	2.437s

@@ -1,0 +1,11 @@
+goos: linux
+goarch: amd64
+pkg: github.com/TheMarstonConnell/ted/controlplane
+cpu: AMD Ryzen 7 5700G with Radeon Graphics         
+BenchmarkDeleteProjectCPU-2   	      20	  16810278 ns/op	    917409 fixture_B	 4408695 B/op	   21396 allocs/op
+BenchmarkDeleteProjectCPU-2   	      20	  17414559 ns/op	    917409 fixture_B	 4697958 B/op	   21400 allocs/op
+BenchmarkDeleteProjectCPU-2   	      20	  17483477 ns/op	    917409 fixture_B	 5588773 B/op	   21411 allocs/op
+BenchmarkDeleteProjectCPU-2   	      20	  16662486 ns/op	    917409 fixture_B	 4960963 B/op	   21404 allocs/op
+BenchmarkDeleteProjectCPU-2   	      20	  16428549 ns/op	    917409 fixture_B	 4802848 B/op	   21402 allocs/op
+PASS
+ok  	github.com/TheMarstonConnell/ted/controlplane	3.235s

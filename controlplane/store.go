@@ -33,17 +33,6 @@ type diskState struct {
 func emptyState() diskState {
 	return diskState{storeVersion, make(map[string]Project), make(map[string]*storedAgent), make(map[string]receipt)}
 }
-func copyJSON[T any](v T) T {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	var out T
-	if err = json.Unmarshal(b, &out); err != nil {
-		panic(err)
-	}
-	return out
-}
 func loadState(dir string) (diskState, error) {
 	state := emptyState()
 	b, err := os.ReadFile(filepath.Join(dir, "state.json"))
@@ -53,12 +42,22 @@ func loadState(dir string) (diskState, error) {
 	if err != nil {
 		return state, err
 	}
-	if err = json.Unmarshal(b, &state); err != nil {
+	return decodeLegacyState(b)
+}
+
+func decodeLegacyState(b []byte) (diskState, error) {
+	state := emptyState()
+	if err := json.Unmarshal(b, &state); err != nil {
 		return state, fmt.Errorf("read control plane state: %w", err)
 	}
 	legacy := state.Version == legacyStoreVersion
 	if (!legacy && state.Version != storeVersion) || state.Projects == nil || state.Agents == nil || state.Receipts == nil {
 		return state, fmt.Errorf("unsupported or incomplete control plane state")
+	}
+	for id, p := range state.Projects {
+		if p.ID != id {
+			return state, fmt.Errorf("invalid project record %q", id)
+		}
 	}
 	for id, a := range state.Agents {
 		if a == nil || a.Agent.ID != id {
@@ -93,13 +92,14 @@ func loadState(dir string) (diskState, error) {
 			return state, fmt.Errorf("invalid read cursor for agent %q", id)
 		}
 	}
+	if err := validateParentDAG(state.Agents); err != nil {
+		return state, err
+	}
 	state.Version = storeVersion
 	return state, nil
 }
 
-// Checkpoint replacement is atomic and synced before acknowledging mutations.
-// Keeping events in the same transaction prevents acknowledged queue changes
-// from existing without their corresponding replay events after a restart.
+// Legacy JSON writer retained for migration fixtures and comparative benchmarks.
 func saveState(dir string, state diskState) error {
 	b, err := json.Marshal(state)
 	if err != nil {

@@ -674,24 +674,19 @@ func TestInterruptedWorkspaceSetupBecomesFailedOnRestart(t *testing.T) {
 
 			// Model the exact durable boundary left by a process interruption. A
 			// restart must never interpret either setup phase as permission to retry.
-			state, err := loadState(stateDir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			record := state.Agents[a.ID]
-			record.Agent.Workspace = Workspace{
-				WorkspaceSelection: WorkspaceSelection{Mode: "worktree", BaseBranch: "origin/main"},
-				Locked:             true, Status: setupStatus,
-				Path:   filepath.Join(stateDir, "worktrees", project.ID, a.ID),
-				Branch: "ted/interrupted-" + a.ID,
-			}
-			if setupStatus == "creating" {
-				record.Agent.Workspace.BaseCommit = strings.Repeat("a", 40)
-			}
-			record.Agent.Queue = []QueuedMessage{{ID: "pending", Text: "never retry", Status: "pending"}}
-			if err = saveState(stateDir, state); err != nil {
-				t.Fatal(err)
-			}
+			editClosedSQLiteState(t, stateDir, func(state diskState) {
+				record := state.Agents[a.ID]
+				record.Agent.Workspace = Workspace{
+					WorkspaceSelection: WorkspaceSelection{Mode: "worktree", BaseBranch: "origin/main"},
+					Locked:             true, Status: setupStatus,
+					Path:   filepath.Join(stateDir, "worktrees", project.ID, a.ID),
+					Branch: "ted/interrupted-" + a.ID,
+				}
+				if setupStatus == "creating" {
+					record.Agent.Workspace.BaseCommit = strings.Repeat("a", 40)
+				}
+				record.Agent.Queue = []QueuedMessage{{ID: "pending", Text: "never retry", Status: "pending"}}
+			})
 
 			restarted, err := NewService(stateDir, nil, []agent.Provider{provider})
 			if err != nil {
@@ -716,6 +711,13 @@ func TestInterruptedWorkspaceSetupBecomesFailedOnRestart(t *testing.T) {
 			_, err = restarted.UpdateWorkspace(a.ID, WorkspaceSelection{Mode: "current_checkout"})
 			requireProblem(t, err, 409, "workspace_locked")
 			noCall(t, provider)
+			if err := restarted.Close(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			durable := readClosedSQLiteState(t, stateDir).Agents[a.ID].Agent
+			if durable.Workspace.Status != "failed" || !durable.Held || durable.Queue[0].Status != "pending" || durable.Cursor != failed.Cursor {
+				t.Fatalf("workspace interruption repair was not durable: %+v", durable)
+			}
 		})
 	}
 }

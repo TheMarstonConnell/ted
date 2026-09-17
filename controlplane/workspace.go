@@ -65,10 +65,11 @@ func projectBranches(root string) (ProjectBranches, error) {
 	if err != nil {
 		return result, err
 	}
+	remoteNames := strings.Fields(remotes)
 	heads := map[string]string{}
 	for _, line := range strings.Split(refs, "\n") {
 		name, target, _ := strings.Cut(line, "\t")
-		for _, remote := range strings.Fields(remotes) {
+		for _, remote := range remoteNames {
 			if !strings.HasPrefix(name, remote+"/") {
 				continue
 			}
@@ -85,7 +86,7 @@ func projectBranches(root string) (ProjectBranches, error) {
 	sort.Strings(result.Branches)
 	result.DefaultBranch = heads["origin"]
 	if result.DefaultBranch == "" {
-		for _, remote := range strings.Fields(remotes) {
+		for _, remote := range remoteNames {
 			if heads[remote] != "" {
 				result.DefaultBranch = heads[remote]
 				break
@@ -145,29 +146,54 @@ func normalizeWorkspace(root string, selection WorkspaceSelection) (WorkspaceSel
 }
 
 func (s *Service) UpdateWorkspace(id string, selection WorkspaceSelection) (Agent, error) {
+	return s.updateWorkspace(id, selection, normalizeWorkspace)
+}
+
+// updateWorkspace accepts its normalizer as an argument so tests can scope slow
+// validation to a single call without installing process-wide hooks.
+func (s *Service) updateWorkspace(id string, selection WorkspaceSelection, normalize func(string, WorkspaceSelection) (WorkspaceSelection, error)) (Agent, error) {
+	s.mu.RLock()
+	if err := s.writableLocked(); err != nil {
+		s.mu.RUnlock()
+		return Agent{}, err
+	}
+	a, err := s.recordLocked(id)
+	if err != nil {
+		s.mu.RUnlock()
+		return Agent{}, err
+	}
+	if a.Agent.Workspace.Locked {
+		s.mu.RUnlock()
+		return Agent{}, problem(409, "workspace_locked", "workspace choices are permanently locked after the first message")
+	}
+	root := s.state.Projects[a.Agent.ProjectID].Root
+	s.mu.RUnlock()
+
+	selection, err = normalize(root, selection)
+	if err != nil {
+		return Agent{}, err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.writableLocked(); err != nil {
 		return Agent{}, err
 	}
-	a, err := s.recordLocked(id)
+	a, err = s.recordLocked(id)
 	if err != nil {
 		return Agent{}, err
 	}
 	if a.Agent.Workspace.Locked {
 		return Agent{}, problem(409, "workspace_locked", "workspace choices are permanently locked after the first message")
 	}
-	selection, err = normalizeWorkspace(s.state.Projects[a.Agent.ProjectID].Root, selection)
-	if err != nil {
-		return Agent{}, err
-	}
-	before := copyJSON(s.state)
+	before := newStateChanges()
+	before.agent(s.state, id)
 	a.Agent.Workspace = Workspace{WorkspaceSelection: selection, Status: "draft"}
 	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
 	if err := s.commitLocked(before); err != nil {
 		return Agent{}, err
 	}
-	return copyJSON(a.Agent), nil
+	return cloneAgent(a.Agent), nil
 }
 
 // This is part of the first message's transaction, before any external effects.
@@ -217,7 +243,8 @@ func (s *Service) saveWorkspace(id string, update func(*Workspace)) error {
 	if s.storageErr != nil {
 		return s.storageErr
 	}
-	before := copyJSON(s.state)
+	before := newStateChanges()
+	before.agent(s.state, id)
 	a := s.state.Agents[id]
 	update(&a.Agent.Workspace)
 	s.eventLocked(a, "agent.updated", s.summaryLocked(a))
