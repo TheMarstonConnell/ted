@@ -20,11 +20,10 @@ import (
 )
 
 const (
-	MaxAttachments          = 4
-	MaxAttachmentBytes      = 5 << 20
-	MaxTotalAttachmentBytes = 20 << 20
-	MaxAttachmentDimension  = 16384
-	MaxAttachmentPixels     = 16 << 20
+	MaxAttachments         = 4
+	MaxAttachmentBytes     = 5 << 20
+	MaxAttachmentDimension = 16384
+	MaxAttachmentPixels    = 16 << 20
 )
 
 // Attachment is an inline image, never a filesystem path or remote URL.
@@ -38,7 +37,6 @@ func ValidateAttachments(attachments []Attachment) error {
 	if len(attachments) > MaxAttachments {
 		return fmt.Errorf("at most %d attachments are allowed", MaxAttachments)
 	}
-	total := 0
 	for _, attachment := range attachments {
 		if !utf8.ValidString(attachment.Name) || utf8.RuneCountInString(attachment.Name) > 256 {
 			return fmt.Errorf("attachment name must not exceed 256 characters")
@@ -61,10 +59,6 @@ func ValidateAttachments(attachments []Attachment) error {
 		}
 		if len(data) > MaxAttachmentBytes {
 			return fmt.Errorf("attachment exceeds 5 MiB")
-		}
-		total += len(data)
-		if total > MaxTotalAttachmentBytes {
-			return fmt.Errorf("attachments exceed 20 MiB")
 		}
 		config, actual, err := image.DecodeConfig(bytes.NewReader(data))
 		if err != nil || actual != format {

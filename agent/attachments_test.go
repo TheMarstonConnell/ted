@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"hash/crc32"
@@ -104,5 +105,32 @@ func TestAttachmentRejectsWebPCanvasFrameMismatch(t *testing.T) {
 	binary.LittleEndian.PutUint32(extended[4:8], uint32(len(extended)-8))
 	if err := ValidateAttachments([]Attachment{{URL: "data:image/webp;base64," + base64.StdEncoding.EncodeToString(extended)}}); err == nil {
 		t.Fatal("accepted mismatched WebP canvas/frame")
+	}
+}
+
+func TestStandaloneTurnRejectsInvalidAttachments(t *testing.T) {
+	var imageBytes bytes.Buffer
+	if err := png.Encode(&imageBytes, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	validURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imageBytes.Bytes())
+	for _, tt := range []struct{ name, kind, url string }{
+		{"remote URL", "user", "https://example.com/private.png"},
+		{"invalid bytes", "user", "data:image/png;base64,aGVsbG8="},
+		{"bot image", "bot", validURL},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := settingsProvider()
+			p.complete = func(CompletionRequest) (*Response, error) {
+				t.Fatal("invalid attachment reached the provider")
+				return nil, nil
+			}
+			a := NewAgent(nil, []Provider{p})
+			before := len(a.Messages())
+			err := a.TurnMessageAttachmentsContext(context.Background(), "inspect", tt.kind, "", []Attachment{{Name: "screen.png", URL: tt.url}})
+			if err == nil || len(a.Messages()) != before {
+				t.Fatalf("invalid input changed conversation or succeeded: %v", err)
+			}
+		})
 	}
 }
