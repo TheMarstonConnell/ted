@@ -68,8 +68,8 @@ defaults to **`http://`** (not HTTPS). For example, `localhost:3000/path`,
 bracketed automatically; an IPv6 address with a port must already use brackets.
 Explicit `http:`, `https:`, `file:`, `about:`, and `data:` schemes are preserved.
 Unsupported schemes (including `javascript:`) and blank addresses are rejected
-with `invalid_params`. Omit `url` for a blank `new` tab. Ambiguous single-label
-host-and-port addresses other than `localhost` must include `http://` explicitly
+with `invalid` on this WebSocket. Omit `url` for a blank `new` tab. Ambiguous
+single-label host-and-port addresses other than `localhost` must include `http://` explicitly
 (e.g. `http://intranet:8080`), so custom schemes are not mistaken for hosts.
 
 Mouse events: `mouseMoved`, `mousePressed`, `mouseReleased`, `mouseWheel`.

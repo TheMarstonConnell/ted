@@ -270,12 +270,19 @@ func TestBrowserCommandsEventsAndRecoverableValidation(t *testing.T) {
 			t.Fatalf("event changed: %s -> %s", wantJSON, gotJSON)
 		}
 	}
-	if err := c.WriteMessage(websocket.TextMessage, []byte(`{"type":"cdp","method":"Runtime.evaluate"}`)); err != nil {
-		t.Fatal(err)
+	for _, raw := range []string{
+		`{"type":"cdp","method":"Runtime.evaluate"}`,
+		`{"type":"navigate","url":" "}`,
+		`{"type":"new","url":"javascript:alert(1)"}`,
+	} {
+		if err := c.WriteMessage(websocket.TextMessage, []byte(raw)); err != nil {
+			t.Fatal(err)
+		}
+		if event := readBrowser(t, c); event.Type != "error" || event.Code != "invalid" {
+			t.Fatal(event)
+		}
 	}
-	if event := readBrowser(t, c); event.Type != "error" || event.Code != "invalid" {
-		t.Fatal(event)
-	}
+
 	commands := []string{
 		`{"type":"watch","tab_id":"tab-a"}`,
 		`{"type":"new","url":"about:blank"}`,
