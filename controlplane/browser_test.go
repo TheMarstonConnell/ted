@@ -270,15 +270,24 @@ func TestBrowserCommandsEventsAndRecoverableValidation(t *testing.T) {
 			t.Fatalf("event changed: %s -> %s", wantJSON, gotJSON)
 		}
 	}
-	if err := c.WriteMessage(websocket.TextMessage, []byte(`{"type":"cdp","method":"Runtime.evaluate"}`)); err != nil {
-		t.Fatal(err)
+	for _, raw := range []string{
+		`{"type":"cdp","method":"Runtime.evaluate"}`,
+		`{"type":"navigate","url":" "}`,
+		`{"type":"new","url":"javascript:alert(1)"}`,
+	} {
+		if err := c.WriteMessage(websocket.TextMessage, []byte(raw)); err != nil {
+			t.Fatal(err)
+		}
+		if event := readBrowser(t, c); event.Type != "error" || event.Code != "invalid" {
+			t.Fatal(event)
+		}
 	}
-	if event := readBrowser(t, c); event.Type != "error" || event.Code != "invalid" {
-		t.Fatal(event)
-	}
+
 	commands := []string{
 		`{"type":"watch","tab_id":"tab-a"}`,
 		`{"type":"new","url":"about:blank"}`,
+		`{"type":"navigate","tab_id":"tab-a","url":"example.test/` + strings.Repeat("é", 8192-len("example.test/")) + `"}`,
+		`{"type":"new","url":"::1/` + strings.Repeat("é", 8192-len("::1/")) + `"}`,
 		`{"type":"navigate","url":"https://example.test"}`,
 		`{"type":"navigate","tab_id":"tab-a","url":"https://example.test/next"}`,
 		`{"type":"back","tab_id":"tab-a"}`,
@@ -329,7 +338,7 @@ func TestBrowserStrictCommandValidation(t *testing.T) {
 		`{"type":null}`, `{"type":"watch","project":"/tmp"}`, `{"type":"watch","thread":"other"}`, `{"type":"watch","home":"/tmp"}`,
 		`{"type":"cdp"}`, `{"type":"watch","tab_id":null}`, `{"type":"watch","url":"https://example.test"}`,
 		`{"type":"new","tab_id":"tab"}`, `{"type":"navigate"}`, `{"type":"navigate","url":"javascript:alert(1)"}`,
-		`{"type":"navigate","url":"relative"}`, `{"type":"navigate","url":"https://[invalid"}`,
+		`{"type":"navigate","url":"/relative"}`, `{"type":"navigate","url":"https://[invalid"}`,
 		`{"type":"back"}`, `{"type":"reload","tab_id":""}`, `{"type":"close","tab_id":12}`, `{"type":"release"}`,
 		`{"type":"text","tab_id":"tab","text":null}`, `{"type":"text","tab_id":"tab","text":42}`,
 		`{"type":"mouse","tab_id":"tab","event":"keyDown","x":1,"y":2}`,

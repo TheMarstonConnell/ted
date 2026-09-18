@@ -60,6 +60,18 @@ wrong scalar types, trailing JSON, and arbitrary CDP methods are rejected.
 | `text` | Required `tab_id`, `text` (paste or explicit text insertion) |
 | `release` | Required `tab_id`; release this viewer's held keys/buttons |
 
+Browser addresses in `navigate` and `new` use the same normalization as CLI
+`open` and `tab-new`: surrounding whitespace is trimmed and a missing scheme
+defaults to **`http://`** (not HTTPS). For example, `localhost:3000/path`,
+`127.0.0.1:8080`, `example.com`, and `[::1]:3000` are accepted;
+`//example.com/path` becomes `http://example.com/path`. Bare IPv6 literals are
+bracketed automatically; an IPv6 address with a port must already use brackets.
+Explicit `http:`, `https:`, `file:`, `about:`, and `data:` schemes are preserved.
+Unsupported schemes (including `javascript:`) and blank addresses are rejected
+with `invalid` on this WebSocket. Omit `url` for a blank `new` tab. Ambiguous
+single-label host-and-port addresses other than `localhost` must include `http://` explicitly
+(e.g. `http://intranet:8080`), so custom schemes are not mistaken for hosts.
+
 Mouse events: `mouseMoved`, `mousePressed`, `mouseReleased`, `mouseWheel`.
 Press/release requires `button` of `left`, `middle`, or `right`; other events can
 use `none`. Key events: `keyDown`, `keyUp`. Coordinates are **CSS viewport

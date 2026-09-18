@@ -748,3 +748,175 @@ test("static page remains interactive for same-tab pin/follow, history no-op and
     )
     .toBe(1);
 });
+
+test("100% view keeps native size, scrolls without clipping, and maps input", async ({
+  page,
+}) => {
+  const live = await liveBrowser(page);
+  await live.open();
+  const id = live.newTab();
+  await expect(live.viewport).toBeVisible();
+  const fitted = await live.viewport.boundingBox();
+  expect(fitted!.width).toBeLessThan(1280);
+  const toggle = page.getByRole("button", { name: "Show browser at 100%" });
+  await toggle.click();
+  const fit = page.getByRole("button", { name: "Fit to panel", exact: true });
+  await expect(fit).toHaveAttribute("aria-pressed", "true");
+  await expect
+    .poll(async () => (await live.viewport.boundingBox())!.width)
+    .toBe(1280);
+  const geometry = await live.viewport.evaluate((element) => {
+    const host = element.parentElement!.parentElement!;
+    const origin = element.getBoundingClientRect();
+    const container = host.getBoundingClientRect();
+    host.scrollLeft = 300;
+    host.scrollTop = 100;
+    return {
+      left: origin.left - container.left,
+      top: origin.top - container.top,
+      scrollLeft: host.scrollLeft,
+      scrollTop: host.scrollTop,
+    };
+  });
+  expect(geometry.left).toBe(0);
+  expect(geometry.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.scrollLeft).toBe(300);
+  const box = (await live.viewport.boundingBox())!;
+  await page.mouse.click(box.x + 400, box.y + geometry.scrollTop + 50);
+  await expect
+    .poll(() =>
+      live.commands
+        .filter(
+          (command) =>
+            command.type === "mouse" && command.event === "mousePressed",
+        )
+        .at(-1),
+    )
+    .toMatchObject({ x: 400, y: geometry.scrollTop + 50 });
+  await fit.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect
+    .poll(async () => (await live.viewport.boundingBox())!.width)
+    .toBe(fitted!.width);
+  live.send({
+    type: "frame",
+    tab_id: id,
+    data: "jpeg",
+    width: 160,
+    height: 90,
+  });
+  await expect
+    .poll(async () => (await live.viewport.boundingBox())!.width)
+    .toBe(160);
+  await expect
+    .poll(async () => (await live.viewport.boundingBox())!.height)
+    .toBe(90);
+});
+
+test("native preview pans locally with wheel, keyboard and touch", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const live = await liveBrowser(page);
+  await live.open();
+  live.newTab();
+  await expect(live.viewport).toBeVisible();
+  await page.getByRole("button", { name: "Show browser at 100%" }).click();
+  const preview = page.getByRole("region", {
+    name: "Browser preview",
+    exact: true,
+  });
+  const box = (await preview.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  const scroll = () =>
+    preview.evaluate((node) => ({ x: node.scrollLeft, y: node.scrollTop }));
+  const before = live.commands.length;
+  await page.mouse.move(x, y);
+  await page.mouse.wheel(120, 60);
+  await expect.poll(async () => (await scroll()).x).toBeGreaterThan(0);
+  await expect.poll(async () => (await scroll()).y).toBeGreaterThan(0);
+  // Enter the preview using the keyboard, not a programmatic focus/scroll.
+  await page
+    .getByRole("button", { name: "Close browser panel", exact: true })
+    .focus();
+  await page.keyboard.press("Tab");
+  await expect(preview).toBeFocused();
+  const afterWheel = await scroll();
+  await Promise.all([
+    preview.evaluate(
+      (node) =>
+        new Promise<void>((resolve) =>
+          node.addEventListener("scrollend", () => resolve(), { once: true }),
+        ),
+    ),
+    page.keyboard.press("ArrowRight"),
+  ]);
+  await expect
+    .poll(async () => (await scroll()).x)
+    .toBeGreaterThan(afterWheel.x);
+  await Promise.all([
+    preview.evaluate(
+      (node) =>
+        new Promise<void>((resolve) =>
+          node.addEventListener("scrollend", () => resolve(), { once: true }),
+        ),
+    ),
+    page.keyboard.press("ArrowDown"),
+  ]);
+  await expect
+    .poll(async () => (await scroll()).y)
+    .toBeGreaterThan(afterWheel.y);
+  const afterKeys = await scroll();
+  await touchGesture(
+    page,
+    Array.from({ length: 7 }, (_, index) => ({
+      x: x - index * 12,
+      y,
+    })),
+  );
+  await expect
+    .poll(async () => (await scroll()).x)
+    .toBeGreaterThan(afterKeys.x);
+  await touchGesture(
+    page,
+    Array.from({ length: 7 }, (_, index) => ({ x, y: y - index * 12 })),
+  );
+  await expect
+    .poll(async () => (await scroll()).y)
+    .toBeGreaterThan(afterKeys.y);
+  expect(
+    live.commands
+      .slice(before)
+      .some(
+        (command) =>
+          command.type === "key" ||
+          command.event === "mouseWheel" ||
+          command.event === "mousePressed",
+      ),
+  ).toBe(false);
+  await touchGesture(page, [{ x, y }]);
+  await expect
+    .poll(() =>
+      live.commands
+        .slice(before)
+        .filter(
+          (command) =>
+            command.event === "mousePressed" ||
+            command.event === "mouseReleased",
+        )
+        .map((command) => command.event),
+    )
+    .toEqual(["mousePressed", "mouseReleased"]);
+  await page.getByRole("button", { name: "Fit to panel", exact: true }).click();
+  await expect(preview).not.toHaveAttribute("tabindex", "0");
+  await live.viewport.hover();
+  await page.mouse.wheel(0, 60);
+  await expect
+    .poll(() =>
+      live.commands
+        .slice(before)
+        .some((command) => command.event === "mouseWheel"),
+    )
+    .toBe(true);
+});

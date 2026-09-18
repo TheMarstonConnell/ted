@@ -422,6 +422,10 @@ func liveRun(ctx context.Context, t *browserTab, actions ...chromedp.Action) err
 	return chromedp.Run(run, actions...)
 }
 func liveNavigate(ctx context.Context, t *browserTab, url string) error {
+	url, err := normalizeURL(url)
+	if err != nil {
+		return err
+	}
 	return liveRun(ctx, t, chromedp.ActionFunc(func(exec context.Context) error {
 		_, _, message, _, err := page.Navigate(url).Do(exec)
 		if err == nil && message != "" {

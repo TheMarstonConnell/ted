@@ -314,6 +314,7 @@ function BrowserViewport({
   const host = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const [actualSize, setActualSize] = useState(false);
   const composing = useRef(false);
   const blurring = useRef(false);
   const pressed = useRef(false);
@@ -418,6 +419,7 @@ function BrowserViewport({
   useEffect(() => {
     const element = input.current!;
     const nativeWheel = (event: WheelEvent) => {
+      if (actualSize) return;
       event.preventDefault();
       const frame = current.current;
       const rect = element.getBoundingClientRect();
@@ -447,7 +449,7 @@ function BrowserViewport({
     };
     element.addEventListener("wheel", nativeWheel, { passive: false });
     return () => element.removeEventListener("wheel", nativeWheel);
-  }, [queueWheel]);
+  }, [queueWheel, actualSize]);
   const pointer = (
     event: PointerEvent<HTMLTextAreaElement>,
     kind: "mouseMoved" | "mousePressed" | "mouseReleased",
@@ -463,7 +465,7 @@ function BrowserViewport({
       frame.height,
     );
     if (event.pointerType === "touch") {
-      event.preventDefault();
+      if (!actualSize) event.preventDefault();
       if (kind === "mousePressed") {
         element.setPointerCapture(event.pointerId);
         capturedPointer.current = event.pointerId;
@@ -480,6 +482,7 @@ function BrowserViewport({
       const gesture = touch.current;
       if (!gesture || gesture.pointerId !== event.pointerId) return;
       if (kind === "mouseMoved") {
+        if (actualSize) return;
         if (
           !gesture.panning &&
           Math.hypot(
@@ -654,15 +657,21 @@ function BrowserViewport({
       ...(text ? { text } : {}),
     });
   };
-  const scale = Math.min(size.width / frame.width, size.height / frame.height);
+  const scale = actualSize
+    ? 1
+    : Math.min(1, size.width / frame.width, size.height / frame.height);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div
         ref={host}
-        className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-muted/40"
+        role="region"
+        aria-label="Browser preview"
+        aria-describedby="browser-focus-help"
+        tabIndex={actualSize ? 0 : undefined}
+        className="flex min-h-0 flex-1 overflow-auto bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <div
-          className="relative shrink-0 overflow-hidden focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring"
+          className="relative m-auto shrink-0 overflow-hidden focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring"
           style={{ width: frame.width * scale, height: frame.height * scale }}
         >
           <img
@@ -678,7 +687,7 @@ function BrowserViewport({
             autoCapitalize="off"
             autoComplete="off"
             spellCheck={false}
-            className="absolute inset-0 size-full resize-none cursor-default touch-none text-base md:text-sm opacity-0"
+            className={`absolute inset-0 size-full resize-none cursor-default text-base md:text-sm opacity-0 ${actualSize ? "touch-pan-x touch-pan-y" : "touch-none"}`}
             onBlur={() => {
               if (!blurring.current) release();
             }}
@@ -738,12 +747,36 @@ function BrowserViewport({
           )}
         </div>
       </div>
-      <p
-        id="browser-focus-help"
-        className="shrink-0 border-t px-4 py-2 text-xs text-muted-foreground"
-      >
-        Click the page to type · Escape releases focus
-      </p>
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-4 py-2 text-xs text-muted-foreground">
+        <p id="browser-focus-help">
+          Click the page to type · Escape releases focus
+          {actualSize && (
+            <span className="block">
+              Scroll or swipe to pan preview · Tab to preview for arrow keys ·
+              Fit to panel to scroll page
+            </span>
+          )}
+        </p>
+        <div className="flex items-center gap-2">
+          <span>
+            {Math.round(frame.width)} × {Math.round(frame.height)}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label={actualSize ? "Fit to panel" : "Show browser at 100%"}
+            aria-pressed={actualSize}
+            title={
+              actualSize
+                ? "Fit the page to the panel"
+                : "Show at 100% with scrollbars"
+            }
+            onClick={() => setActualSize((value) => !value)}
+          >
+            {actualSize ? "Fit to panel" : "100%"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

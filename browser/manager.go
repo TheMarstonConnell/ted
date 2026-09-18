@@ -351,10 +351,15 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 	opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
 	opts = append(opts,
 		chromedp.UserDataDir(profile),
+		chromedp.WindowSize(defaultViewportWidth, defaultViewportHeight),
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
 		chromedp.Flag("disable-background-networking", true),
 		chromedp.Flag("disable-component-update", true),
+		// Keep Chrome's site isolation defaults and do not silently disable its
+		// sandbox when the daemon happens to run as root.
+		chromedp.Flag("disable-features", false),
+		chromedp.Flag("no-sandbox", false),
 	)
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.WithoutCancel(p.manager.ctx), opts...)
 	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
@@ -506,7 +511,7 @@ func (s *session) createTab(ctx context.Context, url string, selectTab bool) (*b
 		tabCtx, cancel = chromedp.NewContext(s.parentCtx)
 	}
 	t := &browserTab{ctx: tabCtx, cancel: cancel}
-	if err := initializeContext(tabCtx, ctx, cancel, runtime.Enable(), log.Enable()); err != nil {
+	if err := initializeContext(tabCtx, ctx, cancel, runtime.Enable(), log.Enable(), defaultViewport()); err != nil {
 		return nil, fail("browser_unavailable", "initialize tab: %v", err)
 	}
 	t.id = chromedp.FromContext(tabCtx).Target.TargetID
@@ -572,6 +577,7 @@ func (t *browserTab) installListeners() {
 				t.appendConsole(item)
 			}
 		default:
+			t.handleNetworkDiagnostic(ev)
 			t.handleRecordingEvent(ev)
 		}
 	})

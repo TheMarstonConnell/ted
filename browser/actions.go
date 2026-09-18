@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -85,7 +84,8 @@ func (s *session) open(ctx context.Context, params map[string]any) (any, error) 
 	if err != nil {
 		return nil, err
 	}
-	if err := validateURL(raw); err != nil {
+	raw, err = normalizeURL(raw)
+	if err != nil {
 		return nil, err
 	}
 	t, err := s.selectedTab()
@@ -96,19 +96,6 @@ func (s *session) open(ctx context.Context, params map[string]any) (any, error) 
 		return nil, err
 	}
 	return s.tabInfo(ctx, t)
-}
-
-func validateURL(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" {
-		return fail("invalid_params", "url must be an absolute URL")
-	}
-	switch strings.ToLower(u.Scheme) {
-	case "http", "https", "file", "about", "data":
-		return nil
-	default:
-		return fail("invalid_params", "unsupported URL scheme %q", u.Scheme)
-	}
 }
 
 func keySequence(key string) string {
@@ -306,7 +293,8 @@ func (s *session) tabNew(ctx context.Context, params map[string]any) (any, error
 	if raw == "" {
 		raw = "about:blank"
 	}
-	if err := validateURL(raw); err != nil {
+	raw, err = normalizeURL(raw)
+	if err != nil {
 		return nil, err
 	}
 	t, err := s.newTab(ctx, raw)

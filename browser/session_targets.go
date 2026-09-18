@@ -158,7 +158,7 @@ func (s *session) claimedPageTargets(infos []*target.Info, seeds map[target.ID]s
 func (s *session) attachPageTarget(request context.Context, id target.ID) error {
 	tabCtx, cancel := chromedp.NewContext(s.parentCtx, chromedp.WithTargetID(id))
 	t := &browserTab{id: id, ctx: tabCtx, cancel: cancel}
-	if err := initializeContext(tabCtx, request, cancel, runtime.Enable(), log.Enable()); err != nil {
+	if err := initializeContext(tabCtx, request, cancel, runtime.Enable(), log.Enable(), defaultViewport()); err != nil {
 		return err
 	}
 	t.installListeners()
