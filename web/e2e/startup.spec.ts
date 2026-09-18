@@ -24,7 +24,6 @@ async function largeWorkspace(page: Page) {
       last_response_cursor: index < 2 ? count : 0,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
-      messages: [{ role: "assistant", content: text.repeat(64) }],
       queue: [{ id: "old", text, status: "completed" }],
     };
     fixture.events[id] = Array.from({ length: count }, (_, eventIndex) => ({
