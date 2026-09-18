@@ -26,6 +26,9 @@ type manager struct {
 	lifecycles     map[sessionIdentity]*sessionLifecycle
 	nextLive       uint64
 	traceMu        sync.Mutex
+	configOnce     sync.Once
+	config         launchConfig
+	configErr      error
 }
 
 type sessionIdentity struct {
@@ -44,13 +47,14 @@ type projectBrowser struct {
 	root    string
 	key     string
 
-	mu            sync.Mutex
-	started       bool
-	allocCtx      context.Context
-	allocCancel   context.CancelFunc
-	browserCtx    context.Context
-	browserCancel context.CancelFunc
-	sessions      map[string]*session
+	mu             sync.Mutex
+	started        bool
+	allocCtx       context.Context
+	allocCancel    context.CancelFunc
+	browserCtx     context.Context
+	browserCancel  context.CancelFunc
+	displayCleanup func()
+	sessions       map[string]*session
 }
 
 type session struct {
@@ -337,6 +341,11 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 	if p.started {
 		return nil
 	}
+	config, err := p.manager.launchConfig()
+	if err != nil {
+		return err
+	}
+	headed := config.Mode == modeHeaded
 	base := filepath.Join(p.manager.home, "browser", "projects", p.key)
 	profile := filepath.Join(base, "profile")
 	if err := mkdirPrivate(profile); err != nil {
@@ -348,9 +357,24 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 	}
 	_ = os.Chmod(filepath.Join(base, "project.json"), 0o600)
 
+	var displayEnv []string
+	displayCleanup := func() {}
+	if headed {
+		displayEnv, displayCleanup, err = startHeadedDisplay(ctx, base)
+		if err != nil {
+			return err
+		}
+	}
+	startedOK := false
+	defer func() {
+		if !startedOK {
+			displayCleanup()
+		}
+	}()
 	opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
 	opts = append(opts,
 		chromedp.UserDataDir(profile),
+		chromedp.Flag("headless", !headed),
 		chromedp.WindowSize(defaultViewportWidth, defaultViewportHeight),
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
@@ -361,12 +385,22 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 		chromedp.Flag("disable-features", false),
 		chromedp.Flag("no-sandbox", false),
 	)
+	if config.Executable != "" {
+		opts = append(opts, chromedp.ExecPath(config.Executable))
+	}
+	if len(displayEnv) > 0 {
+		opts = append(opts, chromedp.Env(displayEnv...))
+	}
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.WithoutCancel(p.manager.ctx), opts...)
 	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
 	// Allocate against the durable session context. ExecAllocator binds Chrome's
 	// lifetime to the first Run context, not merely NewExecAllocator's context.
 	started := make(chan error, 1)
-	go func() { started <- chromedp.Run(browserCtx) }()
+	var windowSetup []chromedp.Action
+	if headed {
+		windowSetup = append(windowSetup, headedWindowSize())
+	}
+	go func() { started <- chromedp.Run(browserCtx, windowSetup...) }()
 	select {
 	case err := <-started:
 		if err != nil {
@@ -382,7 +416,18 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 	}
 	p.allocCtx, p.allocCancel = allocCtx, allocCancel
 	p.browserCtx, p.browserCancel = browserCtx, browserCancel
+	p.displayCleanup = displayCleanup
+	if headed {
+		allocator := chromedp.FromContext(allocCtx).Allocator
+		go func() {
+			allocator.Wait()
+			displayCleanup()
+			browserCancel()
+			p.closeBrowser(browserCtx)
+		}()
+	}
 	p.started = true
+	startedOK = true
 	return nil
 }
 
@@ -391,6 +436,9 @@ func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated
 	// for one thread cannot observe a half-created session.
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if !p.started {
+		return nil, false, fail("browser_unavailable", "browser exited before session creation; retry the request")
+	}
 	if s := p.sessions[thread]; s != nil {
 		if s.isolated != isolated && isolated {
 			return nil, false, fail("conflict", "thread session already exists without isolation")
@@ -426,7 +474,11 @@ func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated
 			return nil, false, fail("browser_unavailable", "create isolated window: %v", err)
 		}
 		ownerCtx, ownerCancel := chromedp.NewContext(p.browserCtx, chromedp.WithTargetID(ownerID))
-		if err := initializeContext(ownerCtx, ctx, ownerCancel); err != nil {
+		var ownerSetup []chromedp.Action
+		if p.manager.config.Mode == modeHeaded {
+			ownerSetup = append(ownerSetup, headedWindowSize())
+		}
+		if err := initializeContext(ownerCtx, ctx, ownerCancel, ownerSetup...); err != nil {
 			ownerCancel()
 			dispose()
 			return nil, false, fail("browser_unavailable", "attach isolated window: %v", err)
@@ -459,14 +511,24 @@ func linkedContext(parent, request context.Context) (context.Context, context.Ca
 }
 
 func (p *projectBrowser) close() {
+	p.closeBrowser(nil)
+}
+
+func (p *projectBrowser) closeBrowser(expected context.Context) {
 	p.mu.Lock()
+	if expected != nil && p.browserCtx != expected {
+		p.mu.Unlock()
+		return
+	}
 	sessions := make([]*session, 0, len(p.sessions))
 	for _, s := range p.sessions {
 		sessions = append(sessions, s)
 	}
 	p.sessions = make(map[string]*session)
 	browserCtx, browserCancel, allocCancel := p.browserCtx, p.browserCancel, p.allocCancel
-	p.browserCtx, p.browserCancel, p.allocCancel = nil, nil, nil
+	displayCleanup := p.displayCleanup
+	p.displayCleanup = nil
+	p.browserCtx, p.browserCancel, p.allocCtx, p.allocCancel = nil, nil, nil, nil
 	p.started = false
 	p.mu.Unlock()
 	for _, s := range sessions {
@@ -487,6 +549,17 @@ func (p *projectBrowser) close() {
 	if allocCancel != nil {
 		allocCancel()
 	}
+	if displayCleanup != nil {
+		displayCleanup()
+	}
+}
+
+func (p *projectBrowser) tabSetup() []chromedp.Action {
+	actions := []chromedp.Action{runtime.Enable(), log.Enable(), defaultViewport()}
+	if p.manager.config.Mode == modeHeaded {
+		actions = append(actions, headedWindowSize())
+	}
+	return actions
 }
 
 func (s *session) newTab(ctx context.Context, url string) (*browserTab, error) {
@@ -511,7 +584,7 @@ func (s *session) createTab(ctx context.Context, url string, selectTab bool) (*b
 		tabCtx, cancel = chromedp.NewContext(s.parentCtx)
 	}
 	t := &browserTab{ctx: tabCtx, cancel: cancel}
-	if err := initializeContext(tabCtx, ctx, cancel, runtime.Enable(), log.Enable(), defaultViewport()); err != nil {
+	if err := initializeContext(tabCtx, ctx, cancel, s.project.tabSetup()...); err != nil {
 		return nil, fail("browser_unavailable", "initialize tab: %v", err)
 	}
 	t.id = chromedp.FromContext(tabCtx).Target.TargetID

@@ -1,13 +1,68 @@
 # Browser compatibility and blocked-page diagnostics
 
 Ted uses a locally installed Chrome/Chromium through chromedp, with a persistent
-project profile and optional isolated browser contexts. It is an automated,
-headless browser, not the user's normal desktop profile. Authentication, installed
+project profile and optional isolated browser contexts. It is automated and
+headless by default, not the user's normal desktop profile. Authentication, installed
 extensions, managed policies, available codecs, certificates and network access
 can differ from the desktop browser. Browser requests originate on the Ted server.
 The shared Browser panel streams a real browser tab, not an iframe containing the
 remote site; a site's `X-Frame-Options` is not itself a reason the panel cannot show
 that site's top-level page.
+
+## Persistent headed mode
+
+Some login flows behave differently in headless Chrome. To run genuine headed
+Chrome through the same live viewer, save this JSON in
+`$TED_HOME/browser/config.json`:
+
+```json
+{
+  "mode": "headed"
+}
+```
+
+For the web control plane, use **`<ted serve --data-dir>/runtime/browser/config.json`**.
+This is the browser home used by chats, not necessarily the server shell's
+`$TED_HOME`. A standalone CLI normally uses `~/.ted/browser/config.json`.
+Configuration is local to that daemon and applies to all its project browsers.
+The default when the file is absent is `{"mode":"headless"}`. Unknown settings,
+invalid mode values, and malformed configuration fail rather than silently
+starting a differently configured browser.
+
+Optionally add `"executable": "/absolute/path/to/chrome"` to select a particular
+Chrome/Chromium installation. Otherwise Ted uses its normal executable discovery.
+Use a current Chrome build with working sandbox support, run as an unprivileged
+user, and leave browser security enabled. Ted does not download browsers or
+system packages automatically.
+
+On Linux, headed mode uses an inherited `DISPLAY` and `XAUTHORITY` when available.
+If `DISPLAY` is unset, install **Xvfb** and its runtime dependencies on the server
+(for example, `sudo apt-get install xvfb` on Ubuntu). Ted then creates a private,
+authenticated virtual display for each project browser. It chooses an unused
+display, disables X11 TCP listening, and removes its display process and credentials
+after Chrome closes. It does not need `xauth` or a VNC server. Missing display
+support produces an actionable startup error; it never silently falls back to
+headless mode. Other platforms use their native graphical desktop.
+
+Settings are read once before the daemon's first Chrome launch. After changing
+configuration or upgrading Ted, gracefully restart the **browser daemon for that
+home** (`ted browser serve`, SIGTERM), not just the viewer. `ted browser close`
+closes a thread's tabs but does not reload launch settings. A server restart alone
+may leave an existing detached browser daemon running. New daemon launches must
+use the upgraded Ted executable.
+
+Mode changes preserve the existing project profile and stored cookies; a restart
+closes current tabs. The browser contents remain 1440 × 900: Ted sizes the native
+headed window around its toolbars, including new/isolated windows and adopted
+popups, rather than clipping the streamed page. Connecting a viewer does not
+resize a tab or reset explicit agent emulation. The viewer still streams webpage
+content, not Chrome's native controls or operating-system dialogs.
+
+Headed mode is **not** user-agent spoofing or a promise of unrestricted access.
+Automation remains disclosed, and sandbox, certificate, CORS and other web
+security checks remain enforced. One reported Google/WorkOS login succeeded after
+switching to headed mode; external authentication behavior is not a CI contract.
+Tests use local fixtures, never real credentials or Google's live sign-in flow.
 
 ## Diagnose before changing configuration
 
@@ -58,8 +113,9 @@ Use an approved API or supported login/access method when required by the site.
 
 ## Launch-policy audit
 
-Ted retains chromedp's automation indicator and headless mode. It does not add
-certificate-error or CORS bypass flags. It removes chromedp's legacy
+Ted retains chromedp's automation indicator in both modes. Headed mode removes the
+headless launch flag; it does not override the user agent or add certificate-error
+or CORS bypass flags. It removes chromedp's legacy
 `disable-features=site-per-process,Translate,BlinkGenPropertyTrees` override so
 Chrome chooses its own site-isolation and feature defaults. It also explicitly
 prevents chromedp's automatic `--no-sandbox` fallback under root: deploy as an

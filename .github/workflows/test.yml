@@ -63,6 +63,24 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - run: npm run build
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify headed browser startup, display security, sizing and persistence
+        working-directory: .
+        env:
+          TED_BROWSER_INTEGRATION: "1"
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb x11-utils
+          # Let sandboxed Chrome create user namespaces on this ephemeral runner.
+          if [[ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          CHROME=$(node -p "require('./web/node_modules/playwright').chromium.executablePath()")
+          export TED_BROWSER_HEADED_TEST_EXECUTABLE="$CHROME"
+          unset DISPLAY
+          go test -race ./browser -run '^(TestBrowserModePersistenceIntegration|TestHeadedViewportIntegration|TestHeadedDisplayXvfbIntegration|TestHeadedChromeExitReleasesDisplayIntegration)$' -count=1
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

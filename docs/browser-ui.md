@@ -51,6 +51,9 @@ The UI scales the stable browser viewport instead of resizing the page on every
 panel layout change. JPEG capture uses quality 90 without a downsampling cap;
 recordings share this same stream. Desktop defaults are also applied to adopted
 popups. Existing running daemons must be restarted to load browser changes.
+[Persistent headed mode](browser-diagnostics.md#persistent-headed-mode) uses the
+same viewer and project profiles, including an automatically managed private
+Xvfb display on Linux servers without a graphical display.
 
 This is webpage interaction, not a streamed operating-system desktop. Native
 Chrome UI, audio, system file pickers, file transfer and remote clipboard readback
@@ -87,7 +90,9 @@ TED_BROWSER_SYSTEM_BINARY=/tmp/ted-browser-system \
 The test creates an isolated `TED_HOME` and project, starts its own server/daemon
 and local webpage, and submits no model turns. The executable still requires the
 normal provider configuration for server startup. Set `CHROME_PATH` if Playwright
-needs a specific local browser executable. Add `TED_WEB_RECORD=1` to retain video.
+needs a specific local browser executable. Set `TED_BROWSER_SYSTEM_MODE=headed`
+and install Xvfb on Linux to exercise the saved headed configuration and managed
+display without touching your existing browser. Add `TED_WEB_RECORD=1` to retain video.
 
 The opt-in daemon integration suite exercises Chrome and recording directly:
 

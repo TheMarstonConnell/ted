@@ -545,6 +545,16 @@ Methods target the current thread tab by default. `--browser` targets the
 shared browser and can affect other threads. Do not place secrets in raw CDP
 arguments or shell commands that will appear in the conversation.
 
+### Persistent headed browser mode
+
+The browser remains headless by default. For sites with headless-specific login
+issues, save `{"mode":"headed"}` in `$TED_HOME/browser/config.json` and restart the
+browser daemon after upgrading Ted. For the web UI, the file belongs in
+`<ted serve --data-dir>/runtime/browser/config.json`. Existing profiles are reused.
+On Linux without `DISPLAY`, install Xvfb; Ted manages an authenticated, TCP-disabled
+display and sizes the real page area to 1440 × 900. It does not spoof automation or
+weaken browser security. See [configuration and restart details](docs/browser-diagnostics.md#persistent-headed-mode).
+
 ### Artifacts and storage
 
 `TED_HOME` defaults to `~/.ted`; the shell's actual `$HOME` is unchanged. Agents
@@ -576,7 +586,9 @@ isolation, and recording, put Chrome/Chromium on `PATH` and run:
 TED_BROWSER_INTEGRATION=1 go test -race ./... -count=1
 ```
 
-Recording verification also requires `ffmpeg` and `ffprobe`. Integration tests
+Headed-mode integration tests additionally require Xvfb on Linux; the CI web job
+runs these against a real browser. Recording verification also requires `ffmpeg`
+and `ffprobe`. Integration tests
 use temporary profiles, not your normal project login state. Recording brings
 its tab to the foreground so Chrome produces screencast frames; avoid competing
 foreground-tab changes during a recording in the shared project browser.
