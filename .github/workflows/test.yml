@@ -63,6 +63,23 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - run: npm run build
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify headed browser startup, display security, sizing and persistence
+        working-directory: .
+        env:
+          TED_BROWSER_INTEGRATION: "1"
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb x11-utils
+          CHROME=$(node -p "require('./web/node_modules/playwright').chromium.executablePath()")
+          mkdir -p "$RUNNER_TEMP/ted-browser-bin"
+          ln -s "$CHROME" "$RUNNER_TEMP/ted-browser-bin/chromium"
+          export PATH="$RUNNER_TEMP/ted-browser-bin:$PATH"
+          export TED_BROWSER_HEADED_TEST_EXECUTABLE="$CHROME"
+          unset DISPLAY
+          go test -race ./browser -run '^(TestBrowserModePersistenceIntegration|TestHeadedViewportIntegration|TestHeadedDisplayXvfbIntegration)$' -count=1
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

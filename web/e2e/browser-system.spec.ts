@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, rm, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createServer } from "node:http";
@@ -21,6 +21,14 @@ test("real browser shares human input, agent clicks and recording", async ({
   const projectRoot = join(home, "project");
   await mkdir(projectRoot);
   const runtimeHome = join(home, "controlplane", "runtime");
+  const browserMode = process.env.TED_BROWSER_SYSTEM_MODE || "headless";
+  expect(["headless", "headed"]).toContain(browserMode);
+  await mkdir(join(runtimeHome, "browser"), { recursive: true, mode: 0o700 });
+  await writeFile(
+    join(runtimeHome, "browser", "config.json"),
+    JSON.stringify({ mode: browserMode }),
+    { mode: 0o600 },
+  );
   const env = {
     ...process.env,
     TED_HOME: runtimeHome,
@@ -144,6 +152,11 @@ test("real browser shares human input, agent clicks and recording", async ({
     await expect(
       page.getByRole("textbox", { name: "Interactive browser viewport" }),
     ).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("1440 × 900", { exact: true })).toBeVisible();
+    const version = await browser("cdp", "Browser.getVersion", "--browser");
+    expect(version.result.userAgent.includes("HeadlessChrome")).toBe(
+      browserMode === "headless",
+    );
     const addressBar = page.getByRole("textbox", { name: "Browser address" });
     await addressBar.fill(fixtureURL.replace("http://", ""));
     await addressBar.press("Enter");
