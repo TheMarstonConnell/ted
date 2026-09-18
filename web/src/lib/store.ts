@@ -210,6 +210,7 @@ export class ControlPlane {
   state = initial();
   listeners = new Set<() => void>();
   private socket?: WebSocket;
+  private eventFetch?: AbortController;
   private readRequests = new Map<string, Map<number, Promise<void>>>();
   private stopped = true;
   private selected?: string;
@@ -248,7 +249,7 @@ export class ControlPlane {
     this.set({ status: "connecting", error: null });
     try {
       const [agents, projects, models] = await Promise.all([
-        api<Agent[]>("/v1/agents?include_settled=true"),
+        api<Agent[]>("/v1/agents?include_settled=true&summary=true"),
         api<Project[]>("/v1/projects"),
         api<Model[]>("/v1/models"),
       ]);
@@ -257,7 +258,7 @@ export class ControlPlane {
       this.set({
         ...initial(),
         agents: Object.fromEntries(
-          agents.map((a) => [a.id, { ...a, queue: [] }]),
+          agents.map((a) => [a.id, { ...a, messages: undefined, queue: [] }]),
         ),
         projects,
         models,
@@ -294,13 +295,44 @@ export class ControlPlane {
     clearInterval(this.poll);
     clearInterval(this.branchPoll);
     clearTimeout(this.pullRequestPoll);
-    this.socket?.close();
-    this.socket = undefined;
+    this.closeSocket();
   };
+  private closeSocket() {
+    const socket = this.socket;
+    this.socket = undefined;
+    this.eventFetch?.abort();
+    this.eventFetch = undefined;
+    socket?.close();
+  }
   select = (id?: string) => {
+    if (id === this.selected) return;
+    const previous = this.selected;
     this.selected = id;
+    this.closeSocket();
+    // Keep history for only the open chat. Returning to a chat replays it again.
+    this.set({
+      transcripts: {},
+      cursors: {},
+      ready: {},
+      ...(previous && this.state.agents[previous]
+        ? {
+            agents: {
+              ...this.state.agents,
+              [previous]: {
+                ...this.state.agents[previous],
+                queue: [],
+                messages: undefined,
+              },
+            },
+          }
+        : {}),
+    });
+    if (!this.stopped && this.state.loaded) {
+      clearTimeout(this.retry);
+      this.set({ status: "connecting", error: null });
+      this.connect();
+    }
     if (id) void this.refreshPullRequests([id]);
-    this.sendSubscription();
     void this.refreshAgentProjects().catch(() => {});
   };
   private sendSubscription() {
@@ -310,26 +342,26 @@ export class ControlPlane {
         type: "subscribe",
         request_id: requestKey(),
         subscribe_all: true,
-        // Explicitly include settled agents for initial history and external restore
-        // updates. All mode discovers newly created agents without polling.
-        agent_ids: [
-          ...new Set([
-            ...Object.keys(this.state.agents),
-            ...(this.selected && this.state.agents[this.selected]
-              ? [this.selected]
-              : []),
-          ]),
-        ],
+        // Sidebar metadata stays live, including settled chats; only the open
+        // chat replays history. All mode discovers new agents without polling.
+        event_agent_ids:
+          this.selected && this.state.agents[this.selected]
+            ? [this.selected]
+            : [],
+        agent_ids: Object.keys(this.state.agents),
         cursors: this.state.cursors,
-      }),
+      } satisfies Schema["WSSubscribe"]),
     );
   }
   private connect() {
     if (this.stopped) return;
+    this.closeSocket();
     const url = new URL("/v1/ws", location.href);
     url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(url);
     this.socket = ws;
+    const eventFetch = new AbortController();
+    this.eventFetch = eventFetch;
     let chain = Promise.resolve();
     let failed = false;
     let fatal = false;
@@ -381,12 +413,19 @@ export class ControlPlane {
               void this.refreshProjects().catch(() => {});
           }
           if (frame.type === "event" || frame.type === "event_ref") {
+            const id =
+              frame.type === "event" ? frame.event.agent_id : frame.agent_id;
+            if (id !== this.selected) return;
             // Never trust an arbitrary URL from the wire; reconstruct the API path.
             const event =
               frame.type === "event"
                 ? frame.event
                 : await api<Event>(
                     `${agentPath(frame.agent_id)}/events/${frame.cursor}`,
+                    "GET",
+                    undefined,
+                    undefined,
+                    eventFetch.signal,
                   );
             if (failed || ws !== this.socket || this.stopped) return;
             this.set(reduceEvent(this.state, event));
@@ -405,6 +444,7 @@ export class ControlPlane {
     };
     ws.onclose = () => {
       if (this.stopped || ws !== this.socket) return;
+      this.closeSocket();
       this.set({ status: "offline" });
       if (!fatal)
         this.retry = setTimeout(
@@ -556,6 +596,8 @@ export class ControlPlane {
   // WebSocket events remain the single source of transcript/queue updates.
   private mergeAgent(agent: Agent) {
     const current = this.state.agents[agent.id];
+    // Mutations return full agents; history belongs to the selected replay only.
+    agent = { ...agent, messages: undefined, queue: current?.queue };
     // HTTP responses may arrive after newer websocket metadata. In particular,
     // a delayed draft PATCH must never reopen a permanently locked selector.
     if (

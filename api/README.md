@@ -123,7 +123,14 @@ listing uses server-side pagination (the omitted value defaults to page 1 or pag
 size 25) and returns `X-Total-Count` for the matching filtered set. Paged results
 are ordered by `updated_at` descending, then `id` ascending, and an out-of-range
 page is an empty array with the same total. Requests without pagination parameters
-retain the legacy full-array ordering and response shape. Settling a running agent
+retain the legacy full-array ordering and response shape. Add `summary=true` to
+return metadata without `queue` or `messages`; filtering, ordering and pagination
+are unchanged. Summary responses and WebSocket inventory include an optional
+`display_title`: a whitespace-normalized, at-most-80-character preview of the
+first queued message or attachment name for unnamed chats. The stored `title`
+is unchanged. Full-agent reads remain the default.
+
+Settling a running agent
 initiates cancellation; the final output and conversation still remain replayable.
 Settled agents must be restored with `PATCH {"settled":false}` before continuing
 or submitting. Deleting a project permanently removes its settled agents, chat

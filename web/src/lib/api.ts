@@ -47,9 +47,11 @@ export async function api<T>(
   method = "GET",
   body?: unknown,
   key?: string,
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch(path, {
     method,
+    ...(signal ? { signal } : {}),
     headers: {
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       ...(key ? { "Idempotency-Key": key } : {}),
@@ -156,6 +158,7 @@ export function groupAgents(agents: Agent[], projects: Project[]) {
 export function agentTitle(agent: Agent) {
   return (
     agent.title ||
+    agent.display_title ||
     agent.queue?.[0]?.text.replace(/\s+/g, " ").trim().slice(0, 80) ||
     agent.queue?.[0]?.attachments?.[0]?.name ||
     "New chat"

@@ -18,11 +18,35 @@ export async function workspace(page: Page) {
   };
   const agents: Record<string, any> = {};
   const events: Record<string, any[]> = {};
-  const sockets: any[] = [];
+  const sockets = new Map<any, any>();
+  const subscriptions: any[] = [];
+  const deliveredEvents: { agent_id: string; cursor: number }[] = [];
+  const observed = (request: any, id: string) =>
+    request.agent_ids?.includes(id) ||
+    (request.subscribe_all && !agents[id].settled);
+  const wantsEvents = (request: any, id: string) =>
+    observed(request, id) &&
+    (!request.event_agent_ids || request.event_agent_ids.includes(id));
+  const summary = (agent: any) => ({
+    ...agent,
+    display_title:
+      agent.queue?.[0]?.text.replace(/\s+/g, " ").trim().slice(0, 80) ||
+      agent.queue?.[0]?.attachments?.[0]?.name ||
+      "",
+    queue: undefined,
+    messages: undefined,
+  });
   function inventory(id: string) {
-    sockets.forEach((ws) =>
-      ws.send(JSON.stringify({ type: "inventory", agent: agents[id] })),
-    );
+    sockets.forEach((request, ws) => {
+      if (observed(request, id))
+        ws.send(
+          JSON.stringify({ type: "inventory", agent: summary(agents[id]) }),
+        );
+    });
+  }
+  function deliver(ws: any, event: any) {
+    deliveredEvents.push({ agent_id: event.agent_id, cursor: event.cursor });
+    ws.send(JSON.stringify({ type: "event", event }));
   }
   function emit(id: string, type: string, data: unknown) {
     const event = {
@@ -39,22 +63,26 @@ export async function workspace(page: Page) {
       agents[id].last_response_cursor = event.cursor;
     events[id].push(event);
     inventory(id);
-    sockets.forEach((ws) => ws.send(JSON.stringify({ type: "event", event })));
+    sockets.forEach((request, ws) => {
+      if (wantsEvents(request, id)) deliver(ws, event);
+    });
   }
   await page.routeWebSocket("**/v1/ws", (ws) => {
-    sockets.push(ws);
+    ws.onClose(() => sockets.delete(ws));
     ws.onMessage((raw) => {
       const request = JSON.parse(String(raw));
+      sockets.set(ws, request);
+      subscriptions.push(request);
       ws.send(
         JSON.stringify({ type: "subscribed", request_id: request.request_id }),
       );
       Object.values(agents).forEach((agent) => {
-        ws.send(JSON.stringify({ type: "inventory", agent }));
-        events[agent.id]
-          .filter((e) => e.cursor > (request.cursors[agent.id] || 0))
-          .forEach((event) =>
-            ws.send(JSON.stringify({ type: "event", event })),
-          );
+        if (!observed(request, agent.id)) return;
+        ws.send(JSON.stringify({ type: "inventory", agent: summary(agent) }));
+        if (wantsEvents(request, agent.id))
+          events[agent.id]
+            .filter((e) => e.cursor > (request.cursors[agent.id] || 0))
+            .forEach((event) => deliver(ws, event));
       });
     });
   });
@@ -112,7 +140,10 @@ export async function workspace(page: Page) {
         events[id] = [];
         inventory(id);
         result = agents[id];
-      } else result = Object.values(agents);
+      } else
+        result = Object.values(agents).map((agent) =>
+          url.searchParams.get("summary") === "true" ? summary(agent) : agent,
+        );
     } else if (url.pathname.endsWith("/pull-request")) {
       result = {};
     } else {
@@ -216,6 +247,8 @@ export async function workspace(page: Page) {
   return {
     agents,
     events,
+    subscriptions,
+    deliveredEvents,
     emit,
     updateAgent(id: string, patch: Record<string, unknown>) {
       Object.assign(agents[id], patch);

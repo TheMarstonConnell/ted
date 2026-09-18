@@ -387,15 +387,15 @@ func (s *Service) DeleteProject(id string) error {
 func (s *Service) Agents(includeSettled bool, projectID string) []Agent {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.agentsLocked(includeSettled, projectID)
+	return s.agentsLocked(includeSettled, projectID, false)
 }
-func (s *Service) agentsLocked(includeSettled bool, projectID string) []Agent {
+func (s *Service) agentsLocked(includeSettled bool, projectID string, summaries bool) []Agent {
 	out := make([]Agent, 0)
 	for _, a := range s.state.Agents {
 		if (!includeSettled && a.Agent.Settled) || (projectID != "" && a.Agent.ProjectID != projectID) {
 			continue
 		}
-		out = append(out, cloneAgent(a.Agent))
+		out = append(out, cloneAgentSnapshot(a.Agent, summaries))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
@@ -410,7 +410,10 @@ func (s *Service) agentsLocked(includeSettled bool, projectID string) []Agent {
 func (s *Service) AgentsPage(includeSettled bool, projectID string, page, pageSize int64) ([]Agent, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.agentsPageLocked(includeSettled, projectID, page, pageSize, false)
+}
 
+func (s *Service) agentsPageLocked(includeSettled bool, projectID string, page, pageSize int64, summaries bool) ([]Agent, int) {
 	candidates := make([]*storedAgent, 0)
 	for _, a := range s.state.Agents {
 		if (!includeSettled && a.Agent.Settled) || (projectID != "" && a.Agent.ProjectID != projectID) {
@@ -443,7 +446,7 @@ func (s *Service) AgentsPage(includeSettled bool, projectID string, page, pageSi
 	start, end := int(start64), int(end64)
 	result := make([]Agent, 0, end-start)
 	for _, a := range candidates[start:end] {
-		result = append(result, cloneAgent(a.Agent))
+		result = append(result, cloneAgentSnapshot(a.Agent, summaries))
 	}
 	return result, total
 }
@@ -1117,6 +1120,12 @@ func (s *Service) SnapshotEvents(cursors map[string]uint64, all bool, ids []stri
 }
 
 func (s *Service) snapshotEvents(cursors map[string]uint64, all bool, ids []string, summaries bool) ([]Agent, []Event, <-chan struct{}, error) {
+	return s.snapshotFilteredEvents(cursors, all, ids, nil, false, summaries)
+}
+
+// A nil filter preserves full replay. Validate membership only at subscription
+// time: all-mode agents can settle and leave the selection afterward.
+func (s *Service) snapshotFilteredEvents(cursors map[string]uint64, all bool, ids []string, eventIDs map[string]bool, validateEventIDs, summaries bool) ([]Agent, []Event, <-chan struct{}, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.storageErr != nil {
@@ -1145,6 +1154,16 @@ func (s *Service) snapshotEvents(cursors map[string]uint64, all bool, ids []stri
 			}
 		}
 	}
+	if validateEventIDs && eventIDs != nil {
+		for id := range eventIDs {
+			if _, err := s.recordLocked(id); err != nil {
+				return nil, nil, nil, err
+			}
+			if !selected[id] {
+				return nil, nil, nil, problem(400, "invalid", "event agent is not subscribed: "+id)
+			}
+		}
+	}
 	ordered := make([]string, 0, len(selected))
 	for id := range selected {
 		ordered = append(ordered, id)
@@ -1154,13 +1173,12 @@ func (s *Service) snapshotEvents(cursors map[string]uint64, all bool, ids []stri
 	events := make([]Event, 0)
 	for _, id := range ordered {
 		a := s.state.Agents[id]
-		snapshot := a.Agent
-		if summaries {
-			snapshot.Queue = nil
-			snapshot.Messages = nil
+		inventory = append(inventory, cloneAgentSnapshot(a.Agent, summaries))
+		// Check the filter before slicing or cloning the event log. In particular,
+		// inventory-only clients must not copy large histories for background agents.
+		if eventIDs == nil || eventIDs[id] {
+			events = append(events, cloneEvents(a.Events[cursors[id]:])...)
 		}
-		inventory = append(inventory, cloneAgent(snapshot))
-		events = append(events, cloneEvents(a.Events[cursors[id]:])...)
 	}
 	return inventory, events, s.changed, nil
 }

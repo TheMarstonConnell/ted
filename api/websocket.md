@@ -21,14 +21,29 @@ values are rejected with an `error` frame; binary messages disconnect.
 ## Subscribe / replace subscriptions
 
 ```json
-{"type":"subscribe","request_id":"sub-1","subscribe_all":true,"agent_ids":[],"cursors":{"agent-a":42}}
+{"type":"subscribe","request_id":"sub-1","subscribe_all":true,"agent_ids":["agent-a"],"event_agent_ids":["agent-a"],"cursors":{"agent-a":42}}
 ```
 
 - `type` and nonempty `request_id` (at most 256 characters) are required.
 - `subscribe_all` defaults to false. When true, observe **all unsettled agents
   across all projects**, including projects and agents created in the future.
 - `agent_ids` defaults to empty; these explicit subscriptions also include
-  settled agents. This selection is unioned with `subscribe_all`.
+  settled agents. This selection is unioned with `subscribe_all`. This union is
+  the **inventory selection** and controls which changes wake the connection.
+- `event_agent_ids` is an optional event-delivery filter which does not change
+  the inventory selection or its atomic next-change wakeup:
+  - omitted preserves the original protocol behavior: replay and deliver events
+    for every agent in the inventory selection, including agents discovered
+    later by `subscribe_all`;
+  - `[]` requests inventory only and neither replays nor delivers events;
+  - a nonempty array replays and delivers events only for those IDs. Every ID
+    must be in the inventory selection when the command is accepted. An explicit
+    `agent_ids` entry qualifies even when settled; `subscribe_all` also qualifies
+    an existing unsettled agent without an explicit entry. In all mode, a resumed
+    cursor key can qualify its settled agent for the initial snapshot as described
+    below. Unknown IDs produce `not_found`, and known but unsubscribed IDs produce
+    `invalid`; IDs are never silently ignored. Dynamic all-mode membership still applies if such an agent
+    later settles or becomes unsettled again.
 - `cursors` maps agent IDs to the last fully processed event cursor. Values are
   nonnegative int64 integers. Omitted agent cursors start at zero, replaying the
   agent's entire lifetime. Each agent has its own independent contiguous log.
@@ -36,7 +51,9 @@ values are rejected with an `error` frame; binary messages disconnect.
   true. In all mode, resumed cursor keys are inventoried and replayed even if
   the agent settled while the client was offline; this flushes terminal events.
 - Unknown cursor agent IDs or cursors beyond the log produce an explicit
-  `cursor_invalid` error (HTTP equivalent: 410), **never a silent skip/reset**.
+  `cursor_invalid` error (HTTP equivalent: 410), **never a silent skip/reset**,
+  even when `event_agent_ids` is empty or excludes that cursor's agent. A cursor
+  only affects replay when its agent is enabled for event delivery.
   Explicit unknown agent IDs produce `not_found`. A malformed cursor produces
   `invalid`. Invalid replacement subscriptions leave the previous subscription
   unchanged.
@@ -45,10 +62,12 @@ values are rejected with an `error` frame; binary messages disconnect.
   unsubscribes everything. Include saved cursors when replacing subscriptions
   if replay is not desired. Reusing `request_id` does not deduplicate subscribe.
 
-Inventory, replay and the next-change wakeup are captured atomically by runtime
-`SnapshotEvents`. The server first sends an `inventory` frame for each agent,
-then events strictly after the requested cursor. Changes during transmission
-close the captured wakeup; the next snapshot catches them. Thus there is no gap
+Inventory, filtered replay and the next-change wakeup are captured atomically
+by runtime `SnapshotEvents`. The server first sends an `inventory` frame for each
+agent, then enabled events strictly after the requested cursor. Event logs for
+agents excluded by `event_agent_ids` are not copied into the snapshot. Changes
+that happen during transmission close the captured wakeup; the next snapshot
+catches them. Thus there is no gap
 between initial inventory, replay and live observation. There is **no global
 ordering across agents**; each agent's events are in ascending cursor order.
 
@@ -58,7 +77,8 @@ ordering across agents**; each agent's events are in ascending cursor order.
 ```
 
 Inventory is a **current** summary, not an event-time snapshot; it omits queue and
-conversation history. It includes the shared `last_response_cursor` and
+conversation history. Unnamed chats can include a bounded `display_title` derived
+from their first message or attachment name, without changing the stored `title`. It includes the shared `last_response_cursor` and
 `read_cursor`; `last_response_cursor > read_cursor` means the agent is unread.
 An advancing HTTP read acknowledgement produces refreshed inventory and an
 `agent.updated` event for every subscribed client. `inventory.agent.cursor` is a

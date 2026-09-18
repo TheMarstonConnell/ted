@@ -81,6 +81,7 @@ type Agent struct {
 	ID                 string             `json:"id"`
 	ProjectID          string             `json:"project_id"`
 	Title              string             `json:"title"`
+	DisplayTitle       string             `json:"display_title,omitempty"`
 	Settings           Settings           `json:"settings"`
 	ActiveSettings     *Settings          `json:"active_settings,omitempty"`
 	Settled            bool               `json:"settled"`

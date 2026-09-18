@@ -211,6 +211,12 @@ func TestHTTPWebSocketExplicitUnionAndInvalidCursors(t *testing.T) {
 		{map[string]any{"type": "subscribe", "request_id": "bad", "agent_ids": []string{a.ID}, "cursors": map[string]uint64{a.ID: a.Cursor + 100}}, "cursor_invalid"},
 		{map[string]any{"type": "subscribe", "request_id": "bad", "subscribe_all": true, "cursors": map[string]uint64{"missing": 0}}, "cursor_invalid"},
 		{map[string]any{"type": "subscribe", "request_id": "bad", "agent_ids": []string{"missing"}}, "not_found"},
+		{map[string]any{"type": "subscribe", "request_id": "bad", "agent_ids": []string{a.ID}, "event_agent_ids": []string{"missing"}}, "not_found"},
+		{map[string]any{"type": "subscribe", "request_id": "bad", "event_agent_ids": []string{a.ID}}, "invalid"},
+		{map[string]any{"type": "subscribe", "request_id": "bad", "subscribe_all": true, "event_agent_ids": []string{b.ID}}, "invalid"},
+		{map[string]any{"type": "subscribe", "request_id": "bad", "event_agent_ids": nil}, "invalid"},
+		{map[string]any{"type": "subscribe", "request_id": "bad", "event_agent_ids": "not-an-array"}, "invalid"},
+		{map[string]any{"type": "subscribe", "request_id": "bad", "event_agent_ids": []any{1}}, "invalid"},
 		{map[string]any{"type": "subscribe", "request_id": "bad", "cursors": map[string]uint64{a.ID: 0}}, "invalid"},
 		{map[string]any{"type": "subscribe", "request_id": "bad", "agent_ids": []string{a.ID}, "cursors": map[string]int{a.ID: -1}}, "invalid"},
 		{map[string]any{"type": "subscribe", "request_id": "bad", "agent_ids": []string{a.ID}, "cursors": map[string]float64{a.ID: 0.5}}, "invalid"},
@@ -596,5 +602,154 @@ func TestHTTPWebSocketReadStatusSync(t *testing.T) {
 	}
 	if !seenInventory || !seenUpdate {
 		t.Fatalf("read status did not sync over websocket: %+v", frames)
+	}
+}
+
+func TestHTTPWebSocketFilteredEventsKeepInventoryLiveAndReconnect(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	p := f.project()
+	background := f.agent(p)
+	selected := f.agent(p)
+
+	// Give the background agent a substantial event log. A filtered snapshot must
+	// neither put this history on the wire nor clone it in the service (the latter
+	// is covered directly by TestSnapshotEventFilterSkipsUnselectedLogsAndValidatesIDs).
+	for i := range 256 {
+		effort := "low"
+		if i%2 != 0 {
+			effort = "high"
+		}
+		var err error
+		background, err = f.s.UpdateSettings(background.ID, SettingsPatch{Effort: &effort})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	c := dialHTTPWS(t, f.server)
+	sendHTTPWS(t, c, map[string]any{
+		"type": "subscribe", "request_id": "filtered", "subscribe_all": true,
+		"agent_ids": []string{selected.ID}, "event_agent_ids": []string{selected.ID},
+	})
+	if frame := readHTTPWS(t, c); frame.Type != "subscribed" || frame.RequestID != "filtered" {
+		t.Fatalf("subscribe: %+v", frame)
+	}
+	cursors := map[string]uint64{}
+	frames := drainHTTPWS(t, c, cursors, map[string]uint64{selected.ID: selected.Cursor})
+	seenInventory := map[string]bool{}
+	for _, frame := range frames {
+		if frame.Type == "inventory" {
+			seenInventory[frame.Agent.Id] = true
+		}
+		if (frame.Type == "event" && frame.Event.AgentID != selected.ID) || (frame.Type == "event_ref" && frame.AgentID != selected.ID) {
+			t.Fatalf("background history was delivered: %+v", frame)
+		}
+	}
+	if !seenInventory[background.ID] || !seenInventory[selected.ID] {
+		t.Fatalf("missing all-mode inventory: %v", seenInventory)
+	}
+
+	// A background mutation must still wake this inventory subscription, but its
+	// event remains filtered. The next frame is the changed inventory summary.
+	low := "low"
+	background, err := f.s.UpdateSettings(background.ID, SettingsPatch{Effort: &low})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := readHTTPWS(t, c)
+	if frame.Type != "inventory" || frame.Agent.Id != background.ID || frame.Agent.Cursor != int64(background.Cursor) {
+		t.Fatalf("background inventory update: %+v", frame)
+	}
+
+	// Selected live delivery remains contiguous; if the background event had
+	// merely been delayed instead of filtered, this loop would reject it.
+	high := "high"
+	selected, err = f.s.UpdateSettings(selected.ID, SettingsPatch{Effort: &high})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := drainHTTPWS(t, c, cursors, map[string]uint64{selected.ID: selected.Cursor})
+	for _, frame := range live {
+		if frame.Type == "event" && frame.Event.AgentID != selected.ID {
+			t.Fatalf("unselected live event: %+v", frame)
+		}
+	}
+
+	// Reconnect at the selected cursor. Background history is still excluded and
+	// the next selected event is delivered exactly once at cursor+1.
+	c.Close()
+	c2 := dialHTTPWS(t, f.server)
+	sendHTTPWS(t, c2, map[string]any{
+		"type": "subscribe", "request_id": "resume", "subscribe_all": true,
+		"agent_ids": []string{selected.ID}, "event_agent_ids": []string{selected.ID},
+		"cursors": map[string]uint64{selected.ID: cursors[selected.ID]},
+	})
+	if frame = readHTTPWS(t, c2); frame.Type != "subscribed" || frame.RequestID != "resume" {
+		t.Fatalf("resume: %+v", frame)
+	}
+	// Initial resume has one inventory frame for each agent and no replay.
+	for range 2 {
+		if frame = readHTTPWS(t, c2); frame.Type != "inventory" {
+			t.Fatalf("unexpected reconnect replay: %+v", frame)
+		}
+	}
+	selected, err = f.s.UpdateSettings(selected.ID, SettingsPatch{Effort: &low})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainHTTPWS(t, c2, cursors, map[string]uint64{selected.ID: selected.Cursor})
+}
+
+func TestHTTPWebSocketEventFilterOmittedVersusEmpty(t *testing.T) {
+	f := newHTTPFixture(t, nil)
+	a := f.agent(f.project())
+
+	// An unsettled agent selected by subscribe_all is a valid event ID even when
+	// it is not duplicated in explicit agent_ids.
+	allMode := dialHTTPWS(t, f.server)
+	sendHTTPWS(t, allMode, map[string]any{
+		"type": "subscribe", "request_id": "all-filtered", "subscribe_all": true,
+		"event_agent_ids": []string{a.ID},
+	})
+	if frame := readHTTPWS(t, allMode); frame.Type != "subscribed" {
+		t.Fatalf("all-mode event filter: %+v", frame)
+	}
+	allCursors := map[string]uint64{}
+	drainHTTPWS(t, allMode, allCursors, map[string]uint64{a.ID: a.Cursor})
+	allMode.Close()
+
+	// Omitting event_agent_ids retains the original replay behavior.
+	legacy := dialHTTPWS(t, f.server)
+	subscribeHTTPWS(t, legacy, false, []string{a.ID}, nil)
+	legacyCursors := map[string]uint64{}
+	drainHTTPWS(t, legacy, legacyCursors, map[string]uint64{a.ID: a.Cursor})
+	legacy.Close()
+
+	// An explicitly empty array is inventory-only, both for initial history and
+	// live updates.
+	inventoryOnly := dialHTTPWS(t, f.server)
+	sendHTTPWS(t, inventoryOnly, map[string]any{
+		"type": "subscribe", "request_id": "inventory-only",
+		"agent_ids": []string{a.ID}, "event_agent_ids": []string{},
+	})
+	if frame := readHTTPWS(t, inventoryOnly); frame.Type != "subscribed" {
+		t.Fatalf("subscribe: %+v", frame)
+	}
+	if frame := readHTTPWS(t, inventoryOnly); frame.Type != "inventory" || frame.Agent.Id != a.ID {
+		t.Fatalf("initial inventory: %+v", frame)
+	}
+	high := "high"
+	a, err := f.s.UpdateSettings(a.ID, SettingsPatch{Effort: &high})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame := readHTTPWS(t, inventoryOnly); frame.Type != "inventory" || frame.Agent.Cursor != int64(a.Cursor) {
+		t.Fatalf("live inventory: %+v", frame)
+	}
+	_ = inventoryOnly.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	if _, _, err = inventoryOnly.ReadMessage(); err == nil {
+		t.Fatal("inventory-only subscription delivered an event")
+	} else if timeout, ok := err.(net.Error); !ok || !timeout.Timeout() {
+		t.Fatalf("expected no event, got %v", err)
 	}
 }
