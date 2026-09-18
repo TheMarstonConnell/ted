@@ -398,6 +398,7 @@ export class ControlPlane {
                     frame.agent.cursor,
               },
             });
+            if (!previous) this.sendSubscription();
             if (
               !previous ||
               previous.project_id !== frame.agent.project_id ||

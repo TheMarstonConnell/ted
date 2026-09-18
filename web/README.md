@@ -305,11 +305,6 @@ checkout branch. Missing PRs, unavailable GitHub access, and unstarted worktrees
 show no PR number. Responses for a different branch or an earlier connection
 cannot label the currently displayed branch.
 
-This first implementation retains transcripts for observed agents in memory and
-replays all existing agents, including settled history, on page load. Very large
-workspaces will benefit from a later lazy history/cache layer; it is not a
-virtualized or server-paginated archive browser yet.
-
 HTTP mutations support large messages and idempotency keys. Failed message
 retries reuse the key while text and attachments are unchanged. Browser HTTP on a trusted LAN
 uses `getRandomValues` where secure-context-only `randomUUID` is unavailable.

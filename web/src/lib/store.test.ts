@@ -791,6 +791,26 @@ describe("WebSocket cursor safety", () => {
       client.stop();
     }
   });
+  it("retains newly discovered agents in the sidebar subscription", async () => {
+    const { client, socket } = await setup(async () => {
+      throw new Error("unexpected history fetch");
+    });
+    try {
+      socket.frame({
+        type: "inventory",
+        agent: agent("new", { cursor: 1 }),
+      });
+      await vi.waitFor(() => expect(socket.sent).toHaveLength(2));
+      expect(socket.sent[1]).toMatchObject({
+        subscribe_all: true,
+        agent_ids: ["a", "new"],
+        event_agent_ids: ["a"],
+        cursors: {},
+      });
+    } finally {
+      client.stop();
+    }
+  });
   it("evicts history on navigation, aborts old references, and replays revisited chats from zero", async () => {
     let signal: AbortSignal | undefined;
     const { client, socket, fetcher } = await setup(
