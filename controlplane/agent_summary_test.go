@@ -17,6 +17,7 @@ func TestAgentSummaryTitlesAndDetachedMetadata(t *testing.T) {
 		{name: "empty"},
 		{name: "prompt", text: " \tFix\n the\u00a0startup crash  ", want: "Fix the startup crash"},
 		{name: "bounded", text: strings.Repeat("界", 10000), want: strings.Repeat("界", 80)},
+		{name: "trimmed boundary", text: strings.Repeat("a", 79) + " next", want: strings.Repeat("a", 79)},
 		{name: "image", filename: "screenshot.png", want: "screenshot.png"},
 		{name: "bounded image", filename: strings.Repeat("a", 10000), want: strings.Repeat("a", 80)},
 		{name: "explicit title", text: "first message", title: "Named chat"},

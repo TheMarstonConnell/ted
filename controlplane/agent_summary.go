@@ -28,12 +28,12 @@ func titlePreview(text string) string {
 			continue
 		}
 		if space {
+			if count+1 == 80 {
+				break
+			}
 			b.WriteByte(' ')
 			count++
 			space = false
-		}
-		if count == 80 {
-			break
 		}
 		b.WriteRune(r)
 		count++
