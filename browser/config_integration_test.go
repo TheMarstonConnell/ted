@@ -168,13 +168,14 @@ func TestHeadedChromeExitReleasesDisplayIntegration(t *testing.T) {
 				t.Fatal(err)
 			}
 			p := m.projects[projectKey(canonicalPath(project))]
-			chrome := chromedp.FromContext(p.browserCtx).Browser.Process()
+			oldBrowserCtx := p.browserCtx
+			chrome := chromedp.FromContext(oldBrowserCtx).Browser.Process()
 			if exit == "crash" {
 				if err := chrome.Kill(); err != nil {
 					t.Fatal(err)
 				}
 			} else {
-				if err := chromedp.Cancel(p.browserCtx); err != nil {
+				if err := chromedp.Cancel(oldBrowserCtx); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -183,12 +184,13 @@ func TestHeadedChromeExitReleasesDisplayIntegration(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(leftovers) == 0 {
+				status := m.status()["projects"].([]map[string]any)
+				if len(leftovers) == 0 && !status[0]["running"].(bool) && status[0]["sessions"].(int) == 0 {
 					break
 				}
 				select {
 				case <-ctx.Done():
-					t.Fatal("Chrome exit leaked its display while daemon remained alive")
+					t.Fatal("Chrome exit did not release display and reset project state")
 				case <-time.After(20 * time.Millisecond):
 				}
 			}
@@ -196,6 +198,21 @@ func TestHeadedChromeExitReleasesDisplayIntegration(t *testing.T) {
 			assertDisplayReaped(t, displayChild{PID: chrome.Pid})
 			if err := m.ctx.Err(); err != nil {
 				t.Fatalf("daemon stopped: %v", err)
+			}
+			if _, err := m.dispatch(ctx, Request{Project: project, Thread: "exit", Action: "open", Params: map[string]any{"url": "about:blank"}}); err != nil {
+				t.Fatalf("relaunch after Chrome exit: %v", err)
+			}
+			restarted := chromedp.FromContext(p.browserCtx).Browser.Process()
+			p.closeBrowser(oldBrowserCtx)
+			if p.browserCtx == nil || chromedp.FromContext(p.browserCtx).Browser.Process() != restarted {
+				t.Fatal("stale exit cleanup replaced the new browser")
+			}
+			if _, err := m.dispatch(ctx, Request{Project: project, Thread: "exit", Action: "snapshot"}); err != nil {
+				t.Fatalf("stale exit cleanup damaged replacement browser: %v", err)
+			}
+			status := m.status()["projects"].([]map[string]any)
+			if !status[0]["running"].(bool) || status[0]["sessions"].(int) != 1 {
+				t.Fatalf("restarted project status: %v", status)
 			}
 		})
 	}

@@ -10,7 +10,6 @@ import (
 	"image/jpeg"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -108,16 +107,11 @@ func viewportWindowID(t *testing.T, ctx context.Context) cdpbrowser.WindowID {
 func TestHeadedViewportIntegration(t *testing.T) {
 	executable := headedTestExecutable(t)
 	home := t.TempDir()
-	config, err := json.Marshal(map[string]string{"mode": "headed", "executable": executable})
+	config, err := json.Marshal(launchConfig{Mode: modeHeaded, Executable: executable})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(home, "browser"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, "browser", "config.json"), config, 0600); err != nil {
-		t.Fatal(err)
-	}
+	writeBrowserConfig(t, home, string(config))
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	mgr := newManager(ctx, home)

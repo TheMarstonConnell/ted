@@ -54,7 +54,6 @@ type projectBrowser struct {
 	browserCtx     context.Context
 	browserCancel  context.CancelFunc
 	displayCleanup func()
-	headed         bool
 	sessions       map[string]*session
 }
 
@@ -346,7 +345,7 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	p.headed = config.Mode == modeHeaded
+	headed := config.Mode == modeHeaded
 	base := filepath.Join(p.manager.home, "browser", "projects", p.key)
 	profile := filepath.Join(base, "profile")
 	if err := mkdirPrivate(profile); err != nil {
@@ -360,7 +359,7 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 
 	var displayEnv []string
 	displayCleanup := func() {}
-	if p.headed {
+	if headed {
 		displayEnv, displayCleanup, err = startHeadedDisplay(ctx, base)
 		if err != nil {
 			return err
@@ -375,7 +374,7 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 	opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
 	opts = append(opts,
 		chromedp.UserDataDir(profile),
-		chromedp.Flag("headless", !p.headed),
+		chromedp.Flag("headless", !headed),
 		chromedp.WindowSize(defaultViewportWidth, defaultViewportHeight),
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
@@ -398,7 +397,7 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 	// lifetime to the first Run context, not merely NewExecAllocator's context.
 	started := make(chan error, 1)
 	var windowSetup []chromedp.Action
-	if p.headed {
+	if headed {
 		windowSetup = append(windowSetup, headedWindowSize())
 	}
 	go func() { started <- chromedp.Run(browserCtx, windowSetup...) }()
@@ -418,11 +417,13 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 	p.allocCtx, p.allocCancel = allocCtx, allocCancel
 	p.browserCtx, p.browserCancel = browserCtx, browserCancel
 	p.displayCleanup = displayCleanup
-	if p.headed {
+	if headed {
 		allocator := chromedp.FromContext(allocCtx).Allocator
 		go func() {
 			allocator.Wait()
 			displayCleanup()
+			browserCancel()
+			p.closeBrowser(browserCtx)
 		}()
 	}
 	p.started = true
@@ -435,6 +436,9 @@ func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated
 	// for one thread cannot observe a half-created session.
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if !p.started {
+		return nil, false, fail("browser_unavailable", "browser exited before session creation; retry the request")
+	}
 	if s := p.sessions[thread]; s != nil {
 		if s.isolated != isolated && isolated {
 			return nil, false, fail("conflict", "thread session already exists without isolation")
@@ -471,7 +475,7 @@ func (p *projectBrowser) getSession(ctx context.Context, thread string, isolated
 		}
 		ownerCtx, ownerCancel := chromedp.NewContext(p.browserCtx, chromedp.WithTargetID(ownerID))
 		var ownerSetup []chromedp.Action
-		if p.headed {
+		if p.manager.config.Mode == modeHeaded {
 			ownerSetup = append(ownerSetup, headedWindowSize())
 		}
 		if err := initializeContext(ownerCtx, ctx, ownerCancel, ownerSetup...); err != nil {
@@ -507,7 +511,15 @@ func linkedContext(parent, request context.Context) (context.Context, context.Ca
 }
 
 func (p *projectBrowser) close() {
+	p.closeBrowser(nil)
+}
+
+func (p *projectBrowser) closeBrowser(expected context.Context) {
 	p.mu.Lock()
+	if expected != nil && p.browserCtx != expected {
+		p.mu.Unlock()
+		return
+	}
 	sessions := make([]*session, 0, len(p.sessions))
 	for _, s := range p.sessions {
 		sessions = append(sessions, s)
@@ -516,7 +528,7 @@ func (p *projectBrowser) close() {
 	browserCtx, browserCancel, allocCancel := p.browserCtx, p.browserCancel, p.allocCancel
 	displayCleanup := p.displayCleanup
 	p.displayCleanup = nil
-	p.browserCtx, p.browserCancel, p.allocCancel = nil, nil, nil
+	p.browserCtx, p.browserCancel, p.allocCtx, p.allocCancel = nil, nil, nil, nil
 	p.started = false
 	p.mu.Unlock()
 	for _, s := range sessions {
@@ -544,7 +556,7 @@ func (p *projectBrowser) close() {
 
 func (p *projectBrowser) tabSetup() []chromedp.Action {
 	actions := []chromedp.Action{runtime.Enable(), log.Enable(), defaultViewport()}
-	if p.headed {
+	if p.manager.config.Mode == modeHeaded {
 		actions = append(actions, headedWindowSize())
 	}
 	return actions

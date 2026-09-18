@@ -23,12 +23,14 @@ test("real browser shares human input, agent clicks and recording", async ({
   const runtimeHome = join(home, "controlplane", "runtime");
   const browserMode = process.env.TED_BROWSER_SYSTEM_MODE || "headless";
   expect(["headless", "headed"]).toContain(browserMode);
-  await mkdir(join(runtimeHome, "browser"), { recursive: true, mode: 0o700 });
-  await writeFile(
-    join(runtimeHome, "browser", "config.json"),
-    JSON.stringify({ mode: browserMode }),
-    { mode: 0o600 },
-  );
+  if (browserMode === "headed") {
+    await mkdir(join(runtimeHome, "browser"), { recursive: true, mode: 0o700 });
+    await writeFile(
+      join(runtimeHome, "browser", "config.json"),
+      JSON.stringify({ mode: browserMode }),
+      { mode: 0o600 },
+    );
+  }
   const env = {
     ...process.env,
     TED_HOME: runtimeHome,
