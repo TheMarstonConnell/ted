@@ -99,7 +99,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description List agents. Without page or page_size, returns the legacy full array and ordering. When either pagination parameter is supplied, an omitted page defaults to 1 and an omitted page_size defaults to 25. Paginated results are sorted by updated_at descending, then id ascending, and X-Total-Count reports the matching total after filtering. */
+        /** @description List agents. Without page or page_size, returns the legacy full array and ordering. When either pagination parameter is supplied, an omitted page defaults to 1 and an omitted page_size defaults to 25. Paginated results are sorted by updated_at descending, then id ascending, and X-Total-Count reports the matching total after filtering. With summary=true, omit queue and messages and include a bounded display_title for unnamed chats. */
         get: operations["ListAgents"];
         put?: never;
         /** @description Create an agent; optional prompt queues its first turn. Optional Idempotency-Key makes retries safe; differing payload with the same key returns 409. */
@@ -642,6 +642,8 @@ export interface components {
             id: string;
             project_id: string;
             title: string;
+            /** @description Summary-only preview of the first message or attachment name for unnamed chats. Does not change title. */
+            display_title?: string;
             settings: components["schemas"]["Settings"];
             active_settings?: components["schemas"]["Settings"];
             settled: boolean;
@@ -681,6 +683,8 @@ export interface components {
             id: string;
             project_id: string;
             title: string;
+            /** @description Summary-only preview of the first message or attachment name for unnamed chats. Does not change title. */
+            display_title?: string;
             settings: components["schemas"]["Settings"];
             active_settings?: components["schemas"]["Settings"];
             settled: boolean;
@@ -786,6 +790,8 @@ export interface components {
             /** @default false */
             subscribe_all: boolean;
             agent_ids?: string[];
+            /** @description Optional event-delivery filter. When omitted, events are replayed and delivered for every subscribed agent (backwards-compatible behavior). An empty array requests inventory only. A nonempty array limits event replay and live delivery to those subscribed agent IDs; it does not change inventory selection or wakeup behavior. Unknown or unsubscribed IDs are errors and are never silently ignored. */
+            event_agent_ids?: string[];
             cursors?: {
                 [key: string]: number;
             };
@@ -1677,6 +1683,8 @@ export interface operations {
         parameters: {
             query?: {
                 include_settled?: boolean;
+                /** @description Return metadata without queue or conversation history. */
+                summary?: boolean;
                 project_id?: string;
                 page?: number;
                 page_size?: number;

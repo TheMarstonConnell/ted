@@ -1087,7 +1087,9 @@ test("shadcn effort selection supports the empty default value and keyboard inte
   const effort = page
     .getByRole("group", { name: "Chat settings", exact: true })
     .getByRole("combobox", { name: "Reasoning effort", exact: true });
+  await expect(effort).toBeEnabled();
   await effort.focus();
+  await expect(effort).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("listbox")).toBeVisible();
   // The portal is visible before its keyboard focus transfer completes.

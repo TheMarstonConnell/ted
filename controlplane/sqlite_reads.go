@@ -7,16 +7,20 @@ import (
 
 // Library snapshots remain usable after Close; HTTP selection reports database failures.
 func (s *Service) listAgents(includeSettled bool, projectID string, page, pageSize int64) ([]Agent, int, error) {
-	if s.store == nil {
-		if pageSize > 0 {
-			rows, total := s.AgentsPage(includeSettled, projectID, page, pageSize)
-			return rows, total, nil
-		}
-		rows := s.Agents(includeSettled, projectID)
-		return rows, len(rows), nil
-	}
+	return s.listAgentSnapshots(includeSettled, projectID, page, pageSize, false)
+}
+
+func (s *Service) listAgentSnapshots(includeSettled bool, projectID string, page, pageSize int64, summaries bool) ([]Agent, int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.store == nil {
+		if pageSize > 0 {
+			rows, total := s.agentsPageLocked(includeSettled, projectID, page, pageSize, summaries)
+			return rows, total, nil
+		}
+		rows := s.agentsLocked(includeSettled, projectID, summaries)
+		return rows, len(rows), nil
+	}
 	recent := pageSize > 0
 	offset, limit := int64(0), int64(-1)
 	if recent {
@@ -40,7 +44,7 @@ func (s *Service) listAgents(includeSettled bool, projectID string, page, pageSi
 		if a == nil {
 			return nil, 0, problem(503, "storage_failed", "agent index disagrees with runtime state")
 		}
-		result = append(result, cloneAgent(a.Agent))
+		result = append(result, cloneAgentSnapshot(a.Agent, summaries))
 	}
 	return result, total, nil
 }

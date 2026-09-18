@@ -5,6 +5,20 @@ React + TypeScript, Vite, Tailwind CSS v4, and shadcn/ui (Base UI), including th
 Connects to one same-origin Ted server. There is no separate frontend login or
 browser-side provider configuration.
 
+## Startup and history loading
+
+Startup requests agent summaries (`GET /v1/agents?include_settled=true&summary=true`),
+not every chat's queue and conversation. WebSocket inventory keeps sidebar
+metadata and unread state live for all chats, including settled chats, while
+`event_agent_ids` limits history replay to the open chat. The overview does not
+subscribe to any event history.
+
+Switching chats releases the previous transcript and queue and cancels its
+in-flight event-reference fetches. Returning to that chat replays its retained
+history from the server; no durable history is deleted. A network reconnect in
+the same chat resumes from its last processed event cursor. Drafts and pending
+outgoing previews remain independent of the transcript cache.
+
 ## Interface conventions
 
 Use the shared shadcn/ui `base-nova` primitives and neutral theme, standardized
@@ -290,11 +304,6 @@ recorded branch (including inherited worktrees), while Local chats use the live
 checkout branch. Missing PRs, unavailable GitHub access, and unstarted worktrees
 show no PR number. Responses for a different branch or an earlier connection
 cannot label the currently displayed branch.
-
-This first implementation retains transcripts for observed agents in memory and
-replays all existing agents, including settled history, on page load. Very large
-workspaces will benefit from a later lazy history/cache layer; it is not a
-virtualized or server-paginated archive browser yet.
 
 HTTP mutations support large messages and idempotency keys. Failed message
 retries reuse the key while text and attachments are unchanged. Browser HTTP on a trusted LAN

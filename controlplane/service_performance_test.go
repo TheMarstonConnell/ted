@@ -68,11 +68,57 @@ func TestNarrowReadSnapshots(t *testing.T) {
 	}
 	want := full[0]
 	want.Queue, want.Messages = nil, nil
+	want.DisplayTitle = "pending"
 	if !reflect.DeepEqual(want, summaries[0]) {
 		t.Fatal("summary changed metadata")
 	}
 	summaries[0].ActiveSettings.Model = "changed"
 	if s.state.Agents["a"].Agent.ActiveSettings.Model != "original" {
 		t.Fatal("summary aliases stored settings")
+	}
+}
+
+func TestSnapshotEventFilterSkipsUnselectedLogsAndValidatesIDs(t *testing.T) {
+	s := &Service{state: emptyState(), changed: make(chan struct{})}
+	s.state.Agents["selected"] = &storedAgent{Agent: Agent{ID: "selected", Cursor: 1}, Events: []Event{{AgentID: "selected", Cursor: 1, Data: json.RawMessage(`{"ok":true}`)}}}
+	// Unselected malformed JSON must never reach the cloning path.
+	s.state.Agents["background"] = &storedAgent{Agent: Agent{ID: "background", Cursor: 1}, Events: []Event{{AgentID: "background", Cursor: 1, Data: json.RawMessage(`{`)}}}
+
+	inventory, events, _, err := s.snapshotFilteredEvents(nil, false, []string{"background", "selected"}, map[string]bool{"selected": true}, true, true)
+	if err != nil || len(inventory) != 2 || len(events) != 1 || events[0].AgentID != "selected" {
+		t.Fatalf("filtered snapshot: inventory=%d events=%+v err=%v", len(inventory), events, err)
+	}
+	inventory, events, _, err = s.snapshotFilteredEvents(nil, false, []string{"background", "selected"}, map[string]bool{}, true, true)
+	if err != nil || len(inventory) != 2 || len(events) != 0 {
+		t.Fatalf("inventory-only snapshot: inventory=%d events=%+v err=%v", len(inventory), events, err)
+	}
+	_, events, _, err = s.snapshotFilteredEvents(nil, false, []string{"selected"}, nil, true, true)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("omitted filter did not preserve replay: %+v %v", events, err)
+	}
+
+	// subscribe_all makes existing unsettled agents valid event selections.
+	_, events, _, err = s.snapshotFilteredEvents(nil, true, nil, map[string]bool{"selected": true}, true, true)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("all-mode event id: %+v %v", events, err)
+	}
+
+	_, _, _, err = s.snapshotFilteredEvents(nil, false, []string{"selected"}, map[string]bool{"background": true}, true, true)
+	var serviceErr *Error
+	if !errors.As(err, &serviceErr) || serviceErr.Status != 400 || serviceErr.Code != "invalid" {
+		t.Fatalf("unsubscribed event id: %v", err)
+	}
+	s.state.Agents["selected"].Agent.Settled = true
+	_, _, _, err = s.snapshotFilteredEvents(nil, true, nil, map[string]bool{"selected": true}, true, true)
+	if !errors.As(err, &serviceErr) || serviceErr.Status != 400 || serviceErr.Code != "invalid" {
+		t.Fatalf("settled all-mode event id: %v", err)
+	}
+	_, _, _, err = s.snapshotFilteredEvents(nil, false, []string{"selected"}, map[string]bool{"missing": true}, true, true)
+	if !errors.As(err, &serviceErr) || serviceErr.Status != 404 || serviceErr.Code != "not_found" {
+		t.Fatalf("unknown event id: %v", err)
+	}
+	_, _, _, err = s.snapshotFilteredEvents(map[string]uint64{"missing": 0}, false, nil, map[string]bool{}, true, true)
+	if !errors.As(err, &serviceErr) || serviceErr.Status != 410 || serviceErr.Code != "cursor_invalid" {
+		t.Fatalf("inventory-only filter hid invalid cursor: %v", err)
 	}
 }

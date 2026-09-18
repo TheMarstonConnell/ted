@@ -29,12 +29,14 @@ type wsInput struct {
 	err  error
 }
 type wsSubscription struct {
-	all       bool
-	explicit  map[string]bool
-	known     map[string]bool
-	cursors   map[string]uint64
-	inventory map[string][]byte
-	wake      <-chan struct{}
+	all                  bool
+	explicit             map[string]bool
+	eventAgents          map[string]bool
+	eventAgentsValidated bool
+	known                map[string]bool
+	cursors              map[string]uint64
+	inventory            map[string][]byte
+	wake                 <-chan struct{}
 }
 
 type publicOriginKey struct{}
@@ -257,6 +259,12 @@ func wsSubscriptionFromJSON(raw map[string]any) (*wsSubscription, error) {
 			s.explicit[id.(string)] = true
 		}
 	}
+	if value, ok := raw["event_agent_ids"]; ok {
+		s.eventAgents = map[string]bool{}
+		for _, id := range value.([]any) {
+			s.eventAgents[id.(string)] = true
+		}
+	}
 	if value, ok := raw["cursors"]; ok {
 		for id, value := range value.(map[string]any) {
 			cursor, err := strconv.ParseInt(value.(json.Number).String(), 10, 64)
@@ -288,7 +296,13 @@ func (h *httpAPI) snapshotWS(s *wsSubscription) ([]Agent, []Event, <-chan struct
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	return h.service.snapshotEvents(s.cursors, s.all, ids, true)
+	agents, events, wake, err := h.service.snapshotFilteredEvents(
+		s.cursors, s.all, ids, s.eventAgents, !s.eventAgentsValidated, true,
+	)
+	if err == nil {
+		s.eventAgentsValidated = true
+	}
+	return agents, events, wake, err
 }
 
 func summaryWS(a Agent) api.AgentSummary {
@@ -306,6 +320,9 @@ func summaryWS(a Agent) api.AgentSummary {
 		Cursor:    int64(a.Cursor),
 		CreatedAt: a.CreatedAt,
 		UpdatedAt: a.UpdatedAt,
+	}
+	if a.DisplayTitle != "" {
+		summary.DisplayTitle = stringPointer(a.DisplayTitle)
 	}
 	if a.ParentAgentID != "" {
 		summary.ParentAgentId = stringPointer(a.ParentAgentID)

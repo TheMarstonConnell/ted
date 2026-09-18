@@ -261,7 +261,8 @@ paths:
         ordering. When either pagination parameter is supplied, an omitted page
         defaults to 1 and an omitted page_size defaults to 25. Paginated results
         are sorted by updated_at descending, then id ascending, and X-Total-Count
-        reports the matching total after filtering.
+        reports the matching total after filtering. With summary=true, omit queue
+        and messages and include a bounded display_title for unnamed chats.
       responses:
         '200':
           description: Success
@@ -291,6 +292,12 @@ paths:
       - name: include_settled
         in: query
         required: false
+        schema:
+          type: boolean
+          default: false
+      - name: summary
+        in: query
+        description: Return metadata without queue or conversation history.
         schema:
           type: boolean
           default: false
@@ -1551,6 +1558,10 @@ components:
         project_id: *id010
         title: &id016
           type: string
+        display_title: &display_title
+          type: string
+          maxLength: 80
+          description: Summary-only preview of the first message or attachment name for unnamed chats. Does not change title.
         settings: &id017
           $ref: '#/components/schemas/Settings'
         active_settings: &id018
@@ -1638,6 +1649,7 @@ components:
         id: *id010
         project_id: *id010
         title: *id016
+        display_title: *display_title
         settings: *id017
         active_settings: *id018
         settled: *id019
@@ -1930,6 +1942,16 @@ components:
           type: boolean
           default: false
         agent_ids:
+          type: array
+          items: *id010
+        event_agent_ids:
+          description: >-
+            Optional event-delivery filter. When omitted, events are replayed and
+            delivered for every subscribed agent (backwards-compatible behavior).
+            An empty array requests inventory only. A nonempty array limits event
+            replay and live delivery to those subscribed agent IDs; it does not
+            change inventory selection or wakeup behavior. Unknown or unsubscribed
+            IDs are errors and are never silently ignored.
           type: array
           items: *id010
         cursors:

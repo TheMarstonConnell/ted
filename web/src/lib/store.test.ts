@@ -711,16 +711,20 @@ describe("WebSocket cursor safety", () => {
       this.onmessage?.({ data: JSON.stringify(frame) });
     }
   }
-  async function setup(reference: () => Promise<Response>) {
+  async function setup(
+    reference: (path: string, options: RequestInit) => Promise<Response>,
+    selected: string | null = "a",
+    inventory: Agent[] = [agent()],
+  ) {
     Socket.instances = [];
     vi.stubGlobal("WebSocket", Socket);
     vi.stubGlobal("location", { href: "http://localhost/", protocol: "http:" });
-    const fetcher = vi.fn((path: string) => {
-      if (path.includes("/events/")) return reference();
+    const fetcher = vi.fn((path: string, options: RequestInit) => {
+      if (path.includes("/events/")) return reference(path, options);
       return Promise.resolve(
         Response.json(
           path.includes("/agents")
-            ? [agent()]
+            ? inventory
             : path === "/v1/projects"
               ? [
                   {
@@ -736,12 +740,207 @@ describe("WebSocket cursor safety", () => {
     });
     vi.stubGlobal("fetch", fetcher);
     const client = new ControlPlane();
+    client.select(selected || undefined);
     await client.start();
     const socket = Socket.instances[0];
     socket.open();
     socket.frame({ type: "subscribed", request_id: "sub" });
     return { client, socket, fetcher };
   }
+  it("starts with summaries and no history subscription on the overview", async () => {
+    const { client, socket, fetcher } = await setup(
+      async () => {
+        throw new Error("unexpected history fetch");
+      },
+      null,
+      [agent("a", { cursor: 100 }), agent("b", { cursor: 200, settled: true })],
+    );
+    try {
+      expect(fetcher).toHaveBeenCalledWith(
+        "/v1/agents?include_settled=true&summary=true",
+        expect.anything(),
+      );
+      expect(socket.sent[0]).toMatchObject({
+        subscribe_all: true,
+        agent_ids: ["a", "b"],
+        event_agent_ids: [],
+        cursors: {},
+      });
+      socket.frame({
+        type: "inventory",
+        agent: agent("b", {
+          cursor: 201,
+          last_response_cursor: 201,
+          settled: true,
+        }),
+      });
+      socket.frame({
+        type: "event_ref",
+        agent_id: "b",
+        cursor: 201,
+        url: "/ignored",
+      });
+      await vi.waitFor(() => expect(client.state.agents.b.cursor).toBe(201));
+      expect(isUnread(client.state.agents.b)).toBe(true);
+      expect(client.state.cursors).toEqual({});
+      expect(client.state.transcripts).toEqual({});
+      expect(
+        fetcher.mock.calls.filter(([path]) => path.includes("/events/")),
+      ).toHaveLength(0);
+    } finally {
+      client.stop();
+    }
+  });
+  it("retains newly discovered agents in the sidebar subscription", async () => {
+    const { client, socket } = await setup(async () => {
+      throw new Error("unexpected history fetch");
+    });
+    try {
+      socket.frame({
+        type: "inventory",
+        agent: agent("new", { cursor: 1 }),
+      });
+      await vi.waitFor(() => expect(socket.sent).toHaveLength(2));
+      expect(socket.sent[1]).toMatchObject({
+        subscribe_all: true,
+        agent_ids: ["a", "new"],
+        event_agent_ids: ["a"],
+        cursors: {},
+      });
+    } finally {
+      client.stop();
+    }
+  });
+  it("evicts history on navigation, aborts old references, and replays revisited chats from zero", async () => {
+    let signal: AbortSignal | undefined;
+    const { client, socket, fetcher } = await setup(
+      async (_path, options) => {
+        signal = options.signal!;
+        return new Promise<Response>((_resolve, reject) => {
+          signal!.addEventListener(
+            "abort",
+            () => reject(new Error("aborted")),
+            { once: true },
+          );
+        });
+      },
+      "a",
+      [agent(), agent("b", { cursor: 2, settled: true })],
+    );
+    try {
+      socket.frame({
+        type: "event",
+        event: event(1, "turn.started", { ...queued, status: "running" }),
+      });
+      socket.frame({ type: "event", event: event(2, "output", output) });
+      socket.frame({
+        type: "event_ref",
+        agent_id: "a",
+        cursor: 3,
+        url: "/ignored",
+      });
+      socket.frame({ type: "event", event: event(4, "output", output) });
+      await vi.waitFor(() => expect(signal).toBeDefined());
+      expect(client.state.transcripts.a).toHaveLength(2);
+      expect(client.state.cursors).toEqual({ a: 2 });
+
+      client.select("b");
+      expect(signal!.aborted).toBe(true);
+      expect(client.state.transcripts).toEqual({});
+      expect(client.state.cursors).toEqual({});
+      expect(client.state.ready).toEqual({});
+      expect(client.state.agents.a.queue).toEqual([]);
+      const second = Socket.instances[1];
+      second.open();
+      expect(second.sent[0]).toMatchObject({
+        event_agent_ids: ["b"],
+        cursors: {},
+      });
+      second.frame({ type: "subscribed", request_id: "second" });
+      second.frame({
+        type: "inventory",
+        agent: agent("b", { cursor: 2, settled: true }),
+      });
+      second.frame({
+        type: "event",
+        event: {
+          ...event(1, "turn.started", { ...queued, status: "running" }),
+          agent_id: "b",
+        },
+      });
+      second.frame({
+        type: "event",
+        event: { ...event(2, "output", output), agent_id: "b" },
+      });
+      await vi.waitFor(() => expect(client.state.cursors.b).toBe(2));
+      expect(client.state.status).toBe("live");
+      expect(client.state.error).toBeNull();
+      expect(client.state.transcripts.a).toBeUndefined();
+      expect(client.state.transcripts.b).toHaveLength(2);
+      expect(client.state.ready.b).toBe(true);
+      expect(
+        fetcher.mock.calls.filter(([path]) => path.includes("/events/")),
+      ).toHaveLength(1);
+
+      client.select("a");
+      const third = Socket.instances[2];
+      third.open();
+      expect(third.sent[0]).toMatchObject({
+        event_agent_ids: ["a"],
+        cursors: {},
+      });
+      third.frame({ type: "inventory", agent: agent("a", { cursor: 1 }) });
+      third.frame({ type: "event", event: event(1, "output", output) });
+      await vi.waitFor(() => expect(client.state.cursors).toEqual({ a: 1 }));
+      expect(client.state.transcripts.a).toHaveLength(1);
+      expect(client.state.transcripts.b).toBeUndefined();
+      expect(client.state.agents.b.queue).toEqual([]);
+    } finally {
+      client.stop();
+    }
+  });
+  it("closes an intervening socket when navigation races an inventory reload", async () => {
+    const { client, socket, fetcher } = await setup(
+      async () => {
+        throw new Error("unexpected reference");
+      },
+      "a",
+      [agent(), agent("b")],
+    );
+    let finish!: (response: Response) => void;
+    fetcher.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    try {
+      const restarting = client.start();
+      expect(socket.readyState).toBe(3);
+      client.select("b");
+      const intervening = Socket.instances[1];
+      intervening.open();
+      finish(Response.json([agent(), agent("b")]));
+      await restarting;
+      expect(intervening.readyState).toBe(3);
+      const current = Socket.instances[2];
+      current.open();
+      expect(current.sent[0]).toMatchObject({
+        event_agent_ids: ["b"],
+        cursors: {},
+      });
+      intervening.frame({
+        type: "error",
+        code: "invalid",
+        message: "stale socket",
+      });
+      current.frame({ type: "subscribed", request_id: "current" });
+      await vi.waitFor(() => expect(client.state.status).toBe("live"));
+      expect(client.state.error).toBeNull();
+    } finally {
+      client.stop();
+    }
+  });
   it("serializes event references before following frames, never acknowledging inventory", async () => {
     let resolve!: (response: Response) => void;
     const reference = new Promise<Response>((r) => {
@@ -770,8 +969,13 @@ describe("WebSocket cursor safety", () => {
         "Hello back",
       ]);
       expect(client.state.agents.a.queue![0].status).toBe("pending");
-      client.select("a");
-      expect(socket.sent.at(-1).cursors).toEqual({ a: 2 });
+      socket.close();
+      await vi.waitFor(() => expect(Socket.instances).toHaveLength(2), {
+        timeout: 2000,
+      });
+      const resumed = Socket.instances[1];
+      resumed.open();
+      expect(resumed.sent.at(-1).cursors).toEqual({ a: 2 });
     } finally {
       client.stop();
     }
@@ -918,6 +1122,7 @@ describe("sidebar branch refresh", () => {
       return Response.json(projects[0]);
     });
     const client = prepare(fetcher);
+    client.select("a");
     client.state = state();
     const sending = client.send("a", "Hello", "key");
     expect(client.state.outgoing.a).toEqual([{ key: "key", text: "Hello" }]);
@@ -990,7 +1195,7 @@ describe("sidebar branch refresh", () => {
         expect(client.state.agents).toEqual({});
         expect(
           fetcher.mock.calls.filter(
-            ([path]) => path === "/v1/agents?include_settled=true",
+            ([path]) => path === "/v1/agents?include_settled=true&summary=true",
           ),
         ).toHaveLength(failReload ? 3 : 2);
         fetcher.mockClear();
@@ -1435,6 +1640,16 @@ describe("read receipts", () => {
 });
 
 describe("screenshot messages", () => {
+  it("names unopened chats from bounded inventory metadata without retaining queues", () => {
+    expect(
+      agentTitle(agent("a", { display_title: "Investigate startup memory" })),
+    ).toBe("Investigate startup memory");
+    expect(
+      agentTitle(
+        agent("a", { title: "Custom title", display_title: "First message" }),
+      ),
+    ).toBe("Custom title");
+  });
   it("labels an image-only chat from its first attachment", () => {
     expect(
       agentTitle(
