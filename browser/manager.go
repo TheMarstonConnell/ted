@@ -418,6 +418,13 @@ func (p *projectBrowser) ensureStarted(ctx context.Context) error {
 	p.allocCtx, p.allocCancel = allocCtx, allocCancel
 	p.browserCtx, p.browserCancel = browserCtx, browserCancel
 	p.displayCleanup = displayCleanup
+	if p.headed {
+		allocator := chromedp.FromContext(allocCtx).Allocator
+		go func() {
+			allocator.Wait()
+			displayCleanup()
+		}()
+	}
 	p.started = true
 	startedOK = true
 	return nil

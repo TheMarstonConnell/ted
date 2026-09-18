@@ -10,6 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+
+	"github.com/chromedp/chromedp"
 	"strings"
 	"testing"
 	"time"
@@ -139,5 +142,76 @@ func TestHeadedChromeStartupFailureReleasesDisplay(t *testing.T) {
 	data, err := os.ReadFile(marker)
 	if err != nil || string(data) != "preserve" {
 		t.Fatalf("display cleanup changed the existing Chrome profile: %q %v", data, err)
+	}
+}
+
+func TestHeadedChromeExitReleasesDisplayIntegration(t *testing.T) {
+	if os.Getenv("TED_BROWSER_INTEGRATION") != "1" {
+		t.Skip("set TED_BROWSER_INTEGRATION=1 with Chrome and Xvfb available")
+	}
+	xvfb, err := exec.LookPath("Xvfb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, exit := range []string{"crash", "graceful"} {
+		t.Run(exit, func(t *testing.T) {
+			t.Setenv("DISPLAY", "")
+			dir := t.TempDir()
+			pidFile := filepath.Join(dir, "display.pid")
+			quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+			script := "#!/bin/sh\necho $$ > " + quote(pidFile) + "\nexec " + quote(xvfb) + " \"$@\"\n"
+			if err := os.WriteFile(filepath.Join(dir, "Xvfb"), []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			home, project := t.TempDir(), t.TempDir()
+			config, _ := json.Marshal(launchConfig{Mode: modeHeaded, Executable: os.Getenv("TED_BROWSER_HEADED_TEST_EXECUTABLE")})
+			writeBrowserConfig(t, home, string(config))
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			m := newManager(ctx, home)
+			defer m.close()
+			if _, err := m.dispatch(ctx, Request{Project: project, Thread: "exit", Action: "open", Params: map[string]any{"url": "about:blank"}}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(pidFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := m.projects[projectKey(canonicalPath(project))]
+			chrome := chromedp.FromContext(p.browserCtx).Browser.Process()
+			if exit == "crash" {
+				if err := chrome.Kill(); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := chromedp.Cancel(p.browserCtx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for {
+				leftovers, err := filepath.Glob(filepath.Join(home, "browser", "projects", "*", "headed-display-*"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(leftovers) == 0 {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatal("Chrome exit leaked its display while daemon remained alive")
+				case <-time.After(20 * time.Millisecond):
+				}
+			}
+			assertDisplayReaped(t, displayChild{PID: pid})
+			assertDisplayReaped(t, displayChild{PID: chrome.Pid})
+			if err := m.ctx.Err(); err != nil {
+				t.Fatalf("daemon stopped: %v", err)
+			}
+		})
 	}
 }

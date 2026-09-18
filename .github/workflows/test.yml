@@ -73,13 +73,17 @@ jobs:
           TED_BROWSER_INTEGRATION: "1"
         run: |
           sudo apt-get install -y --no-install-recommends xvfb x11-utils
+          # Let sandboxed Chrome create user namespaces on this ephemeral runner.
+          if [[ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
           CHROME=$(node -p "require('./web/node_modules/playwright').chromium.executablePath()")
           mkdir -p "$RUNNER_TEMP/ted-browser-bin"
           ln -s "$CHROME" "$RUNNER_TEMP/ted-browser-bin/chromium"
           export PATH="$RUNNER_TEMP/ted-browser-bin:$PATH"
           export TED_BROWSER_HEADED_TEST_EXECUTABLE="$CHROME"
           unset DISPLAY
-          go test -race ./browser -run '^(TestBrowserModePersistenceIntegration|TestHeadedViewportIntegration|TestHeadedDisplayXvfbIntegration)$' -count=1
+          go test -race ./browser -run '^(TestBrowserModePersistenceIntegration|TestHeadedViewportIntegration|TestHeadedDisplayXvfbIntegration|TestHeadedChromeExitReleasesDisplayIntegration)$' -count=1
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
