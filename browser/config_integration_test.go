@@ -19,23 +19,8 @@ import (
 )
 
 func TestBrowserModePersistenceIntegration(t *testing.T) {
-	if os.Getenv("TED_BROWSER_INTEGRATION") != "1" {
-		t.Skip("set TED_BROWSER_INTEGRATION=1 with Chrome and Xvfb available")
-	}
-	if _, err := exec.LookPath("Xvfb"); err != nil {
-		t.Skip("Xvfb is required for managed headed integration")
-	}
 	t.Setenv("DISPLAY", "")
-	var chrome string
-	for _, name := range []string{"chromium", "chromium-browser", "google-chrome", "google-chrome-stable"} {
-		if path, err := exec.LookPath(name); err == nil {
-			chrome = path
-			break
-		}
-	}
-	if chrome == "" {
-		t.Fatal("Chrome/Chromium is required")
-	}
+	chrome := headedTestExecutable(t)
 	home, project := t.TempDir(), t.TempDir()
 	marker := filepath.Join(t.TempDir(), "launches")
 	launcher := filepath.Join(t.TempDir(), "configured chrome")
@@ -165,7 +150,7 @@ func TestHeadedChromeExitReleasesDisplayIntegration(t *testing.T) {
 			}
 			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 			home, project := t.TempDir(), t.TempDir()
-			config, _ := json.Marshal(launchConfig{Mode: modeHeaded, Executable: os.Getenv("TED_BROWSER_HEADED_TEST_EXECUTABLE")})
+			config, _ := json.Marshal(launchConfig{Mode: modeHeaded, Executable: headedTestExecutable(t)})
 			writeBrowserConfig(t, home, string(config))
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()

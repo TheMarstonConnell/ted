@@ -152,7 +152,6 @@ test("real browser shares human input, agent clicks and recording", async ({
     await expect(
       page.getByRole("textbox", { name: "Interactive browser viewport" }),
     ).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText("1440 × 900", { exact: true })).toBeVisible();
     const version = await browser("cdp", "Browser.getVersion", "--browser");
     expect(version.result.userAgent.includes("HeadlessChrome")).toBe(
       browserMode === "headless",

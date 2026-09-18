@@ -25,14 +25,14 @@ import (
 )
 
 // Exercise managed Xvfb when Linux has no inherited display.
-func headedViewportTestExecutable(t *testing.T) string {
+func headedTestExecutable(t *testing.T) string {
 	t.Helper()
 	if os.Getenv("TED_BROWSER_INTEGRATION") != "1" {
 		t.Skip("set TED_BROWSER_INTEGRATION=1")
 	}
 	if runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" {
 		if _, err := exec.LookPath("Xvfb"); err != nil {
-			t.Fatal("headed viewport tests require Xvfb or a private DISPLAY")
+			t.Fatal("headed tests require Xvfb or a private DISPLAY")
 		}
 	}
 	executable := os.Getenv("TED_BROWSER_HEADED_TEST_EXECUTABLE")
@@ -106,7 +106,7 @@ func viewportWindowID(t *testing.T, ctx context.Context) cdpbrowser.WindowID {
 }
 
 func TestHeadedViewportIntegration(t *testing.T) {
-	executable := headedViewportTestExecutable(t)
+	executable := headedTestExecutable(t)
 	home := t.TempDir()
 	config, err := json.Marshal(map[string]string{"mode": "headed", "executable": executable})
 	if err != nil {

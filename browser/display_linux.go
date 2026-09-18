@@ -38,10 +38,11 @@ func startHeadedDisplay(request context.Context, parentDir string) ([]string, fu
 	if err != nil {
 		return fail(err)
 	}
-	owned := true
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	succeeded := false
 	defer func() {
-		if owned {
-			_ = os.RemoveAll(dir)
+		if !succeeded {
+			cleanup()
 		}
 	}()
 	authority := filepath.Join(dir, "Xauthority")
@@ -67,33 +68,23 @@ func startHeadedDisplay(request context.Context, parentDir string) ([]string, fu
 		waitErr = cmd.Wait()
 		close(done)
 	}()
-	var once sync.Once
-	cleanup := func() {
-		once.Do(func() {
-			_ = reader.Close()
+	cleanup = sync.OnceFunc(func() {
+		_ = reader.Close()
+		select {
+		case <-done:
+		default:
+			_ = cmd.Process.Signal(syscall.SIGTERM)
+			timer := time.NewTimer(2 * time.Second)
 			select {
 			case <-done:
-			default:
-				_ = cmd.Process.Signal(syscall.SIGTERM)
-				timer := time.NewTimer(2 * time.Second)
-				select {
-				case <-done:
-				case <-timer.C:
-					_ = cmd.Process.Kill()
-					<-done
-				}
-				timer.Stop()
+			case <-timer.C:
+				_ = cmd.Process.Kill()
+				<-done
 			}
-			_ = os.RemoveAll(dir)
-		})
-	}
-	owned = false
-	succeeded := false
-	defer func() {
-		if !succeeded {
-			cleanup()
+			timer.Stop()
 		}
-	}()
+		_ = os.RemoveAll(dir)
+	})
 	type readyResult struct {
 		display string
 		err     error

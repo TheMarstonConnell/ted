@@ -78,9 +78,6 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
           CHROME=$(node -p "require('./web/node_modules/playwright').chromium.executablePath()")
-          mkdir -p "$RUNNER_TEMP/ted-browser-bin"
-          ln -s "$CHROME" "$RUNNER_TEMP/ted-browser-bin/chromium"
-          export PATH="$RUNNER_TEMP/ted-browser-bin:$PATH"
           export TED_BROWSER_HEADED_TEST_EXECUTABLE="$CHROME"
           unset DISPLAY
           go test -race ./browser -run '^(TestBrowserModePersistenceIntegration|TestHeadedViewportIntegration|TestHeadedDisplayXvfbIntegration|TestHeadedChromeExitReleasesDisplayIntegration)$' -count=1
